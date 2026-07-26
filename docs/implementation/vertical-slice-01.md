@@ -109,15 +109,15 @@ responsibility in this slice.
 5. The local deployment retains state across individual process and container
    restarts.
 6. The Event Bus retains messages required for local restart tests.
-7. The local deployment starts the platform service only after the configured
-   Test Agent's readiness check succeeds. Continuous availability tracking is
-   deferred.
+7. The platform service starts as soon as persistence and the Event Bus are
+   available. Test Agent readiness does not gate platform startup, Workflow API
+   availability, or workflow queries.
 8. The selected persistence design can keep Orchestrator workflow data and
    Test Agent receipt data logically isolated with least-privilege access.
 9. A transactional state-and-outbox design is required, but its concrete
    mechanism remains subject to ADR-0006.
-10. Retry counts, dispatch deadline, retention, and identifier encoding remain
-    configurable until the relevant ADR accepts exact rules.
+10. Retry counts, `task_result_deadline`, retention, and identifier encoding
+    remain configurable until the relevant ADR accepts exact rules.
 11. API examples are logical mappings. Protocol and representation remain
     subject to ADR-0004.
 12. Configuration loading is the slice's registration mechanism: the Test
@@ -186,15 +186,16 @@ is present.
 ### Startup
 
 1. Persistence and the Event Bus become healthy.
-2. The Test Agent starts, validates its local configuration, and becomes ready
-   to consume its supported command.
-3. Local container orchestration confirms Test Agent readiness.
-4. The platform service starts and validates configuration.
-5. The Orchestrator loads the versioned Test Agent manifest into its in-process
+2. The platform service starts and validates configuration.
+3. The Orchestrator loads the versioned Test Agent manifest into its in-process
    Capability Registry.
-6. The platform service reloads nonterminal workflows and resumes unpublished
+4. The platform service reloads nonterminal workflows and resumes unpublished
    outbox messages.
-7. The Workflow API becomes ready.
+5. The Workflow API becomes ready for submissions and queries independently of
+   Test Agent startup. Agent readiness never prevents workflow queries.
+6. Independently, the Test Agent starts, validates its local configuration, and
+   becomes ready to consume its supported command. It may become ready before
+   or after the Workflow API.
 
 ### Workflow Execution
 
@@ -203,36 +204,46 @@ is present.
 3. The Workflow API accepts a client `request_id` or generates one, then
    delegates workflow creation and any valid propagated correlation context to
    the Orchestrator.
-4. The Orchestrator validates domain input and capability support. Invalid or
-   unsupported input is rejected without creating a workflow.
-5. The Orchestrator creates `workflow_id`, `task_id`, `task_attempt_id`, and
+4. The Orchestrator checks the accepted-request mapping. An equivalent request
+   with the same `request_id` returns the existing workflow identifiers and
+   current state; a different request with that `request_id` returns the stable
+   conflict error `REQUEST_ID_CONFLICT`.
+5. For a new `request_id`, the Orchestrator validates domain input and
+   capability support. Invalid or unsupported input is rejected without
+   creating a workflow.
+6. The Capability Registry selects the configured, compatible Test Agent only
+   if its current readiness check succeeds. If no ready Agent exists, the
+   Orchestrator returns `AGENT_TEMPORARILY_UNAVAILABLE` without creating a
+   workflow.
+7. The Orchestrator creates `workflow_id`, `task_id`, `task_attempt_id`, and
    `correlation_id` unless a valid correlation context was propagated.
-6. The Orchestrator durably creates the workflow as `RECEIVED`, associated with
+8. The Orchestrator durably creates the workflow as `RECEIVED`, associated with
    `request_id`.
-7. The Orchestrator transitions the workflow to `PENDING`.
-8. The Capability Registry selects the one configured, compatible Test Agent.
-9. The Orchestrator creates an `ExecuteWordCountTask` command and its
-   `message_id`.
-10. The Orchestrator atomically records the command in its outbox and
-    transitions the workflow to `DISPATCHED`.
-11. The outbox publisher publishes the command using
-    `partition_key = workflow_id`.
-12. The Event Bus delivers the command at least once.
-13. The Test Agent validates the envelope, selected Agent, capability, contract
-    version, and payload.
-14. The Test Agent checks its receipt store by `task_attempt_id` and command
+9. The Orchestrator transitions the workflow to `PENDING`. The `RECEIVED` and
+   `PENDING` transitions are logically distinct but may be committed in one
+   database transaction with both transition-history records preserved.
+10. The Orchestrator creates an `ExecuteWordCountTask` command and its
     `message_id`.
-15. On first processing, the Agent computes word count, captures one processing
-    timestamp, creates its result `message_id`, and atomically stores the
-    receipt, terminal result, and result-outbox record.
-16. The Agent publishes either `TaskCompleted` or `TaskFailed`.
-17. On transport redelivery, the Agent republishes the stored result using the
-    same result `message_id` without recomputing.
-18. The Orchestrator validates and deduplicates the result by consumer and
-    result `message_id`, verifies `task_attempt_id`, and transitions directly
-    from `DISPATCHED` to `COMPLETED` or `FAILED`.
-19. The caller queries the Workflow API and receives the durable terminal state
-    and success or failure result.
+11. The Orchestrator atomically records the command in its outbox and
+     transitions the workflow to `DISPATCHED`.
+12. The outbox publisher publishes the command using
+     `partition_key = workflow_id`.
+13. The Event Bus delivers the command at least once.
+14. The Test Agent validates the envelope, selected Agent, capability, contract
+     version, and payload.
+15. The Test Agent checks its receipt store by `task_attempt_id` and command
+     `message_id`.
+16. On first processing, the Agent computes word count, captures one processing
+     timestamp, creates its result `message_id`, and atomically stores the
+     receipt, terminal result, and result-outbox record.
+17. The Agent publishes either `TaskCompleted` or `TaskFailed`.
+18. On transport redelivery, the Agent republishes the stored result using the
+     same result `message_id` without recomputing.
+19. The Orchestrator validates and deduplicates the result by consumer and
+     result `message_id`, verifies `task_attempt_id`, and transitions directly
+     from `DISPATCHED` to `COMPLETED` or `FAILED`.
+20. The caller queries the Workflow API and receives the durable terminal state
+     and success or failure result.
 
 ## 7. Component Responsibilities
 
@@ -244,7 +255,15 @@ is present.
 - Propagate only a valid caller correlation context.
 - Delegate all workflow creation to the Orchestrator.
 - Return identifiers created by the Orchestrator.
-- Expose local submit and query operations.
+- Expose local submit and query operations independently of Test Agent
+  readiness.
+- Keep workflow queries available whenever the platform service is ready.
+- Return `AGENT_TEMPORARILY_UNAVAILABLE` when the Orchestrator reports that no
+  configured compatible Agent is ready; this rejection occurs before workflow
+  creation.
+- Return existing identifiers and current state for an equivalent accepted
+  `request_id`, and `REQUEST_ID_CONFLICT` when the same `request_id` identifies
+  a different request.
 - Enforce `LocalDevelopmentAuthorizationPolicy`.
 - Return stable sanitized errors.
 
@@ -260,17 +279,19 @@ The API does not write the state store or publish task commands.
 ### Orchestrator
 
 - Validate domain input before workflow creation.
+- Resolve accepted `request_id` mappings idempotently before creating domain
+  identifiers.
 - Generate all domain identifiers.
 - Own the five-state workflow model and every transition.
 - Persist workflow, task, task-attempt, transition, inbox, and outbox records.
 - Load and validate the configured Agent manifest.
-- Select the compatible Test Agent.
+- Require and select a ready compatible Test Agent before workflow creation.
 - Create the command envelope and command `message_id`.
 - Publish through its durable outbox.
 - Consume terminal results idempotently.
 - Resume unpublished outbox records after restart.
-- Resolve an expired durable dispatch deadline without creating another task
-  attempt.
+- Resolve an expired durable `task_result_deadline` without creating another
+  task attempt.
 
 ### Workflow State Store
 
@@ -306,12 +327,15 @@ The Event Bus does not publish a generic dead-letter domain event.
 - Remain a logical module inside the Orchestrator.
 - Load one versioned manifest from local configuration at startup.
 - Validate capability and contract compatibility.
-- Treat the Agent as selectable only after the local deployment readiness gate
-  succeeds.
+- Evaluate the configured Test Agent's current readiness when a new workflow is
+  submitted.
+- Report that no selectable Agent exists when the configured compatible Test
+  Agent is not ready, so the submission is rejected before workflow creation.
 - Select the single compatible Agent deterministically.
 
 It does not retain availability history, process announcements, or track
-heartbeats.
+heartbeats. The Registry remains configuration-based for this slice; the
+readiness check does not introduce dynamic registration or discovery.
 
 ### Test Agent
 
@@ -345,15 +369,17 @@ heartbeats.
 | State | Meaning |
 | --- | --- |
 | `RECEIVED` | A valid domain request and its identifiers are durably accepted. |
-| `PENDING` | The workflow is ready for configured Agent selection and dispatch. |
+| `PENDING` | The workflow has a selected, ready configured Agent and is ready for dispatch. |
 | `DISPATCHED` | The task command is durably stored in the Orchestrator outbox. |
 | `COMPLETED` | A valid success result for the task attempt is durably accepted. |
-| `FAILED` | A valid failure result or terminal dispatch-processing failure is durably accepted. |
+| `FAILED` | A valid failure result, terminal task-result timeout, or terminal processing failure is durably accepted. |
 
 `COMPLETED` and `FAILED` are terminal.
 
 Invalid API shape, unsupported capability, and invalid domain input are rejected
-before workflow creation.
+before workflow creation. A new submission without a ready configured Agent is
+also rejected before workflow creation and cannot leave a workflow indefinitely
+in `PENDING`.
 
 ### Transitions
 
@@ -361,12 +387,17 @@ before workflow creation.
 | --- | --- | --- | --- |
 | none | `RECEIVED` | Valid domain request is durably created | Orchestrator |
 | `RECEIVED` | `PENDING` | Task and its single attempt are created | Orchestrator |
-| `PENDING` | `DISPATCHED` | Compatible Agent selected and command stored in outbox | Orchestrator |
+| `PENDING` | `DISPATCHED` | Command for the selected compatible Agent is stored in outbox | Orchestrator |
 | `DISPATCHED` | `COMPLETED` | Valid `TaskCompleted` result | Orchestrator |
 | `DISPATCHED` | `FAILED` | Valid `TaskFailed` result | Orchestrator |
-| `DISPATCHED` | `FAILED` | Published command exceeds durable dispatch deadline or terminal consumer processing fails | Orchestrator |
+| `DISPATCHED` | `FAILED` | No terminal result arrives by `task_result_deadline` or terminal consumer processing fails | Orchestrator |
 
 A duplicate, late, or conflicting result cannot move a terminal workflow.
+
+`RECEIVED` and `PENDING` remain two logical transitions with separate history
+records. Their workflow snapshot, task, task attempt, accepted-request mapping,
+and both transition records may be persisted in one database transaction. No
+crash-recovery boundary is required between the two states.
 
 There is no persisted validation, running, or cancellation state. Long-running
 task lifecycle and cancellation are future work.
@@ -384,7 +415,7 @@ The attempt records:
 - `attempt_number`;
 - command `message_id`;
 - selected Agent identity;
-- dispatch deadline;
+- `task_result_deadline`;
 - publication state;
 - result `message_id` if present; and
 - terminal outcome if present.
@@ -411,7 +442,7 @@ The Event Bus carries only three workflow message contracts.
 - selected `agent_id`;
 - capability name and version;
 - original text; and
-- dispatch deadline.
+- `task_result_deadline`.
 
 ### Success Result
 
@@ -477,6 +508,22 @@ The envelope is versioned and independent from the selected transport.
   exists.
 - The Workflow API returns the identifiers created by the Orchestrator.
 
+### API Request Idempotency
+
+An accepted `request_id` identifies one canonical validated submission:
+workflow text, capability name, capability version, and API contract version.
+
+- Repeating the `request_id` with an equivalent request returns the existing
+  `workflow_id`, `task_id`, `task_attempt_id`, `correlation_id`, and current
+  workflow state.
+- Repeating the `request_id` with a different canonical request returns
+  `REQUEST_ID_CONFLICT`.
+- The accepted-request mapping is created atomically with the workflow and is
+  unique by `request_id`, so concurrent submissions cannot create two
+  workflows for one accepted `request_id`.
+- A submission rejected before workflow creation, including
+  `AGENT_TEMPORARILY_UNAVAILABLE`, does not create an accepted-request mapping.
+
 ### Retry Identity Rules
 
 Application-level retries are not implemented, but future retries must:
@@ -517,8 +564,10 @@ draining, or degraded status fields.
 
 Readiness is a local deployment condition, not manifest data. The configured
 Agent becomes selectable only after its container or process readiness check
-passes. If the Agent later becomes unavailable, bounded transport processing
-and the durable dispatch deadline eventually resolve the workflow to `FAILED`.
+passes at submission time. Platform startup and workflow queries do not depend
+on that readiness. If the selected Agent becomes unavailable after acceptance,
+bounded transport processing and `task_result_deadline` eventually resolve the
+workflow to `FAILED`.
 
 Configuration is registration for this slice. Dynamic Agent-owned registration
 is deferred.
@@ -533,10 +582,10 @@ snapshot.
 
 | Record | Owner | Required data |
 | --- | --- | --- |
-| API request mapping | Orchestrator | `request_id`, `workflow_id`, and creation outcome for request idempotency. |
+| API request mapping | Orchestrator | Unique `request_id`, canonical request fingerprint, `workflow_id`, domain identifiers, and creation outcome for request idempotency. |
 | Workflow | Orchestrator | `workflow_id`, `request_id`, `correlation_id`, input, capability, state, result or failure, timestamps, and revision. |
 | Task | Orchestrator | `task_id`, workflow reference, capability, selected Agent, and terminal outcome. |
-| Task attempt | Orchestrator | `task_attempt_id`, `task_id`, attempt number, command ID, dispatch deadline, publication state, result ID, and outcome. |
+| Task attempt | Orchestrator | `task_attempt_id`, `task_id`, attempt number, command ID, `task_result_deadline`, publication state, result ID, and outcome. |
 | Transition | Orchestrator | Previous state, new state, direct cause, actor, and timestamp. |
 | Orchestrator inbox | Orchestrator | Consumer identity, result `message_id`, task-attempt reference, outcome, and retention deadline. |
 | Orchestrator outbox | Orchestrator | Command envelope, publication state, transport attempts, and timestamps. |
@@ -576,6 +625,11 @@ The Orchestrator atomically commits:
 - any inbox acknowledgement; and
 - any resulting outbox change.
 
+For initial workflow creation, one transaction may commit the unique API request
+mapping, workflow, task, task attempt, the logical `RECEIVED` and `PENDING`
+transitions, and both transition-history records. This preserves the state
+model without requiring recovery between the two initial transitions.
+
 The Test Agent atomically commits:
 
 - the command receipt;
@@ -608,15 +662,20 @@ No generic dead-letter domain event exists.
 
 - A valid `TaskCompleted` transitions `DISPATCHED` to `COMPLETED`.
 - A valid `TaskFailed` transitions `DISPATCHED` to `FAILED`.
-- If command publication is still unconfirmed after restart, the Orchestrator
-  republishes the same outbox envelope with the same `message_id`.
-- If publication was confirmed but no terminal result arrives before the
-  durable dispatch deadline, the Orchestrator transitions the workflow to
-  `FAILED`.
+- A workflow reaches `DISPATCHED` when its command is durably recorded in the
+  Orchestrator outbox, before transport publication acknowledgement.
+- Publication acknowledgement is transport state. If publication is
+  unconfirmed after restart and `task_result_deadline` has not expired, the
+  Orchestrator republishes the same outbox envelope with the same `message_id`.
+- `task_result_deadline` is the maximum time allowed to receive either
+  `TaskCompleted` or `TaskFailed`. If it expires without a terminal result, the
+  Orchestrator transitions the workflow to `FAILED` regardless of publication
+  acknowledgement state.
 - The slice does not create another `task_attempt_id`.
 
 A terminal consumer failure must therefore become queryable either through
-`TaskFailed` or dispatch-deadline reconciliation.
+`TaskFailed` or `task_result_deadline` reconciliation. This slice does not
+define a separate publication deadline.
 
 ### Platform Service Recovery
 
@@ -625,9 +684,9 @@ On restart, the platform service:
 1. reloads nonterminal workflows;
 2. resumes unpublished Orchestrator outbox messages;
 3. reloads configured Agent manifests;
-4. inspects `DISPATCHED` workflows whose durable deadline expired; and
-5. republishes an unconfirmed command safely or transitions a confirmed but
-   unresolved dispatch to `FAILED`.
+4. inspects `DISPATCHED` workflows whose `task_result_deadline` expired; and
+5. transitions an expired workflow to `FAILED`, or safely republishes an
+   unconfirmed command whose deadline has not expired.
 
 ### Test Agent Recovery
 
@@ -728,6 +787,9 @@ The original workflow text and secrets are not logged.
 - Platform-service readiness requires valid configuration, reachable
   persistence, a ready Event Bus publisher/consumer, loaded compatible
   manifest, and started recovery worker.
+- Platform-service readiness and Workflow API query availability do not require
+  a ready Test Agent. Submission eligibility is evaluated separately for each
+  new workflow.
 - Test Agent liveness confirms the process is responsive.
 - Test Agent readiness requires valid configuration, reachable receipt
   persistence, and a ready Event Bus consumer.
@@ -810,8 +872,11 @@ The slice follows the repository [test strategy](../testing/README.md).
 ### No-Infrastructure Tests
 
 - workflow state-transition unit tests;
+- `RECEIVED` and `PENDING` single-transaction history tests;
 - event-envelope validation tests;
 - identifier ownership and propagation tests;
+- equivalent and conflicting `request_id` idempotency tests, including
+  concurrent submissions;
 - capability-manifest validation tests;
 - deterministic word-count tests;
 - Orchestrator result idempotency tests;
@@ -826,6 +891,9 @@ The slice follows the repository [test strategy](../testing/README.md).
 
 - concrete Event Bus publish and consume test;
 - concrete persistence durability and atomicity test;
+- platform and Workflow API startup while the Test Agent is unavailable;
+- workflow query while the Test Agent is unavailable;
+- temporary-unavailable submission rejection without workflow creation;
 - Orchestrator outbox recovery after restart;
 - Test Agent stored-result republication after restart;
 - duplicate command-delivery test;
@@ -888,7 +956,7 @@ infrastructure tests run against an isolated local stack owned by the test run.
 - **Dependencies:** Phases 1 and 2.
 - **Tests:** Invalid pre-creation input, identifier ownership, manifest
   compatibility, deterministic selection, command creation, duplicate results,
-  conflicting results, and dispatch-deadline failure.
+  conflicting results, and `task_result_deadline` failure.
 - **Completion criteria:** A controlled-port workflow reaches `COMPLETED` or
   `FAILED` with exactly one task attempt.
 - **Suggested commit:** `Implement minimal workflow orchestration`
@@ -968,9 +1036,22 @@ The slice is accepted when:
 
 - a valid workflow can be submitted through the local API;
 - invalid or unsupported input is rejected before workflow creation;
+- the platform service and Workflow API become ready when persistence and the
+  Event Bus are available, independently of Test Agent readiness;
+- workflow queries remain available while the configured Test Agent is not
+  ready;
+- a new submission without a ready configured Test Agent returns
+  `AGENT_TEMPORARILY_UNAVAILABLE` before workflow creation and leaves no
+  workflow in `PENDING`;
 - the Workflow API owns `request_id` and the Orchestrator generates all domain
   identifiers;
+- an equivalent request with an accepted `request_id` returns the existing
+  workflow identifiers and current state;
+- a different request with an accepted `request_id` returns
+  `REQUEST_ID_CONFLICT`, and no accepted `request_id` creates two workflows;
 - workflow state is durably persisted;
+- `RECEIVED` and `PENDING` remain separate logical transitions with preserved
+  history even when committed in one transaction;
 - the configuration-backed Capability Registry selects the compatible Test
   Agent;
 - one task command is dispatched asynchronously;
@@ -982,7 +1063,10 @@ The slice is accepted when:
 - the Agent deduplicates using `task_attempt_id` and command `message_id`;
 - a terminal Agent failure produces a queryable `FAILED` workflow;
 - exhausted command processing eventually results in a queryable `FAILED`
-  workflow through terminal result or durable dispatch deadline;
+  workflow through terminal result or `task_result_deadline`;
+- `DISPATCHED` begins when the command is durably recorded, publication
+  acknowledgement remains transport state, and expiry of
+  `task_result_deadline` produces a terminal `FAILED` workflow;
 - the platform service resumes unpublished outbox messages after restart;
 - the Test Agent republishes stored results using the same result `message_id`
   after restart;
@@ -1003,7 +1087,7 @@ The slice is accepted when:
 | API and Orchestrator both generate domain IDs | Make API transport-only and assert ownership in contract tests. |
 | State and outbox diverge | Require ADR-0006 to prove transactional writes and recovery behavior. |
 | A result is published twice after restart | Persist stable result `message_id`; Orchestrator inbox deduplicates it. |
-| Configured Agent is unavailable after startup | Bound consumer processing and fail the durable dispatch deadline; dynamic availability is deferred. |
+| Configured Agent is unavailable | Reject new submissions before workflow creation; if an accepted workflow already exists, bound processing and fail it at `task_result_deadline`; dynamic availability is deferred. |
 | Dead-letter behavior leaks transport assumptions | Define it in ADR-0005 and test the selected adapter without a generic domain event. |
 | Persistence candidate cannot satisfy source-of-truth requirements | Evaluate against Section 12 and treat relational storage as a strong candidate. |
 | Local authorization is mistaken for production identity | Name and scope `LocalDevelopmentAuthorizationPolicy`; bind only locally. |
@@ -1022,11 +1106,11 @@ The slice is accepted when:
 6. How are Orchestrator and Test Agent data isolated in the selected store?
 7. Is a separate local-container-topology ADR required?
 8. What is the `request_id` idempotency retention period?
-9. What is the durable dispatch deadline?
+9. What duration should `task_result_deadline` use?
 10. How long are inbox, outbox, receipt, result, transition, and dead-letter
     records retained?
-11. How does local orchestration communicate startup readiness to the
-    configuration-backed Registry without becoming dynamic discovery?
+11. How does the configuration-backed Registry evaluate current Test Agent
+    readiness at submission time without becoming dynamic discovery?
 12. Does configuration-backed registration satisfy ADR-0002's requirement that
     Agents register manifests and availability, or is a follow-up clarification
     required?
