@@ -236,9 +236,9 @@ a measured platform benefit.
 
 Use uv for Python installation selection, dependency resolution, dependency
 groups, virtual environments, locked synchronization, Python tool execution,
-and build invocation. The official Pyright CLI is the one deliberate exception:
-it is a development-only Node.js package managed as described in the static
-typing decision.
+and build invocation. The selected BasedPyright distribution is a
+development-only Python package managed through the same uv dependency group
+and lockfile, as described in the static typing decision.
 
 Advantages:
 
@@ -259,8 +259,9 @@ Disadvantages and trade-offs:
   governance.
 - Standardizing on uv creates a tooling dependency on one project even though
   application architecture remains vendor-neutral.
-- The selected Pyright CLI requires a narrowly scoped second package manifest
-  and lockfile for one development tool.
+- BasedPyright packages a Node-based checker behind a Python distribution, so
+  its release and platform-wheel availability remain additional dependency
+  considerations even though contributors do not manage Node or npm directly.
 
 Poetry is rejected because its main benefits overlap with uv while its resolver
 and environment workflow add more overhead for this repository. PDM is a
@@ -275,10 +276,10 @@ documented developer and CI bootstrap process. Exported requirements or
 `pylock.toml` files may be generated for a demonstrated interoperability need,
 but they must not become competing dependency sources of truth.
 
-The root `package.json` declares only an exact Pyright development dependency
-unless another decision explicitly expands its scope. The committed
-`package-lock.json` records that package and its transitive tool dependencies.
-Neither file is a source for Python application dependencies.
+BasedPyright is declared in the standardized development dependency group and
+resolved in `uv.lock`. No root `package.json`, `package-lock.json`, npm
+bootstrap, or separately managed Node.js runtime is introduced solely for
+static typing.
 
 ## Project Metadata
 
@@ -288,17 +289,17 @@ The repository will use one root `pyproject.toml` as the source of truth for:
 - runtime dependencies;
 - standardized development dependency groups;
 - the Hatchling build-system declaration; and
-- Ruff, Pyright, and pytest configuration where those tools support it.
+- Ruff, BasedPyright, and pytest configuration where those tools support it.
 
 The initial project is one internal distribution with one committed `uv.lock`
 at the repository root. The lockfile is generated, reviewed, and committed; it
 must not be edited manually. Dependency changes update `pyproject.toml` and
 `uv.lock` in the same change.
 
-The official Pyright CLI is pinned separately in a minimal root `package.json`
-and committed `package-lock.json`. Those files exist only because the official
-Pyright distribution requires Node.js; they do not replace `pyproject.toml` or
-`uv.lock` for Python project metadata or dependencies.
+The BasedPyright development dependency and its transitive dependencies are
+resolved in the same committed `uv.lock`. Its bundled Pyright and Node
+implementation details do not create a second repository package manifest or
+lockfile.
 
 Development environments use an editable install so source changes are visible
 without reinstalling. CI verification and runtime-image construction use a
@@ -318,8 +319,9 @@ Disadvantages and trade-offs:
 - A single lockfile can grow as component-specific dependencies are added.
 - One distribution may eventually be too coarse if components require
   independent release cycles or incompatible dependency sets.
-- Pyright adds a second, development-only manifest and lockfile outside the
-  Python dependency graph.
+- BasedPyright is a forked distribution rather than Microsoft's direct Pyright
+  package, so its release maintenance and upstream synchronization must be
+  reviewed during upgrades.
 
 Multiple independent `requirements.txt` files, per-component lockfiles, and
 manually managed editable paths are rejected for the initial slice because they
@@ -421,41 +423,75 @@ added.
 | Type inference quality | Strong control-flow narrowing and inference for unannotated expressions; strict collection inference reduces propagation of `Any` | Mature gradual typing with predictable annotation-driven behavior; inference is strong but generally less aggressive in interactive use |
 | Strictness | A documented `strict` mode enables broad unknown-type, missing-stub, and boundary diagnostics; individual rules remain configurable | `strict` mode is mature and highly configurable, with granular error codes and per-module overrides |
 | Diagnostics | Fast, precise diagnostics are available continuously through the language server and from the CLI; JSON output supports machine consumers | Stable CLI diagnostics and error codes are well suited to CI, but feedback is usually batch-oriented without another editor integration |
-| Editor experience | Pyright powers the analysis in Pylance, the primary VS Code Python language server, providing completion, navigation, narrowing, and immediate diagnostics in one analysis engine | Requires a separate mypy editor extension or daemon integration alongside the normal VS Code language server, which can produce delayed or duplicated feedback |
+| Editor experience | Pyright-family analysis provides completion, navigation, narrowing, and immediate diagnostics through Pylance, Pyright, or a compatible language-server extension | Requires a separate mypy editor extension or daemon integration alongside the normal VS Code language server, which can produce delayed or duplicated feedback |
 | AI-first workflow | Immediate diagnostics and inferred types improve the feedback available while GitHub Copilot, Codex, GPT-based tools, and developers create or revise code; agents can also consume the authoritative CLI result | AI tools can run and interpret the CLI, but receive less continuous editor feedback and may encounter differences between editor inference and CI checks |
-| CI integration | Official CLI supports deterministic noninteractive checks and structured output; requires Node.js and a separately pinned npm dependency | Runs directly inside the uv-managed Python environment with no second runtime |
+| CI integration | The selected BasedPyright CLI supports deterministic noninteractive checks and runs from the uv-managed environment; the official distribution would require separately managed Node.js and npm | Runs directly inside the uv-managed Python environment with no second runtime |
 | Performance | Designed for high performance on large Python codebases and responsive language-server use | Incremental caches and the daemon improve performance, but cold and repository-wide checks are generally slower |
-| Maintenance | One configuration can drive CLI Pyright and Pyright-based editor analysis; Pylance and pinned CLI release versions can still differ | One Python lockfile and mature plugins simplify installation; plugins and checker-specific exceptions can accumulate |
+| Maintenance | One configuration can drive CLI and editor analysis; the selected BasedPyright distribution can use the workspace-pinned version, but adds fork-synchronization risk | One Python lockfile and mature plugins simplify installation; plugins and checker-specific exceptions can accumulate |
 | Ecosystem maturity | Mature, standards-oriented checker with first-class VS Code/Pylance usage and support in other editors | Long-established checker with a large stub and plugin ecosystem |
 
 ### Recommendation
 
-Use Pyright in strict mode as the authoritative static type checker for
-platform-owned Python source and maintained test-support code. Store its
-configuration under `[tool.pyright]` in `pyproject.toml`. New public functions,
-ports, contracts, and configuration models must be typed. Narrow exclusions are
+Use Pyright-family analysis in strict mode as the authoritative static type
+check for platform-owned Python source and maintained test-support code. Use
+the BasedPyright distribution and store its configuration under
+`[tool.basedpyright]` in `pyproject.toml`. New public functions, ports,
+contracts, and configuration models must be typed. Narrow exclusions are
 permitted only for documented third-party boundaries; global suppression of
 missing imports or unknown types is not permitted.
 
-Use the official npm distribution, pin its exact version in a minimal
-development-only `package.json`, and commit `package-lock.json`. The pinned CLI
-is authoritative in CI. VS Code uses Pylance or Pyright with the repository
-configuration for immediate feedback, while acknowledging that Pylance may
-bundle a different Pyright engine version.
+### Pyright Installation Strategy Evaluation
 
-Pyright is selected because inference quality, diagnostic speed, and direct
-alignment with the VS Code/Pylance experience materially improve the feedback
-loop for developers and AI coding tools. Codex, GPT-based tools, and GitHub
-Copilot do not require Pyright, but they benefit from fast, local, consistent
-diagnostics during generation and review. That value outweighs the
-development-only Node.js dependency for this AI-first workflow.
+| Criterion | BasedPyright through uv | Python wrapper for Pyright through uv | Official Pyright through npm |
+| --- | --- | --- | --- |
+| Repository simplicity | Uses the existing development dependency group and `uv.lock`; no Node manifest or npm commands | Uses the Python dependency group, but wraps a separately installed or cached Node and npm execution path | Requires root `package.json`, `package-lock.json`, npm commands, and a supported Node runtime |
+| Reproducibility | Pins the checker, its bundled Pyright payload, and Python-visible transitive dependencies in `uv.lock`; the editor can load the workspace package | Pins the wrapper and its targeted Pyright version, but installation or cache behavior for Node and the npm package adds another layer to diagnose | Pins Microsoft's package and transitive npm dependencies directly in `package-lock.json`; Node itself still needs a separate version policy |
+| Long-term maintenance | Normal uv upgrades and one lockfile; accepts a fork-maintenance and upstream-synchronization dependency | Tracks upstream Pyright closely, but depends on a community wrapper plus its Node discovery, download, npm, and cache behavior | Uses Microsoft's direct distribution, but requires ongoing Node, npm, manifest, lockfile, and supply-chain maintenance |
+| Developer onboarding | `uv sync --locked` installs the development tool; no separately managed Node or npm prerequisite | Appears Python-native, but failures can expose Node, npm, cache, and wrapper-specific environment controls | Requires contributors to install and understand Node and npm in addition to uv |
+| CI complexity | Runs with `uv run basedpyright` after the normal locked sync | Runs from uv, but deferred Node or npm setup can add cache and network failure modes unless separately controlled | Requires both `uv sync --locked` and `npm ci`, plus a pinned Node bootstrap |
+| Dependency management | Keeps application and development dependencies in the selected primary Python toolchain | Keeps the wrapper in uv while obscuring part of the executable acquisition behind the wrapper | Makes the second package manager explicit and reproducible, but splits development tooling across two dependency graphs |
+| VS Code integration | The BasedPyright extension can discover the workspace package so editor and CI use the pinned version; Pylance-exclusive features may require a documented hybrid setup | Works with Pyright/Pylance configuration, but the independently updated Pylance engine can differ from the pinned CLI | Provides the direct upstream CLI and familiar Pylance path, but does not by itself keep the Pylance engine aligned with CI |
+| Single primary Python toolchain | Strongest alignment: uv installs and invokes the checker | Partial alignment: uv installs the wrapper, but the wrapper still manages Node/npm behavior | Weakest alignment: Node and npm become explicit development prerequisites |
+
+Use BasedPyright as a development dependency managed and locked entirely
+through uv. The package bundles the Pyright payload and its Node implementation
+dependency, so Node remains an internal implementation detail rather than a
+separately managed repository toolchain. The pinned `uv.lock` resolution and
+`uv run basedpyright` command are authoritative in local checks and CI.
+
+VS Code uses the BasedPyright extension configured to discover the package in
+the workspace environment. This aligns interactive diagnostics with the
+locked CLI version. Pylance is not the default type-checking path because its
+independently bundled engine can diverge; if a Pylance-exclusive language
+feature becomes necessary, Pylance type checking must be disabled so duplicate
+diagnostics are not produced.
+
+Pyright-family analysis is selected because inference quality, diagnostic
+speed, and direct alignment with the VS Code experience materially improve the
+feedback loop for developers and AI coding tools. Codex, GPT-based tools, and
+GitHub Copilot do not require Pyright, but they benefit from fast, local,
+consistent diagnostics during generation and review.
 
 mypy remains a mature, reproducible, Python-native alternative and would be
-preferable if avoiding Node were the dominant constraint. It is not selected
+preferable if avoiding any Node-based implementation, including one packaged
+behind a Python distribution, were the dominant constraint. It is not selected
 because its installation simplicity does not compensate for the separate and
-less immediate editor-checking path. The Node dependency is contained outside
-runtime images and cannot be used for application dependencies without another
-decision.
+less immediate editor-checking path.
+
+The community Python wrapper for Pyright is not selected because it still
+discovers or downloads Node and installs or caches the npm package behind the
+Python entry point. Although that preserves the direct upstream checker and can
+be pinned through uv, the hidden bootstrap and cache behavior is less
+transparent and less hermetic than installing a complete BasedPyright
+distribution through the normal locked sync.
+
+The official npm distribution is not selected because direct Microsoft
+provenance does not provide enough additional architectural value to justify a
+second package manager, lockfile, runtime bootstrap, and CI installation path
+for one development tool. It also does not solve editor-to-CI version drift
+when Pylance bundles a different engine. BasedPyright accepts a fork dependency
+in exchange for lower repository and operational complexity; its upstream
+Pyright base must be verified during each upgrade.
 
 ## Testing
 
@@ -690,10 +726,9 @@ Azure DevOps:
 
 ```text
 uv sync --locked
-npm ci
 uv run ruff format --check .
 uv run ruff check .
-npm exec -- pyright
+uv run basedpyright
 uv run pytest
 ```
 
@@ -701,10 +736,10 @@ These are proposed commands, not claims that CI is currently configured.
 Repository configuration, not CI-specific task behavior, defines tool policy.
 
 The future CI bootstrap must pin uv, select the accepted Python 3.14 patch
-policy, install a supported Node.js runtime, and use both committed lockfiles
-without updating them. Caching may improve speed but must not be required for
-correctness. Checks must not depend on GitHub-only actions, Azure-only tasks,
-globally installed Python or Node packages, or developer-machine state.
+policy, and use the committed `uv.lock` without updating it. Caching may improve
+speed but must not be required for correctness. Checks must not depend on
+GitHub-only actions, Azure-only tasks, globally installed Python packages, or
+developer-machine state.
 
 Advantages:
 
@@ -715,7 +750,8 @@ Advantages:
 Disadvantages and trade-offs:
 
 - Each CI environment still needs a trustworthy uv bootstrap.
-- Pyright adds a Node.js bootstrap and a second locked dependency installation.
+- BasedPyright increases the size of the Python development dependency set
+  because it packages the checker and its implementation runtime.
 - Cross-platform checks may reveal native dependency differences.
 - A single full check can become slow as integration and end-to-end tests grow;
   later job partitioning must preserve the same commands and categories.
@@ -736,16 +772,15 @@ tooling stack:
 - **Metadata:** one root `pyproject.toml`
 - **Build backend:** Hatchling
 - **Python dependency lock:** one committed `uv.lock`
-- **Pyright tool lock:** minimal `package.json` and committed
-  `package-lock.json`
+- **Type-checker lock:** BasedPyright in the committed `uv.lock`
 - **Development installation:** editable
 - **CI and runtime installation:** locked; runtime artifacts are non-editable
 - **Source layout:** `src/ai_platform/`
 - **Import namespace:** one regular `ai_platform` package
 - **Formatting:** Ruff formatter
 - **Linting:** Ruff
-- **Static typing:** Pyright strict mode through the official pinned CLI;
-  Pyright-based VS Code analysis uses the same repository configuration
+- **Static typing:** Pyright-family strict mode through the uv-managed
+  BasedPyright distribution; VS Code uses the workspace-pinned checker
 - **Testing:** pytest
 - **Test layout:** existing unit, contract, component, integration, and
   end-to-end directories
@@ -753,8 +788,8 @@ tooling stack:
   `.env` support and strict secret separation
 - **Logging:** standard Python logging API with platform-owned structured JSON
   and correlation context
-- **CI interface:** the same uv- and npm-managed commands in local development,
-  GitHub Actions, and Azure DevOps
+- **CI interface:** the same uv-managed commands in local development, GitHub
+  Actions, and Azure DevOps
 
 This decision standardizes implementation tooling, not platform contracts.
 Components continue to communicate through the vendor-neutral boundaries
@@ -764,11 +799,11 @@ defined by ADR-0001 and ADR-0002.
 
 ### Positive Consequences
 
-- Contributors learn and operate one application runtime and dependency
-  manager, plus one narrowly scoped Node-managed type checker.
+- Contributors learn and operate one primary Python runtime and dependency
+  toolchain for application and development dependencies.
 - Python provides direct access to the broad AI-agent ecosystem.
-- Committed Python and Pyright lockfiles make dependency resolution reviewable
-  and repeatable.
+- One committed lockfile makes Python and type-checker dependency resolution
+  reviewable and repeatable.
 - Fast formatting and linting encourage frequent local checks.
 - Fast Pyright diagnostics, strict typing, Hatchling, and the `src` layout make
   module boundaries and packaging mistakes visible earlier.
@@ -782,10 +817,10 @@ defined by ADR-0001 and ADR-0002.
 - Strict typing around untyped AI packages may require adapters and maintained
   stubs.
 - uv and its lock format become repository tooling dependencies.
-- Pyright adds Node.js, a second package manifest, and a second lockfile for
-  development and CI.
-- Pylance and the pinned Pyright CLI may temporarily differ in diagnostic
-  behavior when their bundled engine versions do not match.
+- BasedPyright introduces reliance on a community-maintained fork and its
+  synchronization with upstream Pyright.
+- The BasedPyright VS Code extension may not provide every Pylance-exclusive
+  language feature.
 - Hatchling is another build dependency and would need reevaluation for native
   extension modules it cannot support directly.
 - A single package and lockfile may become coarse as components evolve.
@@ -799,12 +834,12 @@ scaffolding must:
 
 - create `pyproject.toml` with Hatchling as its build backend and create
   `uv.lock`;
-- create a minimal `package.json` and `package-lock.json` containing the exact
-  official Pyright CLI dependency and its transitive tool dependencies;
+- include BasedPyright in the standardized development dependency group and
+  resolve it in `uv.lock`;
 - use `src/ai_platform/` rather than the vertical slice's placeholder
   `src/platform/`;
 - create only the modules required by the active implementation phase;
-- configure Ruff, Pyright strict mode, and pytest in `pyproject.toml`;
+- configure Ruff, BasedPyright strict mode, and pytest in `pyproject.toml`;
 - verify Hatchling editable and non-editable builds through uv;
 - update the vertical-slice repository tree to the accepted package spelling;
   and
@@ -815,20 +850,19 @@ that its tooling has been approved.
 
 ### Developer Impact
 
-- Developers install or bootstrap uv and a supported Node.js runtime, then use
-  the committed Python and Node lockfiles.
-- Code is formatted and linted by Ruff, checked by Pyright strict mode, and
-  tested with pytest before review.
+- Developers install or bootstrap uv, then use the committed `uv.lock`.
+- Code is formatted and linted by Ruff, checked by BasedPyright in strict mode,
+  and tested with pytest before review.
 - New platform-owned code includes type annotations and explicit boundary
   validation.
 - Local `.env` files remain optional, ignored, and nonauthoritative.
 - Contributors do not need Go, Poetry, PDM, globally installed Python quality
-  tools, or globally installed Node packages for the initial platform.
+  tools, Node.js, or npm for the initial platform.
 
 ### CI Impact
 
-- Future pipelines pin uv, provide supported Python and Node runtimes, and
-  invoke the same locked commands used locally.
+- Future pipelines pin uv, provide the supported Python runtime, and invoke the
+  same locked commands used locally.
 - GitHub Actions and Azure DevOps require no platform-specific quality
   implementation.
 - Python and dependency caches may improve performance but cannot affect
@@ -846,8 +880,9 @@ Review or supersede this decision when:
 - a component requires an independent release cadence or incompatible
   dependency graph;
 - `uv.lock` portability or uv maintenance creates recurring failures;
-- Pyright/Pylance diagnostic divergence or Node maintenance materially reduces
-  delivery quality;
+- BasedPyright no longer tracks upstream Pyright promptly, its maintenance
+  becomes uncertain, or its VS Code integration materially reduces delivery
+  quality;
 - Hatchling cannot support a required packaging behavior or native extension;
 - Ruff lacks a required analysis that another tool can demonstrably provide;
 - a frontend or specialized service justifies a second language;
@@ -864,8 +899,8 @@ Review or supersede this decision when:
 | uv or its lock format changes incompatibly | Pin uv, review lockfile changes, document upgrades, and retain standards-based `pyproject.toml` metadata |
 | One lockfile couples unrelated components | Use dependency groups initially; split only after independent deployment or conflict evidence is documented |
 | Strict Pyright creates excessive unknown-type diagnostics around AI libraries | Start strict on greenfield code, isolate untyped SDKs behind typed adapters, keep exclusions narrow and documented, and track removal |
-| The Pyright CLI adds Node.js and a second supply-chain lock | Keep the npm manifest limited to exact Pyright, commit its lockfile, use `npm ci`, and exclude Node from runtime images |
-| Pylance and CLI Pyright versions disagree | Treat the pinned CLI as authoritative, keep shared repository configuration, and reconcile repeatable differences before changing rules |
+| BasedPyright diverges materially from upstream Pyright or becomes insufficiently maintained | Pin and review every upgrade, verify the reported upstream Pyright base, and reconsider the official distribution if synchronization or maintenance becomes unreliable |
+| BasedPyright's VS Code extension lacks a required Pylance-exclusive feature | Prefer the workspace-pinned extension; if a hybrid is necessary, disable Pylance type checking and keep the locked BasedPyright CLI authoritative |
 | Hatchling cannot support a future native or specialized build | Keep runtime code pure Python initially and review the backend when a demonstrated packaging requirement exceeds Hatchling |
 | Ruff rule upgrades create unexpected churn | Pin Ruff and review rule-set or version changes separately from behavior changes |
 | `.env` files lead to credential commits | Keep ignore rules, provide nonsecret examples, review secret handling, and follow `SECURITY.md` |
@@ -885,8 +920,9 @@ Review or supersede this decision when:
   packages provide Python 3.14-compatible releases; later-selected dependencies
   and optional extras will be revalidated before implementation.
 - Developers and future CI workers can install the pinned uv binary.
-- Developers and future CI workers can provide a supported Node.js runtime for
-  the official pinned Pyright CLI.
+- BasedPyright continues to publish Python 3.14-compatible distributions for
+  supported developer and CI platforms and remains promptly synchronized with
+  upstream Pyright.
 - Docker remains the accepted deployment packaging boundary, but this ADR does
   not choose image topology or local orchestration.
 
@@ -899,8 +935,8 @@ Review or supersede this decision when:
 3. Which minimal Ruff rule families should be enabled at first acceptance?
 4. Which test-support modules, in addition to all production source, must pass
    Pyright strict mode from the first implementation phase?
-5. Which supported Node.js release and bootstrap method should local and CI
-   environments use for the pinned Pyright CLI?
+5. What upgrade evidence is required to confirm a BasedPyright release's
+   upstream Pyright base and editor compatibility?
 6. Which configuration and JSON-formatting libraries, if any, are necessary
    after the first contracts are defined?
 
@@ -928,10 +964,10 @@ second runtime.
 ### Python with Poetry, Black, Flake8, mypy, Setuptools, and unittest
 
 Use mature independent tools for each concern. This was not selected because it
-adds overlapping configuration and gives up Pyright's direct VS Code/Pylance
-feedback loop. The selected uv, Hatchling, Ruff, Pyright, and pytest stack adds
-a contained Node.js development dependency in exchange for faster and more
-consistent interactive diagnostics.
+adds overlapping configuration and gives up Pyright-family analysis's direct
+VS Code feedback loop. The selected uv, Hatchling, Ruff, BasedPyright, and
+pytest stack keeps the type checker in the primary Python dependency workflow
+while retaining fast, consistent interactive diagnostics.
 
 ### Tool Choice Per Component
 
@@ -967,8 +1003,8 @@ This ADR does not decide:
 - [ ] The project accepts uv and `uv.lock` as tooling dependencies and the
       application dependency source of truth.
 - [ ] A pinned uv bootstrap and upgrade policy is agreed.
-- [ ] The root `pyproject.toml`, Python `uv.lock`, narrow Pyright
-      `package-lock.json`, and editable-development strategy are approved.
+- [ ] The root `pyproject.toml`, single `uv.lock`, and editable-development
+      strategy are approved.
 - [ ] Hatchling is accepted as the PEP 517/PEP 660 build backend for editable
       development and future wheel or source-distribution builds.
 - [ ] `src/ai_platform/` is accepted as the concrete spelling of the vertical
@@ -976,9 +1012,11 @@ This ADR does not decide:
 - [ ] Ruff formatter is accepted as the only formatter.
 - [ ] Ruff is accepted as the only baseline linter and its initial rule set is
       agreed.
-- [ ] Pyright strict mode is accepted as the authoritative type check, its
-      checked paths are agreed, and the official npm dependency is approved.
-- [ ] The pinned CLI remains authoritative when Pylance diagnostics differ.
+- [ ] Pyright-family strict mode through the uv-managed BasedPyright
+      distribution is accepted as the authoritative type check, and its checked
+      paths are agreed.
+- [ ] The BasedPyright fork-maintenance trade-off and workspace-pinned VS Code
+      extension strategy are approved.
 - [ ] pytest and the existing layered test directories are accepted without
       changing the test strategy.
 - [ ] Environment-variable, `.env`, validation, and secret-separation rules
@@ -1014,6 +1052,11 @@ This ADR does not decide:
 - [Ruff formatter](https://docs.astral.sh/ruff/formatter/)
 - [Ruff linter](https://docs.astral.sh/ruff/linter/)
 - [Pyright documentation](https://microsoft.github.io/pyright/)
+- [BasedPyright command-line and language-server installation](https://docs.basedpyright.com/dev/installation/command-line-and-language-server/)
+- [BasedPyright IDE installation](https://docs.basedpyright.com/dev/installation/ides/)
+- [BasedPyright package and editor version pinning](https://docs.basedpyright.com/dev/benefits-over-pyright/pypi-package-vscode-pinning/)
+- [BasedPyright upstream synchronization](https://docs.basedpyright.com/dev/development/upstream/)
+- [Pyright Python wrapper](https://github.com/RobertCraigie/pyright-python)
 - [mypy documentation](https://mypy.readthedocs.io/)
 - [pytest documentation](https://docs.pytest.org/)
 - [FastAPI package metadata](https://pypi.org/project/fastapi/)
