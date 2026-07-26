@@ -9,6 +9,7 @@ technical and structural choices.
 | --- | --- | --- |
 | [ADR-0001](ADR-0001-core-design-principles.md) | Core Design Principles | Accepted |
 | [ADR-0002](ADR-0002-platform-communication-and-state.md) | Platform Communication and State | Proposed |
+| [ADR-0003](ADR-0003-runtime-and-development-tooling.md) | Runtime and Development Tooling | Proposed |
 
 ## Naming
 
