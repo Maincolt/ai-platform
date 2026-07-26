@@ -1,0 +1,233 @@
+# ---------------------------------------------------------------------------
+# Secrets and local environment configuration
+# ---------------------------------------------------------------------------
+
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+secrets/
+*.secret
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Native extensions
+*.so
+
+# Packaging and build output
+.Python
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Test, coverage, lint, and type-check caches
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Framework and tool state
+*.log
+*.pot
+*.mo
+*.db
+*.sqlite
+*.sqlite3
+.ipynb_checkpoints/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ---------------------------------------------------------------------------
+# Node.js and JavaScript tooling
+# ---------------------------------------------------------------------------
+
+node_modules/
+.npm/
+.pnpm-store/
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Package manager runtime state
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches/
+!.yarn/plugins/
+!.yarn/releases/
+!.yarn/sdks/
+!.yarn/versions/
+
+# Build, test, and tool caches
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+.vitepress/cache/
+.eslintcache
+.stylelintcache
+.node_repl_history
+coverage/
+*.tsbuildinfo
+
+# Local package archives
+*.tgz
+
+# ---------------------------------------------------------------------------
+# Docker and local container runtime state
+# ---------------------------------------------------------------------------
+
+.docker/
+.docker-buildx/
+docker-data/
+container-data/
+compose.*.local.yml
+compose.*.local.yaml
+docker-compose.*.local.yml
+docker-compose.*.local.yaml
+
+# Preserve source-controlled container definitions.
+!Dockerfile
+!Dockerfile.*
+!compose.yml
+!compose.yaml
+!docker-compose.yml
+!docker-compose.yaml
+!.dockerignore
+
+# ---------------------------------------------------------------------------
+# Unraid local state and user shares
+# ---------------------------------------------------------------------------
+
+# Standard Unraid runtime shares when the repository is used as a deployment
+# workspace. Infrastructure definitions and templates remain trackable.
+/appdata/
+/domains/
+/isos/
+/system/
+/mnt/
+/.unraid/
+/unraid/appdata/
+/unraid/domains/
+/unraid/isos/
+/unraid/system/
+/unraid/logs/
+/unraid/secrets/
+
+# Sensitive machine-local Unraid boot configuration
+/config/super.dat
+/config/*.key
+/config/passwd
+/config/shadow
+/config/smbpasswd
+/config/network.cfg
+/config/ssh/
+/config/ssl/
+/config/wireguard/
+
+# ---------------------------------------------------------------------------
+# Visual Studio Code
+# ---------------------------------------------------------------------------
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+*.code-workspace
+.history/
+
+# ---------------------------------------------------------------------------
+# Linux and filesystem metadata
+# ---------------------------------------------------------------------------
+
+*~
+.directory
+.Trash-*
+.fuse_hidden*
+.nfs*
+lost+found/
+
+# Common metadata when the repository is accessed from other operating systems
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------------------------------------------------------------------------
+# Logs, process state, temporary files, and editor backups
+# ---------------------------------------------------------------------------
+
+logs/
+*.log.*
+*.pid
+*.pid.lock
+*.seed
+*.stackdump
+
+tmp/
+temp/
+.tmp/
+.temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.swp
+*.swo
+*.swn
+
+# Generic local runtime and generated output
+.runtime/
+runtime-data/
+artifacts/
+reports/
