@@ -1,7 +1,7 @@
 # ADR-0005: Event Bus and Messaging Infrastructure
 
-- **Status:** Proposed
-- **Date:** Not yet accepted
+- **Status:** Accepted
+- **Date:** 2026-07-26
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -45,9 +45,9 @@ The following points must remain visible rather than being silently resolved:
   not a messaging-semantics conflict, and this ADR does not modify it.
 - ADR-0002 requires workflow-scoped ordering, while ADR-0004 defines
   `workflow_id` as the logical key. Neither document states whether ordering
-  must span multiple physical channels. This ADR defines ordering within
-  `(logical_channel, workflow_id)` and does not promise a total order across
-  separate channels. Architecture reviewers must confirm that interpretation.
+  must span multiple physical channels. This ADR resolves that ambiguity by
+  defining ordering within `(logical_channel, workflow_id)` without promising
+  a total order across separate channels.
 - Vertical Slice 01 permits the deterministic Test Agent to recompute after a
   crash that occurs before an outcome is durably recorded. That is narrower
   than an absolute claim that a `task_attempt_id` can never execute twice.
@@ -163,6 +163,52 @@ in CI, but their startup cost and failure controls differ. The in-memory option
 is the only zero-service test adapter and cannot substitute for the selected
 broker's integration and resilience suite.
 
+### Kafka Protocol Capability Boundary
+
+The Kafka-protocol adapter may depend only on this baseline capability set:
+
+- produce records and receive broker publication acknowledgment;
+- consume records from configured platform topics;
+- keyed partitions using `workflow_id` as the record key;
+- traditional consumer groups and partition assignment;
+- manual offset commits after durable processing;
+- message headers for nonauthoritative transport metadata;
+- broker-supported client authentication;
+- topic and consumer-group authorization;
+- topic retention by configured age and size;
+- idempotent producer behavior; and
+- basic administration required for platform topics, limited to creating,
+  describing, and validating topics and their approved partition, replication,
+  retention, and access configuration.
+
+The adapter, infrastructure definitions, and domain modules must not depend on
+the following without a future ADR:
+
+- Kafka Streams;
+- ksqlDB or KSQL;
+- Kafka Connect;
+- MirrorMaker;
+- a deployed Schema Registry;
+- Tiered Storage;
+- broker transactions as the mechanism for business or workflow consistency;
+- broker-side transformations;
+- Redpanda-specific Admin APIs; or
+- any implementation-specific extension outside the allowed capability set.
+
+Idempotent production is allowed because it reduces duplicate broker records
+created by transport retries. It does not replace `message_id` deduplication,
+the transactional outbox, or business idempotency. Message headers are
+transport metadata and must not become an alternative source for domain
+semantics already carried by the ADR-0004 envelope.
+
+This allowlist uses mature Kafka capabilities implemented across Redpanda,
+Apache Kafka, and common managed Kafka services. Excluding broker-side
+processing, proprietary administration, managed-only storage, and auxiliary
+Kafka products reduces migration surface and feature mismatch. It does not
+reduce current platform capability: Vertical Slice 01 needs only durable keyed
+publication, consumer groups, acknowledgments, retention, security, and basic
+topic administration.
+
 ## 3. Kafka Versus Redpanda
 
 | Concern | Apache Kafka | Redpanda | Decision effect |
@@ -174,7 +220,7 @@ broker's integration and resilience suite.
 | Memory and disk | JVM and page-cache operating model; tunable for small environments | No JVM, but production recommendations still require dedicated CPU, memory, and durable high-performance disk | Do not describe Redpanda as resource-free or use developer mode as production evidence |
 | Operational tooling | Extensive Kafka ecosystem and long operational history | `rpk`, Admin API, and optional Console; smaller ecosystem | Redpanda simplifies initial administration but has a narrower independent tooling base |
 | Maturity | Longest history and broadest third-party support | Younger implementation with a growing compatibility surface | Maintain Apache Kafka conformance as a portability check |
-| License | Apache-2.0 | Community Edition uses the Business Source License and later converts code to Apache-2.0; commercial service restrictions apply | Repository-owner license review is required before acceptance |
+| License | Apache-2.0 | Community Edition uses the Business Source License and later converts code to Apache-2.0; commercial service restrictions apply | Repository-owner license compliance review is required before implementation or deployment |
 | Standard clients | Native reference clients and broad third-party support | Standard clients work only within Redpanda's implemented Kafka subset | Use a narrow adapter and test every required feature |
 | Migration | Source implementation | Kafka-compatible target/source for supported APIs | Broker data, consumer offsets, ACLs, configuration, and operational metadata do not migrate merely by changing a bootstrap address |
 | Unraid and small self-hosting | Viable in containers, but KRaft/JVM tuning remains | Viable in one container for local or small self-hosted use | Redpanda is the preferred initial implementation |
@@ -229,12 +275,49 @@ deployment configuration must document:
 - maximum message size;
 - retention and replay controls;
 - native delayed-delivery support;
-- producer idempotence or transaction support;
+- producer idempotence; broker transactions remain outside the baseline
+  capability set and cannot implement business consistency;
 - broker durability and replication requirements; and
 - transport-specific authentication and authorization features.
 
 Domain behavior may require a capability, such as durable replay, but must not
 branch on a broker product name.
+
+The Kafka adapter implements only the capability allowlist in Section 2.
+Unsupported capabilities are absent from the Event Bus port rather than
+exposed conditionally. Infrastructure code may perform the allowed basic topic
+administration, but domain modules may not invoke Kafka, Redpanda, or managed
+service administration APIs. Adapter startup must fail clearly when a
+configured broker cannot provide the required allowed capabilities.
+
+### Messaging and Persistence Responsibility Boundary
+
+This ADR defines messaging semantics only. Requiring durable coordination does
+not select a persistence product, storage schema, or concrete transaction.
+
+| Responsibility | Architectural owner and boundary in this ADR | Deferred to ADR-0006 |
+| --- | --- | --- |
+| Event Bus | Stores broker-accepted records for configured retention; assigns keyed partitions; delivers and redelivers records; maintains consumer-group positions; acknowledges publications; and carries transport quarantine records | No workflow, outcome, receipt, inbox, outbox, or deduplication state model |
+| Outbox | The producing component retains one immutable outgoing publication and its publication state until broker acknowledgment; the outbox closes the state-to-publish failure window | Persistence technology, record ownership, transaction scope, durability, schema, queries, and recovery storage |
+| Inbox | A consuming component durably records accepted message processing so redelivery does not repeat a state transition or side effect | Persistence technology, atomic relationship to domain updates, schema, retention, concurrency, and recovery |
+| Workflow persistence | The Orchestrator owns workflow state and transitions; the broker is not their source of truth | Store selection, workflow storage ownership, transaction and durability guarantees, schema design, and recovery storage |
+| Agent outcome persistence | The Agent owns its durable outcome and the immutable event prepared for publication | Store selection, transaction boundaries among receipt, outcome, and event outbox, schema design, and recovery storage |
+| Deduplication persistence | Consumers require durable deduplication by consumer identity and `message_id`; Agents also enforce `task_attempt_id` business idempotency | Store, key representation, retention, concurrency protection, durability, cleanup, and recovery |
+| Receipt persistence | The Agent durably records command receipt and its relationship to the retained outcome | Store, ownership boundaries, atomicity, schema, retention, and restart recovery |
+
+ADR-0006 will define:
+
+- persistence technology;
+- storage ownership and access boundaries;
+- concrete transactional boundaries;
+- durability guarantees;
+- persistence schema design; and
+- recovery storage and queries.
+
+ADR-0005 requires those future decisions to satisfy the messaging semantics
+above, but does not preselect how they are implemented. Broker offsets and
+retained messages cannot substitute for the required durable application
+records.
 
 ## 5. Logical Channels
 
@@ -498,7 +581,11 @@ Republishing therefore uses the original bytes, key, and `message_id` and may
 create duplicate broker records. Consumer deduplication remains required even
 when the Kafka producer uses idempotent mode.
 
-This ADR defines no persistence technology or outbox table.
+This ADR requires the outbox behavior because it is part of reliable message
+publication, but defines no persistence technology, storage owner, transaction
+implementation, durability level, schema, table, or recovery query. ADR-0006
+must define those persistence details while preserving the publication
+semantics above.
 
 ## 13. Agent Result Publication
 
@@ -529,6 +616,11 @@ Future side-effecting Agents must use an idempotent external operation,
 pre-execution claim or lease, side-effect ledger, or another explicitly
 documented policy. This ADR does not select Agent persistence or a universal
 side-effect protocol.
+
+The receipt, outcome, deduplication, and event-outbox records are application
+persistence, not Event Bus state. ADR-0006 must define their storage ownership,
+transactional boundaries, durability, schema, retention, and restart-recovery
+mechanism.
 
 ## 14. Consumer Groups and Scaling
 
@@ -783,7 +875,14 @@ Redpanda compatibility issue.
 The coherent messaging architecture is:
 
 - a technology-neutral platform-owned Event Bus port;
-- a Kafka-protocol transport adapter using only a documented tested subset;
+- a Kafka-protocol transport adapter limited to produce, consume, keyed
+  partitions, traditional consumer groups, manual offset commits, message
+  headers, authentication, authorization, retention, idempotent production,
+  and basic platform-topic administration;
+- no dependency on Kafka Streams, ksqlDB, Connect, MirrorMaker, Schema
+  Registry, Tiered Storage, broker transactions for business consistency,
+  broker-side transformations, Redpanda-specific Admin APIs, or other
+  implementation-specific extensions without a future ADR;
 - Redpanda Community Edition as the preferred initial self-hosted broker;
 - no managed-service dependency and no claim of full Kafka implementation
   interchangeability;
@@ -803,6 +902,9 @@ The coherent messaging architecture is:
   Orchestrator outcome processing;
 - a transactional Orchestrator outbox;
 - a durable Agent receipt, outcome, and event outbox;
+- durable inbox and deduplication behavior whose persistence technology,
+  ownership, transaction boundaries, guarantees, schema, and recovery storage
+  are deferred to ADR-0006;
 - bounded immediate transport retry and no delayed retry in Vertical Slice 01;
 - restricted per-channel quarantine topics and explicit operator replay;
 - bounded configurable retention, with workflow state remaining external and
@@ -929,10 +1031,12 @@ Review or supersede this decision when:
 | State and message inconsistency | Commit state and outbox atomically and make publication acknowledgment a separate recoverable transport state |
 | Agent outcome loss | Atomically retain receipt, outcome, and event outbox before acknowledging the command |
 | Kafka-compatible implementations differ | Restrict the feature subset, run conformance and failure tests, and plan migrations rather than assuming interchangeability |
+| Kafka ecosystem capabilities expand the adapter implicitly | Enforce the Section 2 allowlist in the port, dependency review, configuration, and conformance tests; require a future ADR for every prohibited capability |
+| Messaging semantics are mistaken for persistence design | Keep the Section 4 responsibility matrix authoritative and require ADR-0006 to select stores, owners, transactions, durability, schemas, and recovery storage |
 | Development and production diverge | Use the real broker for integration tests and prevent developer mode from proving durability |
 | Broker concepts leak through the port | Prohibit client types and metadata in domain modules, review adapter boundaries, and test transport-metadata isolation |
 | Sensitive retained messages | Minimize payloads, encrypt transport, restrict topic and quarantine access, bound retention, and never log bodies |
-| Redpanda BSL is unacceptable | Complete license review before acceptance; retain Apache Kafka as the tested protocol-compatible alternative |
+| Redpanda BSL use violates repository-owner policy or intended deployment terms | Complete license compliance review before implementation or deployment; retain Apache Kafka as the tested protocol-compatible alternative |
 | Client native wheels are unavailable on a target | Validate CPython 3.14 artifacts for every target architecture and test source-build or alternative-client fallback before deployment |
 
 ## 25. Assumptions
@@ -942,17 +1046,17 @@ Review or supersede this decision when:
   `TaskFailed`.
 - CPython 3.14 remains the accepted runtime.
 - Workflow and Agent persistence capabilities can provide the atomicity needed
-  by the selected outbox and deduplication model; the technology is unresolved.
+  by the selected outbox, inbox, receipt, outcome, and deduplication model;
+  ADR-0006 will select the technology, ownership, transaction boundaries,
+  durability, schema, and recovery storage.
 - Initial development and self-hosting can provide a Linux container runtime
   and a durable local volume.
 - One physical machine is acceptable for development and non-high-availability
   use; production availability requirements remain unresolved.
 - The planned self-hosted use does not offer Redpanda as a commercial
-  streaming or queuing service to third parties, subject to repository-owner
-  license confirmation.
-- Required Kafka API features are limited to produce, fetch, keyed partitions,
-  traditional consumer groups, manual offset commits, topic administration,
-  idempotent producer behavior, security, and operational statistics.
+  streaming or queuing service to third parties; license compliance must be
+  confirmed before implementation or deployment.
+- Required Kafka API features are limited to the explicit Section 2 allowlist.
 - No deployed schema registry, broker transform, Kafka Streams application, or
   managed-service-only feature is required.
 - Exact retry counts, retention durations, replication factors, image pins,
@@ -960,8 +1064,9 @@ Review or supersede this decision when:
 
 ## 26. Open Questions
 
-The following questions do not change the selected broker, port, channels, or
-delivery semantics:
+The following bounded implementation and deployment questions do not change
+the accepted broker, capability boundary, port, channels, ordering, or delivery
+semantics:
 
 1. What small initial partition count matches measured local concurrency?
 2. What age and size limits apply to commands, outcomes, and quarantine data?
@@ -973,13 +1078,8 @@ delivery semantics:
    disposal procedure is used?
 6. Which Redpanda image and version are pinned for the first implementation?
 7. Which TLS certificate-issuance and rotation process is selected?
-8. Does the repository owner approve the documented Redpanda Community Edition
-   BSL use?
-9. Do architecture reviewers accept `(logical_channel, workflow_id)` rather
-   than cross-channel total ordering as the ADR-0002 ordering boundary?
-10. Do reviewers accept at-most-one durable Agent outcome, with safe
-    recomputation before the durability point for the deterministic Test Agent,
-    as the intended interpretation of Vertical Slice 01?
+8. Who records the required Redpanda Community Edition license compliance
+   review before the first implementation or deployment?
 
 ## 27. Explicitly Out of Scope
 
@@ -1005,11 +1105,18 @@ This ADR does not decide:
 
 - [ ] The Kafka-protocol adapter and preferred Redpanda Community Edition
       implementation are approved.
-- [ ] Redpanda BSL terms are reviewed and accepted for the intended use.
+- [ ] The Redpanda BSL trade-off and pre-implementation license compliance
+      requirement are approved.
 - [ ] At-least-once delivery and the prohibition on end-to-end exactly-once
       claims are approved.
 - [ ] The technology-neutral Event Bus port and capability boundary are
       approved.
+- [ ] The allowed Kafka capabilities are explicit and sufficient for Vertical
+      Slice 01.
+- [ ] Kafka Streams, ksqlDB, Connect, MirrorMaker, Schema Registry, Tiered
+      Storage, business-consistency transactions, broker-side transformations,
+      Redpanda-specific Admin APIs, and implementation-specific extensions
+      require a future ADR.
 - [ ] `task-commands` and `task-outcomes` are approved as the only first-slice
       logical channels.
 - [ ] Physical naming and deployment mapping remain outside domain contracts.
@@ -1024,6 +1131,10 @@ This ADR does not decide:
 - [ ] The transactional Orchestrator outbox is approved architecturally without
       selecting persistence.
 - [ ] Durable Agent receipt, outcome, and event-outbox behavior is approved.
+- [ ] Event Bus, outbox, inbox, workflow state, Agent outcome, deduplication,
+      and receipt responsibilities are distinct.
+- [ ] ADR-0006 owns persistence technology, storage ownership, transactional
+      boundaries, durability guarantees, schema design, and recovery storage.
 - [ ] The Test Agent crash-window recomputation interpretation is approved.
 - [ ] The two Vertical Slice 01 consumer groups and partition-limited scaling
       model are approved.
