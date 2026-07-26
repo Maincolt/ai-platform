@@ -12,6 +12,8 @@ as the behavior or decision it describes.
   responsibilities, boundaries, and collaboration flow
 - `architecture/decisions/` — Architecture Decision Records for significant
   technical and structural choices
+- `implementation/vertical-slice-01.md` — implementation plan for the first
+  deterministic end-to-end workflow
 - `testing/README.md` — platform test levels, execution categories, and
   validation expectations
 
