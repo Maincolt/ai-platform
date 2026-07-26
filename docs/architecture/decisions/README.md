@@ -11,6 +11,7 @@ technical and structural choices.
 | [ADR-0002](ADR-0002-platform-communication-and-state.md) | Platform Communication and State | Accepted |
 | [ADR-0003](ADR-0003-runtime-and-development-tooling.md) | Runtime and Development Tooling | Accepted |
 | [ADR-0004](ADR-0004-api-and-contract-standards.md) | API and Contract Standards | Accepted |
+| [ADR-0005](ADR-0005-event-bus-and-messaging-infrastructure.md) | Event Bus and Messaging Infrastructure | Proposed |
 
 ## Naming
 
