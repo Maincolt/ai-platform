@@ -8,8 +8,8 @@ as the behavior or decision it describes.
 
 ## Contents
 
-- `Architecture.md` — logical platform architecture, component responsibilities,
-  boundaries, and collaboration flow
+- `architecture/README.md` — logical platform architecture, component
+  responsibilities, boundaries, and collaboration flow
 - `architecture/decisions/` — Architecture Decision Records for significant
   technical and structural choices
 

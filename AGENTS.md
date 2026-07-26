@@ -107,7 +107,7 @@ AI agents working in this repository must:
 - Prefer durable communication in version-controlled documentation for
   decisions that affect future work.
 
-## Event-Driven Behaviour
+## Event-Driven Behavior
 
 Events are contracts between modules, not informal notifications.
 

@@ -62,33 +62,41 @@ The intended architecture separates coordination, communication, agent
 behavior, and external integrations:
 
 ```text
-                    Requests and events
-                            |
-                  +---------v---------+
-                  |   Orchestration   |
-                  +---------+---------+
-                            |
-                  Documented event contracts
-                            |
-          +-----------------+-----------------+
-          |                 |                 |
-    +-----v-----+     +-----v-----+     +-----v-----+
-    |  Agent A  |     |  Agent B  |     |  Agent N  |
-    +-----+-----+     +-----+-----+     +-----+-----+
-          |                 |                 |
-          +-----------------+-----------------+
-                            |
-                 Replaceable integration
-                       boundaries
+                         External requests
+                                 |
+                                 v
+                    +-------------------------+
+                    |      Orchestrator       |-----+
+                    +------------+------------+     |
+                                 |                  |
+                         workflow events            | AI capability
+                                 |                  | requests
+                                 v                  |
+                    +-------------------------+     |
+                    |        Event Bus        |     |
+                    +------------+------------+     |
+                                 |                  |
+                                 v                  |
+                    +-------------------------+     |
+                    |         Agents          |-----+
+                    +-------------------------+     |
+                                                   v
+                                      +-------------------------+
+                                      |        AI Router        |
+                                      +------------+------------+
+                                                   |
+                                                   v
+                                      External AI capabilities
 ```
 
 The orchestration boundary coordinates work without absorbing agent-specific
 behavior. Agents own focused responsibilities and collaborate through explicit
-events. Integrations remain behind replaceable boundaries so that external
-providers and environments can change without redefining the platform.
+events on the Event Bus. AI capability requests pass through the AI Router so
+that external providers remain behind a replaceable boundary.
 
-Detailed component choices and contracts will be added only when they are
-decided and recorded under `docs/architecture/decisions/`.
+See the [platform architecture](docs/architecture/README.md) for component
+responsibilities and collaboration flows. Significant design choices are
+recorded in the [ADR index](docs/architecture/decisions/README.md).
 
 ## License
 

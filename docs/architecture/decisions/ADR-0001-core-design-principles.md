@@ -170,6 +170,6 @@ decisions.
 
 ## References
 
-- [Platform Architecture](../../Architecture.md)
+- [Platform Architecture](../README.md)
 - [Repository guidance](../../../AGENTS.md)
 - [Project overview](../../../README.md)
