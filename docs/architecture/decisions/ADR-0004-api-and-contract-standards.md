@@ -1,7 +1,7 @@
 # ADR-0004: API and Contract Standards
 
-- **Status:** Proposed
-- **Date:** Not yet accepted
+- **Status:** Accepted
+- **Date:** 2026-07-26
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -24,21 +24,18 @@ message documentation, fixtures, and consumers could drift. Field naming,
 identifier encoding, timestamp precision, compatibility, and error behavior
 could then become accidental framework or transport behavior.
 
-### Existing Documentation Conflicts
+### Resolved Documentation Alignments
 
-The following inconsistencies are explicit inputs to this proposal:
+The following inconsistencies were explicit inputs to this decision and were
+resolved in Vertical Slice 01 when this ADR was Accepted:
 
-| Subject | Vertical Slice 01 | This proposal | Required alignment |
+| Subject | Earlier vertical-slice wording | Accepted alignment |
 | --- | --- | --- | --- |
-| Command name | `ExecuteWordCountTask` | `ExecuteTask` | Treat these as two names for the same required command, not two contracts. Before this ADR is Accepted, select one name and update the vertical slice. This ADR proposes `ExecuteTask` because capability-specific behavior belongs in the payload. |
-| Outcome classification | `TaskCompleted` and `TaskFailed` are `result` messages and use `message_kind = result` | They are immutable event contracts with `message_kind = event` | Update the vertical-slice terminology if this proposal is Accepted. Their payload semantics do not change. |
-| Contract-name field | `event_type` | `contract_name` | Use `contract_name` because the common envelope carries commands and events, not only events. |
-| Common timestamp | `occurred_at` for commands and results | `created_at` for every message; event occurrence timestamps remain in event payloads when semantically distinct | Update the vertical-slice envelope if this proposal is Accepted. |
-| Partition metadata | `partition_key` appears in the portable envelope | The logical ordering key is `workflow_id`; the derived transport partition key remains outside the domain envelope | Update the vertical-slice envelope if this proposal is Accepted. ADR-0005 will define the transport mapping. |
-
-There is also a repository-index inconsistency unrelated to the contract
-decision: ADR-0002 is marked Accepted in its own file but Proposed in the ADR
-index. This ADR does not resolve that metadata issue.
+| Command name | `ExecuteWordCountTask` | `ExecuteTask`; this is a rename of the same required command, not a second contract |
+| Outcome classification | `TaskCompleted` and `TaskFailed` were `result` messages with `message_kind = result` | They are immutable events with `message_kind = event`; their outcome semantics are unchanged |
+| Contract-name field | `event_type` | `contract_name`, because the envelope carries commands and events |
+| Common timestamp | `occurred_at` for commands and results | `created_at` for every message, with event-specific `completed_at` or `failed_at` timestamps |
+| Partition metadata | `partition_key` in the portable envelope | `workflow_id` is the logical ordering key; ADR-0005 maps it to transport partitioning outside the envelope |
 
 ## Decision Drivers
 
@@ -138,6 +135,13 @@ only when it crosses a documented boundary.
   from the schemas or maintained explicitly, but automated parity tests are
   mandatory either way.
 
+Each published `contract_name` and `MAJOR.MINOR` pair has one immutable
+canonical schema. Consumers resolve and validate the exact declared version
+from the versioned schemas distributed with the platform. They do not validate
+a `1.0` message against a `1.2` schema merely because they support `1.2`.
+Version support and producer selection follow Section 10; this requires no
+deployed schema registry or broker-specific negotiation.
+
 If a Python model, OpenAPI document, AsyncAPI document, example, or generated
 client disagrees with a canonical JSON Schema, the canonical schema and this
 ADR's semantic rules are authoritative. The disagreeing artifact is defective
@@ -186,10 +190,27 @@ Removing or changing a default follows the compatibility rules below.
 Producers must emit only fields documented by the exact schema version they
 declare. They may not silently add implementation-specific properties.
 
-Every object schema explicitly declares `additionalProperties`; it must not
-rely on JSON Schema's permissive default. Closed objects set it to `false`.
-Documented extension points set it to `true` or constrain additional values
-with a schema.
+Every concrete object schema explicitly declares its closure behavior; it must
+not rely on JSON Schema's permissive default. A simple object whose properties
+are declared in one schema object uses `additionalProperties: false` when
+closed. Documented extension points use `additionalProperties: true` or
+constrain additional values with a schema.
+
+`additionalProperties` sees only properties declared in the same subschema.
+Therefore, a reusable definition intended for composition through `$ref` or
+`allOf` must not close itself in a way that rejects properties contributed by
+another subschema. When a concrete composed object must be closed, apply
+`unevaluatedProperties: false` at the outermost completed schema after the
+common envelope, payload, and other referenced properties have been evaluated.
+Closure belongs at the concrete composition boundary, not prematurely inside
+an extensible base definition.
+
+Validators used for canonical contracts must implement the Draft 2020-12
+evaluation semantics for `$ref`, `allOf`, and `unevaluatedProperties`.
+Composition tests must prove that all documented properties are accepted and
+that undeclared properties are rejected at closed boundaries. This guidance
+does not require every schema to use composition or prescribe the structure of
+individual schemas.
 
 Objects intended for additive evolution are marked extensible in their schema.
 Consumers that claim support for a contract major version must ignore unknown
@@ -239,7 +260,7 @@ Commands and events use one transport-neutral envelope.
 
 | Field | Required | Creator and format | Immutable meaning |
 | --- | --- | --- | --- |
-| `message_id` | Yes | The producer creates a lowercase UUIDv7 | Identifies one exact logical publication and remains stable across transport redelivery |
+| `message_id` | Yes | The producer creates a lowercase UUIDv7 | Identifies one immutable logical publication whose complete envelope and payload are preserved during transport redelivery |
 | `message_kind` | Yes | The producer sets `command` or `event` | Distinguishes imperative requests from immutable facts |
 | `contract_name` | Yes | The producer uses the registered `PascalCase` contract name | Selects the payload semantics |
 | `contract_version` | Yes | The producer uses a `MAJOR.MINOR` string such as `1.0` | Selects the exact published schema and compatibility line |
@@ -307,8 +328,9 @@ sequences are not public cross-component identifiers.
   Orchestrator.
 - `task_attempt_id` is the business idempotency key for exactly one execution
   attempt.
-- `message_id` is created by each message producer and identifies one exact
-  command or event publication.
+- `message_id` is created by each message producer and identifies one immutable
+  logical command or event publication. Transport redelivery preserves its
+  complete envelope and payload.
 - `correlation_id` is accepted from valid external context or created by the
   Orchestrator. Its format is UUIDv7.
 - `causation_id` is not independently generated. It is either the direct
@@ -448,9 +470,53 @@ not describe wire compatibility. It is more expressive than an integer major
 alone because producers and consumers can identify an exact additive schema.
 
 The API URL carries only the major version, such as `/api/v1`. OpenAPI metadata
-records the full API contract version. Asynchronous envelopes and capability
-manifests carry the full `MAJOR.MINOR` string. Canonical schema paths use the
-major directory, while `$id` and schema metadata identify the full version.
+records the full API contract version. API compatibility is governed by the
+URL major and its published OpenAPI revisions; API requests and responses do
+not use the asynchronous envelope's `contract_version`.
+
+Asynchronous command and event envelopes carry the exact message
+`MAJOR.MINOR` in `contract_version`. Capability manifests declare supported
+command and event contract versions. Canonical schema paths use the major
+directory, while `$id` and schema metadata identify the exact full version.
+
+#### Asynchronous Minor-Version Processing
+
+The following rules apply independently for each `contract_name`:
+
+1. A consumer declares the exact major and minor versions it accepts through
+   the existing capability manifest or another explicit static contract.
+   Vertical Slice 01 uses `accepted_command_contract_versions` and
+   `produced_event_contract_versions`; this decision does not redesign that
+   manifest.
+2. Support for `1.2` includes `1.0` and `1.1` in the same major by default. A
+   noncontiguous exception must be explicitly documented and advertised as
+   exact versions; it must never be inferred.
+3. Support for `1.0` does not imply support for `1.1` or any later minor.
+4. When an intended consumer is selected and its version information is
+   available, a producer emits only an exact version known to be supported by
+   that consumer. Capability selection and message-version selection use the
+   intersection of producer and consumer support.
+5. When a field, enum value, or widened validation introduced in a newer minor
+   is required for the message, the producer may emit that minor only after
+   confirming that the selected consumer supports it.
+6. If more than one mutually supported minor can express the message, the
+   producer uses the lowest suitable minor unless a documented selection rule
+   requires another mutually supported version.
+7. When a message has no selected consumer or consumer-version information is
+   unavailable, the producer uses the lowest minor it supports in the accepted
+   major line, normally `1.0`. This is the conservative fallback to Rule 4; it
+   must not optimistically emit a newer minor.
+8. An unsupported major or unsupported minor is rejected before payload or
+   domain processing with `UNSUPPORTED_CONTRACT_VERSION`. Asynchronous
+   disposition follows the later Event Bus decision; rejection does not create
+   a new domain event implicitly.
+9. A consumer validates the envelope and payload against the exact schema named
+   by `contract_name` and declared `contract_version`, then applies semantic
+   relationship and authorization checks. It never substitutes its newest
+   compatible schema for the declared schema.
+
+This is static capability negotiation, not runtime broker negotiation and not a
+deployed schema registry.
 
 A breaking change includes:
 
@@ -491,14 +557,14 @@ For this matrix:
 
 | Change | Backward | Forward | Classification and rule |
 | --- | --- | --- | --- |
-| Add optional field with no new required semantics | Yes | Conditional on documented unknown-field tolerance | Minor |
+| Add optional field with no new required semantics | Yes | Conditional on documented unknown-field tolerance | Minor; producers emit the newer minor only to consumers known to support it |
 | Add required field | No | Not sufficient even if an old consumer ignores it | Breaking |
 | Remove field | Conditional for already-tolerant readers | Conditional for optional old readers | Breaking by platform policy after deprecation |
 | Rename field | No | No | Breaking |
 | Change field type or nullability | No | No | Breaking |
-| Widen accepted validation | Yes | No when an old consumer receives newly valid values | Conditional minor only with capability or version negotiation |
+| Widen accepted validation | Yes | No when an old consumer receives newly valid values | Conditional minor; newly valid values require confirmed support for that exact minor |
 | Narrow accepted validation | No | Yes only for values still in the narrowed set | Breaking |
-| Add enum value | Yes | Conditional; strict old consumers may reject it | Minor only when emission is negotiated |
+| Add enum value | Yes | Conditional; strict old consumers may reject it | Minor; the new value is emitted only to consumers known to support that exact minor |
 | Remove enum value | No for old data containing it | Conditional | Breaking |
 | Change semantic meaning without changing shape | No | No | Breaking |
 | Change a default | No | No | Breaking unless proven observationally equivalent |
@@ -535,6 +601,35 @@ It excludes property order, JSON whitespace, correlation metadata, transport
 headers, and other nonsemantic request data. The platform stores the SHA-256
 fingerprint of the RFC 8785 canonical semantic object, not raw JSON text.
 
+Each accepted request also retains an internal `fingerprint_policy_version`
+that identifies the normalization fields, default-materialization rules,
+canonicalization behavior, and digest algorithm used when it was accepted.
+This version is persistence metadata and is not exposed as a public API field.
+
+Fingerprint evolution follows these rules:
+
+- The stored fingerprint and policy version are immutable and are never
+  silently recomputed after an upgrade.
+- A replay is normalized using the persisted historical policy, or an explicit
+  compatibility adapter for that policy, before its digest is compared.
+- A new optional execution-semantic field defines how it maps to older
+  policies. Omission or the historical implied default may remain equivalent;
+  a value that changes execution semantics must produce
+  `REQUEST_ID_CONFLICT`.
+- A representation-only optional field remains excluded and must not create a
+  false conflict.
+- Adding or changing a default creates a new fingerprint policy when it can
+  affect normalization. Replays of older accepted requests use the default
+  semantics recorded by their historical policy, not the current default.
+- A change to canonicalization, normalization, or digest behavior creates a new
+  fingerprint policy. The implementation retains comparison support for every
+  policy that can still appear in an accepted-request mapping.
+- If the stored policy cannot be evaluated safely, processing fails closed and
+  must not create another workflow.
+
+These rules preserve comparison across API minor upgrades without comparing
+raw JSON or exposing persistence design through the Workflow API.
+
 #### Agent Execution Idempotency
 
 `task_attempt_id` identifies one business execution attempt. Repeated delivery
@@ -547,7 +642,8 @@ conflicting command and fails safely. A future application retry creates a new
 
 #### Message Deduplication
 
-`message_id` identifies one exact logical command or event publication.
+`message_id` identifies one immutable logical command or event publication.
+Its complete envelope and payload are preserved during transport redelivery.
 Consumers deduplicate by consumer identity and `message_id`. This is separate
 from business idempotency by `task_attempt_id`.
 
@@ -583,7 +679,7 @@ for API idempotency and audit. It is not overloaded as message causation.
   transitions, and command creation.
 - The producer of a message owns conformance of the emitted envelope and
   payload.
-- An Agent owns how it computes an outcome, but emits result payloads only
+- An Agent owns how it computes an outcome, but emits event payloads only
   within the shared accepted `TaskCompleted` or `TaskFailed` contract.
 - Shared schemas, operation descriptions, examples, and compatibility records
   are versioned in this repository.
@@ -603,7 +699,11 @@ Validation occurs at every trust boundary:
   domain constraints before workflow creation;
 - consumers validate the complete envelope, declared contract version,
   producer, identifiers, relationships, and payload before processing;
-- unsupported versions are rejected with stable semantics;
+- consumers confirm the declared asynchronous message version is in their
+  explicit support set and reject unsupported major or minor versions with
+  stable semantics;
+- consumers validate against the exact declared canonical schema, not their
+  newest supported minor schema;
 - configuration and capability manifests are validated separately from API and
   message contracts;
 - unvalidated dictionaries do not enter domain logic; and
@@ -622,7 +722,7 @@ the schema permits a string.
 
 OpenAPI documents:
 
-- the three required HTTP operation groups;
+- the four required HTTP operations;
 - request, response, parameter, header, status, media-type, and problem
   semantics; and
 - reusable references to canonical JSON Schemas.
@@ -727,12 +827,19 @@ Required coverage includes:
 - producer tests proving emitted documents conform to the declared exact
   version;
 - consumer tests for every supported version;
+- contiguous newer-minor support, no implicit forward-minor support, lowest
+  suitable producer selection, and missing-capability fallback tests;
+- exact declared-schema validation and unsupported major and minor rejection;
 - serialization and deserialization round trips;
 - compatibility tests for every schema change;
-- unknown-field tests at extensible and closed object boundaries;
-- unsupported-version rejection;
+- `$ref` and `allOf` composition tests proving correct
+  `unevaluatedProperties` closure;
+- unknown-field tests at explicit extension points and closed object
+  boundaries;
 - lowercase UUIDv7 and timestamp-format tests;
-- API request fingerprint and idempotency tests;
+- API request fingerprint and idempotency tests across historical policy
+  versions, optional fields, defaults, representation-only changes, and
+  canonicalization upgrades;
 - Agent execution-idempotency and message-deduplication tests;
 - correlation and causation propagation;
 - stable API problem and validation-detail tests;
@@ -769,7 +876,7 @@ authentication provider or authorization model.
 
 ### 21. Coherent Contract Standard
 
-The proposed platform contract stack is:
+The accepted platform contract stack is:
 
 - HTTP and UTF-8 JSON for the synchronous Workflow API;
 - UTF-8 JSON for asynchronous commands and events;
@@ -781,10 +888,11 @@ The proposed platform contract stack is:
 - lowercase UUIDv7 identifiers;
 - RFC 3339 UTC timestamps with six fractional digits and `Z`;
 - `snake_case` JSON properties and stable semantic `PascalCase` contract names;
-- `MAJOR.MINOR` contract versions with explicit major compatibility;
+- `MAJOR.MINOR` contract versions with exact schemas, explicit consumer
+  support, and conservative minor-version selection;
 - one transport-neutral command and event envelope;
 - RFC 9457 API problem responses with stable error codes;
-- RFC 8785 plus SHA-256 request fingerprints; and
+- policy-versioned RFC 8785 plus SHA-256 request fingerprints; and
 - strict repository-owned contract, compatibility, idempotency, and security
   tests.
 
@@ -855,6 +963,8 @@ selected instead.
 - Canonical schemas, examples, operation descriptions, and generated
   documentation are reviewable in Git.
 - Runtime validation and compatibility tests make boundary behavior explicit.
+- Exact schema validation and conservative version selection prevent newer
+  minor contracts from reaching consumers that have not declared support.
 - UUIDv7, timestamps, correlation, causation, and stable errors improve
   operational traceability.
 - API request, Agent execution, and message-delivery idempotency remain
@@ -866,6 +976,8 @@ selected instead.
 - Canonical schemas and Python runtime models create parity work.
 - OpenAPI, AsyncAPI, and generated bundles add files and generation tooling.
 - Strict compatibility governance slows casual schema changes.
+- Producers and consumers must maintain exact support metadata, and API
+  idempotency must retain historical fingerprint-policy behavior.
 - UUIDv7 generation requires clock-rollback-safe implementations.
 - Forward-compatible unknown-field handling is more complex than rejecting
   every unrecognized property.
@@ -873,13 +985,9 @@ selected instead.
 
 ### Migration Impact
 
-There is no implementation to migrate. Before Vertical Slice 01 contract
-implementation begins:
+There is no implementation to migrate. Vertical Slice 01 has been aligned with
+this Accepted decision. Before contract implementation begins:
 
-- resolve the `ExecuteTask` versus `ExecuteWordCountTask` name;
-- align `result` terminology to immutable events or amend this proposal;
-- align the envelope to `contract_name`, `created_at`, and transport-external
-  partition metadata;
 - create the contract directory only in the implementation phase that needs
   it; and
 - select pinned validation and generation tools without changing the canonical
@@ -943,18 +1051,21 @@ Review or supersede this decision when:
 | Schemas are duplicated across OpenAPI and AsyncAPI | Reference canonical files and fail generation when a tool rewrites shared meaning |
 | Sensitive workflow data leaks | Minimize payloads, classify sensitive fields, prohibit secrets, and test redaction and examples |
 | Consumers ignore `contract_version` | Validate supported versions before payload processing and test rejection |
+| Producers optimistically emit a newer minor | Select only from explicit producer-consumer capability intersection; without consumer information, emit the lowest supported minor in the accepted major |
+| Consumers validate an older message with a newer schema | Resolve and validate the exact declared `contract_name` and `contract_version`; test every supported schema independently |
+| Composed closed schemas reject documented properties or accept extras | Close simple objects locally; apply `unevaluatedProperties: false` at completed composition boundaries; test `$ref` and `allOf` combinations |
 | Timestamp or UUID implementations disagree | Use RFC-defined formats, fixed timestamp precision, canonical lowercase strings, and cross-language vectors |
 | OpenAPI and AsyncAPI represent shared schemas differently | Treat canonical JSON Schema as authoritative and test generated representations against it |
 | Unknown fields alter behavior | Permit them only at declared extension points and prohibit producers from relying on unknown semantics |
 | UUIDv7 exposes approximate creation time | Treat IDs as opaque and avoid using them where timestamp disclosure is unacceptable |
-| Request fingerprints differ across implementations | Validate and materialize defaults before RFC 8785 canonicalization; share test vectors |
+| Request fingerprints differ across implementations or upgrades | Persist a fingerprint policy version, never recompute stored digests silently, retain historical comparison behavior, and share cross-version test vectors |
 
 ## Assumptions
 
 - ADR-0001, ADR-0002, and ADR-0003 remain Accepted and govern architecture,
   communication, and runtime tooling.
 - Vertical Slice 01 still contains only one workflow command and two terminal
-  outcome messages.
+  events.
 - The initial Workflow API is HTTP-accessible in a local or internal
   environment.
 - JSON payload size and performance are sufficient for the first slice.
@@ -963,7 +1074,7 @@ Review or supersede this decision when:
 - The Event Bus selected by ADR-0005 can carry opaque UTF-8 JSON and transport
   metadata separately.
 - The persistence decision can enforce unique request mappings and store
-  canonical request fingerprints.
+  canonical request fingerprints with their policy versions.
 - No concrete framework, validator, generator, broker, or schema registry is
   accepted by this ADR.
 
@@ -1005,7 +1116,7 @@ This ADR does not decide:
 - [ ] JSON Schema Draft 2020-12 is approved as the canonical data-schema source.
 - [ ] OpenAPI 3.1.1 and AsyncAPI 3.0.0 responsibilities and authority
       boundaries are approved.
-- [ ] The `ExecuteTask` naming proposal is reconciled with Vertical Slice 01.
+- [ ] The `ExecuteTask` name is reconciled with Vertical Slice 01.
 - [ ] Commands, events, responses, and internal models remain semantically
       distinct.
 - [ ] `snake_case`, path, header, contract, enum, error, and filename
@@ -1020,7 +1131,13 @@ This ADR does not decide:
 - [ ] `MAJOR.MINOR` versions, deprecation, and multiple-version support are
       approved.
 - [ ] The compatibility matrix and unknown-field policy are approved.
+- [ ] Exact minor-version declaration, conservative producer selection,
+      capability negotiation, and exact-schema validation rules are approved.
+- [ ] Closed-schema composition through `$ref`, `allOf`, and
+      `unevaluatedProperties` is understood and tested.
 - [ ] API, Agent, and message idempotency remain distinct and testable.
+- [ ] Fingerprint policy versioning preserves accepted-request comparison
+      across optional fields, defaults, and canonicalization upgrades.
 - [ ] Correlation and message-only causation semantics are approved.
 - [ ] Canonical schema and breaking-change ownership are assigned.
 - [ ] Runtime validation is required independently of Python static typing.
@@ -1034,8 +1151,7 @@ This ADR does not decide:
 - [ ] Every open question has an owner or is accepted as a bounded
       implementation-policy item.
 - [ ] Reviewers confirm consistency with ADR-0001 through ADR-0003, the test
-      strategy, and Vertical Slice 01 after the documented conflicts are
-      resolved.
+      strategy, and the aligned Vertical Slice 01.
 - [ ] No out-of-scope infrastructure or implementation technology is selected.
 
 ## Related Decisions

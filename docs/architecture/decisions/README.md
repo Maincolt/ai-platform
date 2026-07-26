@@ -8,9 +8,9 @@ technical and structural choices.
 | ADR | Title | Status |
 | --- | --- | --- |
 | [ADR-0001](ADR-0001-core-design-principles.md) | Core Design Principles | Accepted |
-| [ADR-0002](ADR-0002-platform-communication-and-state.md) | Platform Communication and State | Proposed |
+| [ADR-0002](ADR-0002-platform-communication-and-state.md) | Platform Communication and State | Accepted |
 | [ADR-0003](ADR-0003-runtime-and-development-tooling.md) | Runtime and Development Tooling | Accepted |
-| [ADR-0004](ADR-0004-api-and-contract-standards.md) | API and Contract Standards | Proposed |
+| [ADR-0004](ADR-0004-api-and-contract-standards.md) | API and Contract Standards | Accepted |
 
 ## Naming
 
