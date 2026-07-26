@@ -3,12 +3,48 @@
 This directory contains Architecture Decision Records (ADRs) for significant
 technical and structural choices.
 
-ADRs should be numbered sequentially and use descriptive names, for example:
+## Index
+
+| ADR | Title | Status |
+| --- | --- | --- |
+| [ADR-0001](ADR-0001-core-design-principles.md) | Core Design Principles | Accepted |
+
+## Naming
+
+ADRs are numbered sequentially and use descriptive names:
 
 ```text
-0001-event-broker-selection.md
+ADR-NNNN-short-descriptive-title.md
 ```
 
-Each ADR should capture its status, context, decision, alternatives, and
-consequences. Accepted records are immutable historical documents; superseding
-decisions should be recorded in a new ADR and linked to the earlier record.
+Copy [ADR-template.md](ADR-template.md) when starting a new decision. Replace
+`NNNN` with the next available four-digit number.
+
+## Lifecycle
+
+An ADR has one of these statuses:
+
+- **Proposed** — under discussion and not yet binding
+- **Accepted** — approved and currently governing the architecture
+- **Deprecated** — retained for history but no longer recommended
+- **Superseded** — replaced by a newer ADR
+- **Rejected** — considered but not adopted
+
+New ADRs begin as Proposed unless the decision has already been explicitly
+accepted. Record the decision date when its status becomes Accepted.
+
+## Process
+
+1. Identify a decision with significant or difficult-to-reverse architectural
+   consequences.
+2. Copy the template and assign the next number.
+3. Describe the context and constraints without assuming a preferred outcome.
+4. State the decision and its boundaries precisely.
+5. Record positive and negative consequences.
+6. Summarize the meaningful alternatives considered.
+7. Link related ADRs and documentation.
+8. Add the ADR to the index in this file.
+
+Accepted ADRs are immutable historical records. Correct minor errors without
+changing the decision's meaning. Record material changes in a new ADR, mark the
+earlier record as Superseded, and link the two records.
