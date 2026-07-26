@@ -1,7 +1,7 @@
 # ADR-0003: Runtime and Development Tooling
 
-- **Status:** Proposed
-- **Date:** Not yet accepted
+- **Status:** Accepted
+- **Date:** 2026-07-26
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -23,8 +23,8 @@ components. The choice must support AI-agent development and asynchronous,
 event-driven services without coupling the architecture to an AI provider,
 cloud, CI product, or infrastructure implementation.
 
-The repository contains no implementation code or accepted runtime tooling at
-the time of this proposal. Every technology in this ADR is therefore evaluated
+At the time this ADR was proposed, the repository contained no implementation
+code or accepted runtime tooling, so every technology in this ADR was evaluated
 rather than treated as an existing standard.
 
 ## Decision Drivers
@@ -762,8 +762,7 @@ or claim that any check is currently enforced.
 
 ## Decision
 
-If accepted, all initial platform-owned runtime components use this coherent
-tooling stack:
+All initial platform-owned runtime components use this coherent tooling stack:
 
 - **Runtime language:** Python
 - **Runtime:** CPython 3.14, latest approved patch, with
@@ -829,8 +828,8 @@ defined by ADR-0001 and ADR-0002.
 
 ### Migration Impact
 
-There is no implementation to migrate. When this ADR becomes Accepted, initial
-scaffolding must:
+There is no implementation to migrate. Acceptance of this ADR requires initial
+scaffolding to:
 
 - create `pyproject.toml` with Hatchling as its build backend and create
   `uv.lock`;
