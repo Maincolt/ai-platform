@@ -89,3 +89,7 @@ providers and environments can change without redefining the platform.
 
 Detailed component choices and contracts will be added only when they are
 decided and recorded under `docs/architecture/decisions/`.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
