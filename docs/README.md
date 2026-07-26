@@ -12,5 +12,7 @@ as the behavior or decision it describes.
   responsibilities, boundaries, and collaboration flow
 - `architecture/decisions/` — Architecture Decision Records for significant
   technical and structural choices
+- `testing/README.md` — platform test levels, execution categories, and
+  validation expectations
 
 Major architectural choices belong in `architecture/decisions/`.
