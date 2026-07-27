@@ -13,6 +13,7 @@ technical and structural choices.
 | [ADR-0004](ADR-0004-api-and-contract-standards.md) | API and Contract Standards | Accepted |
 | [ADR-0005](ADR-0005-event-bus-and-messaging-infrastructure.md) | Event Bus and Messaging Infrastructure | Accepted |
 | [ADR-0006](ADR-0006-persistence-state-and-recovery.md) | Persistence, State, and Recovery | Accepted |
+| [ADR-0007](ADR-0007-agent-execution-model-and-lifecycle.md) | Agent Execution Model and Lifecycle | Proposed |
 
 ## Naming
 
