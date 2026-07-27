@@ -1,6 +1,6 @@
 # ADR-0007: Agent Execution Model and Lifecycle
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-27
 - **Supersedes:** None
 - **Superseded by:** None
@@ -141,20 +141,29 @@ manifest fields, commands, events, or scheduling behavior.
 The first-slice lifecycle is:
 
 1. The Event Bus adapter receives `ExecuteTask` without acknowledging it.
+   The adapter associates the delivery with its current partition assignment
+   ownership, which remains a transport concern.
 2. Transport bytes and the exact ADR-0004 contract are validated. A record
    lacking trusted message identity follows ADR-0006 transport-rejection
    recovery, not Agent execution.
 3. The Agent validates target, capability name and version, input, command
    semantics, authorization, and configured readiness. A permanent rejection
    follows the ADR-0005/ADR-0006 quarantine and durable-disposition path and
-   does not continue to capability execution.
+   does not continue to capability execution. Only after transport and
+   semantic validation does the Agent classify a valid command whose
+   `task_result_deadline` is already expired.
 4. It constructs a stable, technology-neutral execution context.
 5. It resolves any completed receipt and outcome by `task_attempt_id`,
    command `message_id`, and immutable command digest. A resolved duplicate
    returns the stored disposition and does not execute again.
 6. It admits new work only when bounded capacity and deadline policy allow.
+   If the deadline expired before admission or while waiting for capacity, it
+   skips execution and constructs a stable safe deadline-expired failure.
 7. It executes deterministic capability logic outside a database transaction.
-8. It classifies success, failure, timeout, or cooperative cancellation.
+8. It classifies success, failure, confirmed execution-policy cancellation, or
+   lifecycle interruption. Unfinished lifecycle-interrupted work skips outcome
+   creation and durability, remains unacknowledged, and proceeds only to
+   resource release.
 9. It constructs one immutable `TaskCompleted` or `TaskFailed` event with
    stable identity and bytes.
 10. One ADR-0006 transaction commits the completed receipt, one accepted
@@ -165,7 +174,9 @@ The first-slice lifecycle is:
     command only after Step 10 commits. It need not wait for terminal-event
     broker acknowledgment because the durable outbox owns publication
     recovery. Rejected and duplicate paths acknowledge only after their
-    respective ADR-0005/ADR-0006 durability and publication barriers.
+    respective ADR-0005/ADR-0006 durability and publication barriers. An
+    adapter acknowledges only while the handler still owns the applicable
+    partition assignment; stale handlers cannot advance broker progress.
 13. The Agent releases admission capacity and execution resources.
 
 Stages 1 through 6 use bounded in-process state and read-only persistence
@@ -173,7 +184,9 @@ lookups. Stage 7 is outside a transaction. Only Stage 10 is the atomic domain
 transaction. Stages 11 and 12 are separate recoverable transport activities;
 there is no database/Event Bus distributed transaction. A crash before Step 10
 permits deterministic recomputation. A crash after Step 10 recovers the stored
-outcome and event.
+outcome and event. The deadline-expired path skips Stage 7 but still performs
+Stages 8 through 12, producing a truthful non-execution failure rather than
+claiming that execution started and timed out.
 
 ### 5. Execution State Model
 
@@ -235,6 +248,17 @@ capacity pressure does not create a new event. The Test Agent supports only
 `text.word-count` capability version `1.0` and the exact accepted first-slice
 contracts.
 
+Dependency disposition is determined at the capability boundary. After valid
+work is admitted, a safely classified dependency failure with exhausted
+bounded retry becomes one stable `TaskFailed` when persistence is available.
+If schema compatibility, required credential resolution, process
+infrastructure, or local durability is unavailable or unknown, the Agent
+cannot reliably create an outcome and leaves the command unacknowledged.
+Authentication or configuration failure discovered before admission is a
+non-retryable readiness failure. Repeated systemic dependency failure stops or
+reduces admission before identical terminal failures can form a high-rate
+stream.
+
 ### 8. Capability Declaration Boundary
 
 The first-slice declaration remains the versioned, configuration-backed
@@ -289,6 +313,13 @@ per assigned partition. Global concurrency cannot exceed the configured limit
 and useful concurrency cannot exceed assigned partitions under the
 per-partition ordering rule.
 
+Each assigned partition has a technology-neutral processing lane. Records are
+admitted and durably disposed in order within that lane, while different lanes
+may progress independently and finish out of order. Prefetched records remain
+in a bounded adapter handoff and do not become concurrently executing work in
+the same lane. Completion in one lane cannot advance transport progress for
+another lane.
+
 The consumer/polling path remains responsive and separate from task execution.
 Task handlers catch and classify capability failures so one task does not
 cancel unrelated siblings. Owned structured tasks are observed and drained;
@@ -305,18 +336,38 @@ measurement.
 The broker is the durable waiting area. The Agent does not create an unbounded
 in-memory queue.
 
-When capacity is full, the adapter pauses affected partition intake or stops
-fetching additional work while continuing the client activity required to
-retain healthy consumer-group membership. It resumes only after capacity is
-released. At most a small configured number of delivered-but-not-executing
+When global capacity or a partition lane is full, the adapter pauses the
+affected partition where supported or stops fetching additional work while
+continuing the client activity required to retain healthy consumer-group
+membership. Other assigned partitions may continue when they have capacity.
+The adapter resumes a partition only after its lane and global capacity allow
+admission. At most a small configured number of delivered-but-not-executing
 records may exist in the adapter handoff; they remain unacknowledged and are
 not durable Agent queue state.
 
-One in-flight command per partition preserves ADR-0005 offset and ordering
-semantics. Capacity across partitions is fair enough to prevent one hot
+One in-flight command per partition preserves ADR-0005 ordering. Offset
+progress for a partition cannot pass a record until its required durable
+disposition completes; completion in another partition cannot satisfy or skip
+that barrier. Capacity across partitions is fair enough to prevent one hot
 partition from consuming every slot; exact scheduling is an implementation
-policy. Consumer polling, poll intervals, and processing bounds must be
-configured together and tested through rebalance.
+policy. Consumer polling, poll intervals, handoff bounds, and processing limits
+must be configured together and tested through rebalance.
+
+A contract-valid, correctly targeted command whose deadline expired before
+admission is removed from the capacity path without running capability work.
+The Agent constructs a stable safe deadline-expired `TaskFailed`, atomically
+persists its completed receipt, outcome, event, and event outbox, and
+acknowledges only after that boundary. This finite disposition prevents
+redelivery from becoming an implicit wait for capacity. Transport-invalid
+commands still use quarantine recovery.
+
+Partition revocation closes admission for that lane and triggers lifecycle
+cancellation of unfinished transient work. The Event Bus adapter fences offset
+commit using its current assignment generation, ownership token, or equivalent
+mechanism. A handler from a revoked or earlier assignment may finish and
+attempt the outcome transaction, but it cannot acknowledge broker progress for
+the new owner. The new owner resolves any committed outcome through the
+completed receipt; otherwise deterministic work may be recomputed.
 
 Shutdown stops admission before draining. Capacity exhaustion creates no
 `TaskFailed`, retry publication, or new domain event.
@@ -335,36 +386,57 @@ ADR-0004 and ADR-0006 remain authoritative:
 | Different attempt ID | Independent application attempt selected by the Orchestrator |
 | Duplicate after event publication | Return stored outcome; lost publication confirmation may republish the same event ID |
 | Duplicate after command acknowledgment loss | Resolve completed receipt and acknowledge without recomputation |
+| Redelivery after partition revocation | Resolve a committed outcome or safely recompute deterministic uncommitted work |
 
 Before the completed-receipt transaction, in-memory coalescing is only an
 optimization. Database uniqueness arbitrates competing commits. The loser
 loads the winner and either returns the identical accepted outcome or reports a
 conflict. No case proves exactly-once computation.
 
+Assignment fencing protects broker progress, not computation or outcome
+commit. A stale execution may race the new owner, and database uniqueness still
+selects one accepted outcome. This duplicate computation remains acceptable
+only for the deterministic, side-effect-free Test Agent.
+
 ### 13. Cancellation Model
 
-Four concepts remain distinct:
+Cancellation causes and their durable meanings remain distinct:
 
+- **Execution-policy cancellation:** an Agent execution timeout, exhausted
+  local execution budget, capability policy cancellation, or
+  `task_result_deadline` reached after admission. When the Agent has confirmed
+  that capability work stopped at a safe boundary and can classify the
+  failure, it may persist a truthful terminal `TaskFailed`.
+- **Lifecycle cancellation:** graceful shutdown, process drain, partition
+  revocation, infrastructure restart, or forced termination. It controls
+  process ownership and must not by itself create a business `TaskFailed`.
 - **Orchestrator deadline expiry:** may make the workflow terminal while Agent
-  work continues; it is not a cancellation command.
-- **Cooperative local cancellation:** an in-process signal observed at safe
-  capability or dependency boundaries.
-- **Forced process cancellation:** process/container termination, which loses
-  transient state and relies on broker redelivery.
+  work continues; it is not an explicit cancellation command.
 - **Future explicit cancellation:** requires a new accepted command/event
   contract and is absent.
 
-The Agent knows `task_result_deadline`. It may avoid starting already-expired
-work and may signal cooperative cancellation when remaining time is exhausted,
-but passing a deadline does not prove that work stopped. If cooperative
-cancellation succeeds, the Agent records a truthful `TaskFailed` classification.
-If a cancellation-insensitive operation completes, the Agent records and
-publishes the actual outcome; the Orchestrator may classify it as late.
+For unfinished deterministic first-slice work interrupted by lifecycle
+cancellation, the Agent does not persist a completed receipt or outcome, does
+not acknowledge the command, and releases or abandons transient execution for
+Event Bus redelivery. If the outcome transaction committed first, normal
+completed-receipt, duplicate, and event-outbox recovery applies. Work that
+truthfully completes after partition revocation may still race to commit its
+outcome, but assignment fencing prevents the stale handler from committing an
+offset.
 
-Cancelling an asyncio task does not stop a running thread, subprocess, provider
-request, or external effect unless that boundary documents cancellation.
-Shutdown cancellation follows the same rule. Vertical Slice 01 has no explicit
-cancellation command.
+A contract-valid command already expired before admission follows the stable
+non-execution failure path in Sections 4 and 11. It is not lifecycle
+cancellation and does not claim that capability execution began. Deadline
+expiry during execution requests execution-policy cancellation. If confirmed
+cooperative cancellation stops the work safely, the Agent records a stable
+failure; if cancellation-insensitive work completes, the Agent records and
+publishes the actual outcome and the Orchestrator may classify it as late.
+
+An asyncio cancellation exception alone is insufficient evidence that a
+thread, subprocess, provider request, dependency operation, or external effect
+stopped. The adapter or capability boundary must positively establish safe
+termination before cancellation becomes a terminal business failure.
+Vertical Slice 01 has no explicit cancellation command.
 
 ### 14. Timeout Model
 
@@ -373,7 +445,7 @@ Timeouts have separate owners:
 | Timeout | Owner and semantics |
 | --- | --- |
 | Command-processing/retry bound | Event Bus adapter under ADR-0005; bounds handler transport attempts |
-| Admission wait | Agent; bounded by remaining deadline and local capacity policy |
+| Admission wait | Agent; bounded by remaining deadline and local capacity policy; expiry produces the durable non-execution failure |
 | Task execution | Agent capability policy; bounds one admitted execution |
 | Provider/tool call | Dependency adapter; no longer than remaining execution budget |
 | Persistence operation | Persistence adapter under ADR-0006; separate transaction timeout and retry |
@@ -392,6 +464,18 @@ durations use a monotonic clock. Clock skew and reserve margins are observable
 and tested. A local timeout means the Agent stopped awaiting or accepting the
 operation result; it is not evidence that an external action stopped.
 
+Deadline disposition depends on the stage:
+
+- if already expired when received, transport and semantic validation still
+  run so invalid commands use quarantine rather than an Agent outcome;
+- after successful validation but before admission, or while waiting for
+  admission, expiry produces the stable durable non-execution `TaskFailed`;
+- during execution, expiry requests execution-policy cancellation and creates
+  `TaskFailed` only after safe stop and classification; and
+- while outcome persistence is retrying, the already constructed stable
+  outcome remains unchanged, retry stays bounded, and the command remains
+  unacknowledged until durability succeeds.
+
 ### 15. Deadline Races
 
 The Agent cannot determine the Orchestrator's durable workflow state. It
@@ -400,11 +484,13 @@ event publishable even when its local clock indicates the result may be late.
 
 | Race | Result |
 | --- | --- |
+| Valid command is already expired before admission | Agent skips execution and durably records the stable non-execution failure; Orchestrator may accept or classify it as late |
+| Deadline expires while waiting for admission | Same finite non-execution failure path; capacity pressure cannot cause infinite redelivery |
 | Work finishes before deadline, commit finishes after | Agent commits truthful outcome; Orchestrator decides whether it arrived durably in time |
 | Outcome commits just before Orchestrator deadline transition | Event publication may still be late; Orchestrator row lock and state transition arbitrate |
 | Publication occurs after workflow failure | Event is delivered and recorded as late; workflow cannot reopen |
-| Deadline expires while executing | Agent signals cooperative cancellation where supported; completion or cancellation becomes the truthful outcome |
-| Deadline expires during persistence retry | Retry remains bounded; a committed outcome is still published and may be late |
+| Deadline expires while executing | Agent requests execution-policy cancellation; confirmed safe stop produces failure, otherwise the actual completion remains authoritative |
+| Deadline expires during persistence retry | Stable outcome intent is not reclassified; retry remains bounded and a committed outcome is still published and may be late |
 | Deadline expires after event publication before processing | Orchestrator's first accepted terminal transition wins |
 
 The Agent does not suppress a committed terminal event merely because the
@@ -421,10 +507,14 @@ Internal classifications and initial dispositions are:
 | Unsupported capability/version or invalid target | Permanent quarantine; no retry loop |
 | Policy or authorization rejection | Permanent quarantine and safe audit |
 | Capacity pressure | Backpressure; no acknowledgment and no domain failure |
-| Execution timeout or successful cooperative cancellation | Durable safe `TaskFailed` after admission |
+| Valid command expired before admission | Durable safe non-execution `TaskFailed`; acknowledge only after completed-receipt/outcome/event/outbox commit |
+| Execution timeout or confirmed cooperative execution-policy cancellation | Durable safe `TaskFailed` only after safe stop and classification |
+| Lifecycle cancellation before outcome commit | No completed receipt, outcome, or acknowledgment; abandon transient work for redelivery |
 | Deterministic task failure | Durable `TaskFailed` |
-| Dependency unavailable or rate limited | Bounded internal retry when safe; otherwise durable `TaskFailed` or unacknowledged infrastructure failure according to classification |
-| Dependency authentication failure | Readiness/policy failure and operator action; do not expose credential detail |
+| Classified capability-operation dependency failure after admission | After bounded safe retry, durable stable `TaskFailed`; acknowledge only after the ADR-0006 transaction |
+| Agent infrastructure failure or unknown local durability | No reliable outcome and no command acknowledgment; recover or redeliver |
+| Systemic dependency failure | Stop or reduce admission and mark readiness unavailable; current command follows the classified outcome or infrastructure-failure rule |
+| Authentication or configuration failure before admission | Non-retryable configuration/readiness failure and operator action; do not create an ordinary task retry loop |
 | Persistence unavailable | No command acknowledgment; retain or recompute after recovery |
 | Internal Agent defect | Isolate task where possible; bounded transport retry or process restart, then quarantine/deadline resolution |
 | Integrity conflict | Fail closed, record safe evidence, and quarantine |
@@ -432,9 +522,12 @@ Internal classifications and initial dispositions are:
 
 Raw exception names, stack traces, secrets, provider payloads, and unrestricted
 text are not event fields. `TaskFailed` uses ADR-0004 safe stable error
-contracts. Whether a dependency failure can be represented as terminal depends
-on having safely admitted and classified that execution; infrastructure
-durability failure is never converted into a successful acknowledgment.
+contracts. A valid admitted capability operation whose dependency failure can
+be safely classified becomes terminal after its bounded retry budget is
+exhausted when persistence remains available. Persistence, schema, required
+credential-resolution, process-wide infrastructure, or unknown-durability
+failures leave the command unacknowledged. Event Bus redelivery is never an
+implicit unbounded dependency retry loop.
 
 ### 17. `TaskCompleted` and `TaskFailed` Creation
 
@@ -483,6 +576,17 @@ Agent-internal retry is permitted only when:
 Authentication, policy, validation, and integrity failures are not retried.
 Retry concurrency and dependency-wide budgets prevent storms. A future
 side-effect protocol governs retry of external writes.
+
+Rate limits, dependency unavailability, provider timeouts, and deterministic
+dependency rejections are capability-operation failures after admission when
+their outcome is safely known. They retry only within the internal attempt and
+elapsed-time budget, global concurrency bound, cancellation policy, and
+remaining task deadline. Exhaustion produces one stable `TaskFailed` for the
+admitted attempt when persistence is available. If the Agent cannot resolve
+required credentials, validate schema/configuration, or determine local
+durability, it cannot reliably create an outcome and leaves the command
+unacknowledged. Repeated systemic dependency failure closes or reduces
+admission before it can generate a high-rate stream of identical failures.
 
 ### 19. External Dependency Boundary
 
@@ -569,8 +673,9 @@ unbounded consumption.
 Shutdown proceeds as follows:
 
 1. enter draining and make readiness unavailable;
-2. stop admitting commands;
-3. pause or stop new broker intake while maintaining safe group behavior;
+2. close admission for every assigned partition lane;
+3. pause or stop new broker intake per partition while maintaining safe group
+   behavior;
 4. allow a bounded grace period for in-flight deterministic work;
 5. commit outcomes that finish within the durability window;
 6. never acknowledge a command without committed completed receipt, outcome,
@@ -582,11 +687,19 @@ Shutdown proceeds as follows:
 10. abandon unfinished transient work for redelivery.
 
 If a task completes during shutdown, it may commit and be acknowledged within
-the grace period. At timeout, cooperative cancellation is requested, but the
-process may terminate without every task finishing. Forced termination loses
-only transient state. A published event with unknown acknowledgment remains
-unknown under ADR-0006. Persistence failure prevents command acknowledgment and
-leaves recovery to redelivery.
+the grace period while its adapter still owns the partition assignment. At
+timeout, lifecycle cancellation is requested, but that signal does not create
+a business `TaskFailed`. Unfinished work has no completed receipt or outcome,
+is not acknowledged, and is abandoned for redelivery. The process may
+terminate without every task finishing. Forced termination loses only
+transient state.
+
+Partition revocation uses the same lifecycle-cancellation rule for the
+affected lane without stopping independent lanes. A stale handler may commit a
+truthful completed outcome, but assignment fencing prevents it from committing
+an offset after ownership is lost. A published event with unknown
+acknowledgment remains unknown under ADR-0006. Persistence failure prevents
+command acknowledgment and leaves recovery to redelivery.
 
 ### 24. Startup and Recovery
 
@@ -599,7 +712,8 @@ Startup order is:
 5. start the Agent event-outbox publisher and recover eligible records and
    expired claims;
 6. initialize the Event Bus consumer and assignment handling;
-7. start the bounded execution supervisor; and
+7. establish a fenced processing lane for each assigned partition and start
+   the bounded execution supervisor; and
 8. expose readiness only when required dependencies and recovery workers are
    usable.
 
@@ -612,6 +726,11 @@ On restart, no in-memory state is trusted. The Agent recovers event outboxes,
 resolves completed receipts and outcomes on redelivery, and recomputes
 deterministic work only when no durable outcome exists. Unknown publication
 outcomes preserve their identity and may republish under ADR-0006.
+
+Assignment and revocation callbacks create and close adapter-owned partition
+lanes. Generations, ownership tokens, offsets, and consumer objects never enter
+the capability context. After rebalance, the new owner resolves a committed
+outcome before executing; an uncommitted command may be recomputed.
 
 ### 25. Health, Readiness, and Draining
 
@@ -634,6 +753,14 @@ the capability unavailable according to configured policy. With one
 first-slice capability, a required dependency failure makes the Agent unready;
 a future multi-capability Agent may expose capability-level availability
 without making unrelated capabilities unavailable.
+
+Repeated dependency failures that show the capability cannot safely serve new
+work stop or reduce admission and make the capability or Agent unready.
+Recovery is bounded and may require operator intervention. A command already
+admitted still follows its own deterministic disposition: safely classified
+dependency failure commits one stable outcome when persistence is available;
+an infrastructure or unknown-durability failure remains unacknowledged. This
+prevents readiness failure from becoming a stream of identical task failures.
 
 No HTTP framework or monitoring backend is selected.
 
@@ -685,6 +812,7 @@ based on whether a framework calls its objects “agents.”
 Each Agent process uses one asyncio event loop for:
 
 - broker adapter coordination;
+- partition-lane assignment, pause/resume, and revocation coordination;
 - async persistence and outbox operations;
 - async dependency calls;
 - bounded execution supervision;
@@ -701,6 +829,19 @@ Known blocking I/O may use bounded `asyncio.to_thread` only when thread safety
 and non-cancellation are understood. CPU-heavy work uses a bounded process pool
 or subprocess capability adapter. No arbitrary fire-and-forget task is
 allowed.
+
+Execution-policy and lifecycle cancellation use distinct supervisor causes.
+Lifecycle cancellation abandons unfinished transient work without constructing
+a business failure. An asyncio cancellation exception is merely a control
+signal until the relevant capability or dependency boundary confirms safe
+termination.
+
+The Event Bus adapter owns partition lanes and assignment fencing. Rebalance
+callbacks close admission for revoked lanes and invalidate their offset-commit
+authority. Capability tasks receive no consumer object, offset, assignment
+generation, or ownership token. Polling remains responsive while owned
+execution tasks run, and independent partitions may advance concurrently
+within the global bound.
 
 ### 29. Capability Plugin Model
 
@@ -770,11 +911,13 @@ Without selecting a backend, Agent signals cover:
 
 - commands received, validated, admitted, backpressured, rejected, and
   acknowledged;
+- partition lanes assigned, paused, resumed, revoked, fenced, and drained;
 - duplicates, command-identity conflicts, and deterministic recomputation;
 - active execution, capacity, partition occupancy, and admission wait;
 - execution, timeout, cancellation, and drain duration;
 - success and safe failure classification;
 - dependency latency, retry, rate limit, and failure;
+- systemic dependency admission suppression and readiness transitions;
 - persistence transaction and outcome-commit latency/failure;
 - event-outbox count, oldest age, publication certainty, and failure;
 - recovered outcomes and event publications; and
@@ -827,18 +970,34 @@ Required coverage includes:
   partition pause/resume, one in-flight per partition, multiple instances,
   rebalance, fairness, and shutdown at capacity;
 - timeout/cancellation: already-expired deadline, expiry during admission or
-  execution, local execution timeout, cancellation-aware and insensitive work,
-  late publication, and terminal workflow;
+  execution, local execution timeout, confirmed execution-policy cancellation,
+  lifecycle cancellation without business failure, cancellation-aware and
+  insensitive work, late publication, and terminal workflow;
 - crash recovery: interruption before/during execution, after work before
   commit, after commit before publication, after broker acceptance before
   acknowledgment, before command offset commit, and with outbox backlog;
-- failure classification: deterministic, dependency, authentication,
-  rate-limit, persistence, internal defect, policy, and integrity failures;
+- failure classification: admitted capability dependency failure,
+  authentication/configuration failure, systemic dependency failure,
+  rate-limit exhaustion, persistence/unknown-durability infrastructure
+  failure, deterministic failure, internal defect, policy, and integrity
+  failure;
 - startup/shutdown: dependency and schema ordering, invalid configuration,
   outbox recovery priority, draining, bounded grace, forced termination, and
   persistence failure during shutdown; and
 - isolation/security: denied dependency/tool access, sanitized telemetry,
   bounded outputs, and resource-policy enforcement.
+
+Real Event Bus integration tests additionally cover:
+
+- two partitions completing out of order without cross-partition offset
+  advancement;
+- one blocked partition while another advances;
+- rebalance during execution and stale completion after revocation;
+- outcome commit before revocation with the offset still uncommitted;
+- revocation before outcome commit;
+- shutdown with work on multiple partitions;
+- duplicate redelivery to the new owner; and
+- no offset skipping under pause, resume, retry, revocation, or failure.
 
 In-memory tests do not prove PostgreSQL uniqueness, broker ordering,
 acknowledgment, process termination, thread cancellation, rebalance, or
@@ -854,7 +1013,10 @@ Vertical Slice 01 uses:
 - one built-in deterministic `text.word-count` capability;
 - small configurable in-process concurrency, bounded globally and to one
   in-flight command per assigned partition;
-- broker-aware backpressure and no durable or unbounded Agent queue;
+- independent adapter-owned per-partition lanes with assignment-fenced offset
+  commits;
+- broker-aware per-partition backpressure and no durable or unbounded Agent
+  queue;
 - no durable execution lease or public `RUNNING` state;
 - no external effect, provider, LLM, or AI Router;
 - no dynamic plugin loading or explicit cancellation command;
@@ -877,16 +1039,26 @@ The decision is:
 - Agent targets are logical deployment plus capability identities;
 - one asyncio loop and a bounded supervised worker set execute at most one
   command per partition;
-- the broker supplies durable backpressure; no unbounded memory queue exists;
+- adapter-owned partition lanes progress independently within the global bound,
+  and assignment fencing prevents stale offset commits;
+- the broker supplies durable per-partition backpressure; no unbounded memory
+  queue exists;
 - completed receipts and database uniqueness arbitrate duplicates and
   conflicts without exactly-once computation claims;
-- local cancellation is cooperative, and no explicit cancellation command
-  exists;
+- execution-policy cancellation may create `TaskFailed` only after confirmed
+  safe stop and classification; lifecycle cancellation creates no business
+  failure for unfinished work;
+- no explicit cancellation command exists;
 - timeout categories remain separate and execution uses a bounded combination
   of capability policy and remaining `task_result_deadline`;
+- a valid command expired before admission receives a finite durable
+  non-execution failure;
 - the Agent persists and publishes truthful terminal outcomes; only the
   Orchestrator accepts or rejects late events;
 - retry identity and ownership follow Section 18;
+- admitted classified dependency exhaustion becomes one durable failure, while
+  infrastructure or unknown-durability failure remains unacknowledged and
+  systemic failure closes or reduces admission;
 - external dependencies remain behind restricted ports;
 - every side-effecting Agent requires a future ADR;
 - trusted deterministic work runs in process; stronger isolation has explicit
@@ -905,13 +1077,15 @@ The decision is:
 | Guarantee | Responsible component | Durable record | Admission/concurrency mechanism | Failure window and recovery | Required proof |
 | --- | --- | --- | --- | --- | --- |
 | Supported work only | Agent validation boundary | Quarantine/rejection or no outcome | Validate before admission | Crash before disposition redelivers; permanent invalid input quarantines without execution | Contract, target, capability, and policy tests |
-| Bounded execution | Agent supervisor | None before outcome | Global bound plus one in-flight per partition | Crash loses slots and broker redelivers; no durable queue is lost | Capacity, memory, pause/resume, and rebalance tests |
+| Bounded execution | Agent supervisor and Event Bus adapter | None before outcome | Global bound plus one in-flight per partition lane | Crash loses slots and broker redelivers; no durable queue is lost | Capacity, memory, pause/resume, independent-lane, and rebalance tests |
+| Finite expired-command disposition | Agent and persistence adapter | Completed receipt, deadline-expired outcome, terminal event, and outbox | Validate before deadline disposition; skip capability admission | Invalid transport quarantines; valid expired work commits non-execution failure or remains unacknowledged until persistence recovers | Expired-on-receipt, admission-wait expiry, persistence-retry, and late-event tests |
 | One accepted outcome | Agent and persistence adapter | Completed receipt, outcome, terminal event | Unique attempt/outcome transaction | Precommit crash may recompute; postcommit duplicate reads winner | Competing execution and every commit-window test |
 | No lost terminal event after outcome | Agent outbox publisher | Outcome and event outbox in one transaction | Publisher claims are separate from execution slots | Postcommit crash resumes immutable event; unknown broker ack may duplicate | Outbox crash and lost-ack tests |
-| Partition-safe acknowledgment | Event Bus adapter and Agent handler | Completed receipt/outcome before offset | One in-flight per partition; manual acknowledgment | Precommit crash leaves offset; postcommit lost offset redelivers and deduplicates | Offset, ordering, and rebalance tests |
+| Partition-safe acknowledgment | Event Bus adapter and Agent handler | Completed receipt/outcome before offset | Ordered lane plus assignment-generation, ownership-token, or equivalent fencing | No lane advances past unfinished work; stale owner cannot commit; postcommit revoke redelivers and deduplicates | Out-of-order partitions, blocked lane, revoke-before/after-commit, stale completion, and no-skip tests |
 | Deadline cannot be reopened | Orchestrator, with truthful Agent event | Agent outcome plus Orchestrator workflow/inbox | Orchestrator row lock/revision, not Agent clock | Late commit/publication is recorded but terminal workflow remains unchanged | All deadline-race and late-event tests |
-| Cancellation claim is honest | Agent capability/dependency adapter | Terminal outcome only if one commits | Cooperative signal within bounded execution | Forced or insensitive work may continue; no stop/rollback claim is made | Cooperative, blocking, forced-stop, and external-boundary tests |
-| Safe shutdown | Agent supervisor and adapters | Any outcome committed before stop; outbox claims | Draining closes admission and bounds grace | Uncommitted work redelivers; unknown publication stays unknown | Drain, timeout, forced termination, and persistence-outage tests |
+| Cancellation claim is honest | Agent supervisor and capability/dependency adapter | Terminal outcome only for confirmed execution-policy cancellation; none for unfinished lifecycle cancellation | Typed cancellation cause plus bounded supervised execution | Async cancellation alone proves nothing; insensitive work may continue and unfinished lifecycle work redelivers | Confirmed execution stop, lifecycle cancellation, blocking, forced-stop, and external-boundary tests |
+| Deterministic dependency disposition | Agent capability/dependency and persistence adapters | Stable failure outcome when safely classified; none when infrastructure cannot persist reliably | Bounded internal retry plus systemic admission suppression | Exhausted admitted operation commits once; infrastructure failure redelivers; systemic failure becomes unready without a failure storm | Exhaustion, rate-limit, auth/config, persistence, unknown-durability, and systemic-failure tests |
+| Safe shutdown and revocation | Agent supervisor and Event Bus adapter | Any outcome committed before stop; outbox claims | Draining closes lanes, bounds grace, and fences revoked assignments | Uncommitted work redelivers; stale offset commit is rejected; unknown publication stays unknown | Multi-partition drain, revocation races, forced termination, and persistence-outage tests |
 | Framework neutrality | Agent/capability ports | Versioned platform contracts | Dependency injection and boundary review | Framework replacement cannot change message or workflow semantics | Port, contract, and forbidden-type tests |
 | No duplicate-effect guarantee | Future side-effect policy owner | None in first slice | Side effects prohibited | Any future effect blocks adoption until a separate ADR defines recovery | Architecture review and side-effect conformance gate |
 
@@ -997,18 +1171,22 @@ Review or supersede this ADR when:
 | Unbounded concurrency or queue | Hard global capacity, one in-flight per partition, bounded handoff, and broker pause/resume |
 | Long execution blocks broker polling | Separate consumer coordination from owned execution tasks and test rebalance timing |
 | Event-loop blocking | Require async ports or bounded thread/process adapters and observe loop responsiveness |
-| Async task cancellation is mistaken for external cancellation | State the cooperative boundary and never claim rollback or stop without adapter evidence |
+| Lifecycle cancellation creates an unintended business failure | Separate cancellation causes; unfinished shutdown/revocation work records no outcome and redelivers |
+| Async task cancellation is mistaken for external cancellation | Require confirmed safe stop before execution-policy failure and never claim rollback from an exception alone |
+| Already-expired command loops forever | Persist a stable non-execution failure after validation and acknowledge only after its durability boundary |
 | Deadline race | Persist truthful outcome and let Orchestrator durable state arbitrate |
 | Outcome commits after terminal workflow | Publish it as late; Orchestrator cannot reopen terminal state |
 | Work continues after drain | Bound grace, signal cancellation, terminate if necessary, and redeliver uncommitted work |
 | Memory leak or native crash | Bound tasks/resources, restart process, and trigger stronger isolation review |
-| Dependency retry storm | Bound attempts, elapsed time, concurrency, and backoff; honor cancellation and deadline |
+| Dependency retry or failure-event storm | Bound attempts, elapsed time, concurrency, and backoff; suppress admission and readiness on systemic failure |
 | One capability crashes the process | Validate inputs, catch task errors, and use subprocess/container isolation when evidence requires |
 | Dynamic plugin compromise | Do not load dynamic code in the slice; require signing, trust, rollback, and sandbox decisions later |
 | Provider SDK leaks into contracts | Inject adapters behind platform ports and prohibit SDK types at boundaries |
 | Agent framework conflicts with Orchestrator | Select plain Python and require any future framework to remain capability-internal |
 | Capability metadata becomes stale | Validate code-owned metadata with configuration at startup and fail readiness on mismatch |
 | Long task exceeds consumer timing | One in-flight per partition, responsive polling, bounded execution, and future long-running review |
+| Stale handler commits offset after rebalance | Fence commit with adapter-owned assignment generation or ownership token and test every revoke/commit ordering |
+| One partition skips unfinished work or advances another | Use ordered independent lanes and never commit progress across partitions |
 | In-memory state is treated as durable | Persist only ADR-0006 completed records and test process loss at every stage |
 | Late outcome reopens workflow | Orchestrator state/revision validation rejects terminal transitions |
 | Secret, prompt, or provider data leaks | Minimize context, sanitize telemetry, restrict outcomes, and test redaction |
@@ -1082,14 +1260,22 @@ This ADR does not decide:
 - [ ] The Orchestrator selects a logical deployment and capability target.
 - [ ] One asyncio loop, bounded owned tasks, and one in-flight command per
       partition are approved.
-- [ ] Broker-aware backpressure replaces unbounded in-memory queueing.
+- [ ] Independent ordered partition lanes progress within the global bound.
+- [ ] Broker-aware per-partition backpressure replaces unbounded in-memory
+      queueing.
+- [ ] Offset progress cannot cross unfinished records or partitions, and stale
+      assignment owners are fenced from acknowledgment.
 - [ ] Duplicate and conflict cases preserve ADR-0004 and ADR-0006 semantics.
 - [ ] No exactly-once computation or side-effect claim is made.
 - [ ] Timeout categories and owners remain distinct.
+- [ ] A valid command expired before admission receives a finite durable
+      non-execution failure after validation.
 - [ ] `task_result_deadline` is not represented as an explicit cancellation
       command.
-- [ ] Cooperative, forced, blocking, and future explicit cancellation are
-      distinguished.
+- [ ] Execution-policy, lifecycle, Orchestrator-deadline, blocking, and future
+      explicit cancellation are distinguished.
+- [ ] Lifecycle cancellation creates no business failure for unfinished work,
+      and asyncio cancellation alone proves no external stop.
 - [ ] Deadline races preserve truthful Agent outcomes and Orchestrator terminal
       authority.
 - [ ] Error classifications map safely to failure, quarantine, retry,
@@ -1098,6 +1284,9 @@ This ADR does not decide:
       atomic outbox persistence are approved.
 - [ ] Transport, internal operation, persistence, outbox, and application
       retries remain distinct.
+- [ ] Admitted classified dependency failures terminate after bounded retry,
+      infrastructure failures remain unacknowledged, and systemic failures
+      suppress admission/readiness rather than producing a failure storm.
 - [ ] External dependencies use restricted injected ports and stable
       idempotency keys where supported.
 - [ ] A future ADR is required before side-effecting execution.
@@ -1107,7 +1296,8 @@ This ADR does not decide:
       production values.
 - [ ] Startup prioritizes recoverable completed work and verifies dependencies.
 - [ ] Recovery never relies on lost in-memory execution state.
-- [ ] Draining and shutdown bound completion without unsafe acknowledgment.
+- [ ] Draining, shutdown, and partition revocation abandon unfinished work
+      without unsafe outcomes or acknowledgment.
 - [ ] Liveness, readiness, dependency health, capacity, and draining are
       distinct.
 - [ ] Configuration is validated, secret-separated, and immutable per
@@ -1124,7 +1314,9 @@ This ADR does not decide:
 - [ ] Local fakes and real Redpanda/PostgreSQL/process tests have distinct
       proof responsibilities.
 - [ ] The testing matrix covers validation, duplicates, capacity, cancellation,
-      deadline races, crashes, startup, shutdown, failure, and security.
+      deadline races, dependency disposition, crashes, startup, shutdown,
+      partition-lane independence, revocation fencing, offset skipping, and
+      security.
 - [ ] Reviewers confirm consistency with ADR-0001 through ADR-0006, Vertical
       Slice 01, the test strategy, `SECURITY.md`, and `AGENTS.md`.
 - [ ] Every open question is bounded implementation or future-policy work.
