@@ -1,6 +1,6 @@
 # ADR-0008: Capability Registry and Agent Discovery
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-27
 - **Supersedes:** None
 - **Superseded by:** None
@@ -113,7 +113,8 @@ A logical registry binding identifies at least:
 - produced terminal-event contract names and supported exact versions;
 - logical Agent deployment `agent_id`;
 - Agent implementation identity and version;
-- declaration and registry revision;
+- deployment declaration revision or digest;
+- complete Registry revision;
 - trusted provenance and environment;
 - administrative policy status;
 - availability observation and observation time when applicable.
@@ -142,8 +143,20 @@ The identities remain distinct:
 | Capability | Stable semantic work and its independent version |
 | Agent implementation | A software release that implements capabilities |
 | Agent deployment | Stable logical target in one environment |
+| Registry revision | Orchestrator-owned identity of one complete immutable Registry snapshot |
+| Deployment declaration revision/digest | Identity of one trusted Agent deployment declaration and environment binding |
+| Agent-loaded declaration identity | Proof of which deployment declaration the Agent process loaded |
 | Process instance | Ephemeral runtime member of a deployment |
 | Consumer group | Event Bus transport identity |
+
+The complete Registry revision covers every declaration, deployment binding,
+administrative policy, compatibility entry, and applicable selection-policy
+configuration. An Agent neither loads nor interprets that global revision. It
+loads its own trusted deployment declaration and reports or proves the
+corresponding deployment declaration revision/digest through readiness. A
+change elsewhere in the Registry can therefore change the Registry revision
+without changing this deployment's declaration identity or readiness.
+Process-instance identity remains telemetry only.
 
 ### 4. Capability Naming and Versioning
 
@@ -238,28 +251,36 @@ technology-neutral readiness port supplies volatile availability.
 ### 7. First-Slice Configuration-Backed Registry
 
 The deployment/release configuration is the authoritative source. The
-Orchestrator owns loading, validation, indexing, and use of the Registry. The
-capability and Agent implementation owners provide reviewed declaration
-metadata; the deployment owner binds it to an environment and `agent_id`.
+Orchestrator owns loading, validation, indexing, and use of the complete
+Registry revision. The capability and Agent implementation owners provide
+reviewed declaration metadata; the deployment owner binds it to an environment
+and `agent_id`, producing a deployment declaration revision/digest.
 
 At startup the Orchestrator:
 
-1. loads one complete trusted manifest revision;
+1. loads one complete trusted Registry revision;
 2. validates its contract version, provenance, identities, bindings, and
    compatibility;
 3. rejects duplicates and conflicts;
 4. creates one immutable in-process snapshot; and
-5. becomes platform-ready only when the snapshot is valid.
+5. makes the Registry ready only when the snapshot is valid.
 
 The snapshot is derived cache, not long-term authority. It is immutable for one
 Orchestrator process. First-slice changes require restart. Every Orchestrator
 instance receives the same immutable artifact and expected revision. Missing,
 partial, conflicting, mismatched, or invalid configuration makes that instance
-unready for new submissions. No partially valid subset is activated.
+ineligible for new submissions. It may still serve persistence-backed query,
+accepted-replay, conflict-resolution, and administrative operations when their
+own dependencies are healthy, although the overall full-service readiness
+signal may remain false. No partially valid subset is activated.
 
-The Agent independently validates that its code-owned capability metadata and
-deployment configuration agree. This check can make the Agent unready but
-cannot add or widen a trusted Registry declaration.
+The Agent loads only its trusted deployment declaration and independently
+validates that its code-owned capability metadata and deployment configuration
+agree. It exposes the loaded declaration identity through the readiness
+boundary. This check can make the Agent unready but cannot add or widen a
+trusted Registry declaration. An unrelated declaration change does not make
+the Agent unready when its own declaration digest and routing binding are
+unchanged.
 
 ### 8. Declaration Ownership and Provenance
 
@@ -273,8 +294,9 @@ Responsibilities are:
 | Orchestrator | Registry validation, compatibility, eligibility, and lookup |
 | Release/deployment pipeline | Reproducible artifact revision and promotion evidence |
 
-Provenance includes a manifest/registry revision, release or source identity,
-deployment environment, issuer/owner classification, and validation time.
+Provenance includes the complete Registry revision, each deployment declaration
+revision/digest, release or source identity, deployment environment,
+issuer/owner classification, and validation time.
 Production distribution must be authenticated or otherwise trusted and
 tamper-evident according to deployment policy; this ADR selects no signing
 technology. An Agent cannot self-assert a new capability or make itself
@@ -289,9 +311,13 @@ acceptance, and production bindings are distinct and cannot cross-register.
 
 One deployment may expose several explicitly bound capabilities. Several
 deployments may expose the same capability but use distinct `agent_id` values.
-Multiple process instances of one deployment share its `agent_id` and consumer
-group. Hostname, container ID, process ID, IP address, Kafka member ID, pod name,
-and consumer-group member are never portable deployment identity.
+Multiple process instances of one deployment share its `agent_id`. Instances
+that consume the same logical Event Bus subscription use that deployment
+subscription's configured consumer-group identity. A deployment may support
+multiple logical subscriptions in the future, each with separate transport
+configuration. Hostname, container ID, process ID, IP address, Kafka member ID,
+pod name, consumer-group name, and consumer-group member are never portable
+deployment or capability identity.
 
 ### 10. Registry Data Model
 
@@ -303,6 +329,8 @@ The technology-neutral model contains logical records equivalent to:
 - capability-to-deployment binding;
 - command/event contract compatibility;
 - immutable registry revision;
+- deployment declaration revision/digest and Agent-loaded declaration identity;
+- trusted readiness-routing binding;
 - volatile availability observation; and
 - deprecation, disablement, and security-policy status.
 
@@ -312,6 +340,13 @@ and eligibility are derived. Lookup indexes and caches are disposable.
 Operational timestamps and failure detail are metadata. Durable workflow/task
 selection records provide historical audit. Static declaration and volatile
 availability are never collapsed into one field.
+
+The readiness-routing binding is trusted, environment-specific deployment
+configuration associated with one `agent_id` and deployment declaration
+digest. It contains adapter-owned target information plus indirect credential
+and trust references, never raw secrets. It is validated before use, hidden
+from workflow/domain logic, replaceable behind the availability adapter, and
+grants neither capability permission nor contract compatibility.
 
 ### 11. Static Declaration Versus Dynamic Availability
 
@@ -332,6 +367,19 @@ Transient health never changes capability identity or version.
 
 The first-slice model separates:
 
+- **Process liveness:** the Orchestrator process, event loop, and runtime are
+  responsive.
+- **Registry readiness:** one complete active Registry snapshot is loaded,
+  valid, and queryable.
+- **Core/API readiness:** required API and persistence dependencies plus a
+  valid Registry snapshot support the full documented API. A Registry failure
+  may make this full readiness signal false while safe persistence-backed
+  retrieval, accepted replay, conflict resolution, health, and administration
+  remain operational in a degraded mode.
+- **New-submission capability eligibility:** candidate lookup finds at least
+  one compatible, enabled, policy-permitted, fresh-enough deployment.
+- **Deployment availability:** a bounded recent observation for one logical
+  Agent deployment; it reserves no capacity and guarantees no execution.
 - **Administrative status:** `enabled`, `disabled`, or `deprecated`, from
   trusted configuration.
 - **Observed availability:** `ready`, `unavailable`, `draining`, `stale`, or
@@ -344,6 +392,12 @@ unavailable, draining, stale, and unknown are temporary observations.
 Stale/unknown are ineligible. These are Registry operational concepts, not
 public workflow states.
 
+One unavailable Agent or ordinary short saturation does not make the
+Orchestrator process dead or necessarily make the full API unready. Workflow
+retrieval never depends on Agent readiness, and accepted replay never repeats
+selection. Capability-level ineligibility is exposed independently from
+process, Registry, and core/API readiness.
+
 ### 13. Availability Inputs
 
 | Input | What it proves | What it does not prove | Initial use |
@@ -353,6 +407,7 @@ public workflow states.
 | Event heartbeat | Recent publication | Capability correctness or consumer ownership | Not selected |
 | Database heartbeat/lease | Writer recently updated state | End-to-end Agent readiness | Not selected |
 | Deployment configuration | Permission and intended support | Runtime availability | Selected declaration authority |
+| Readiness-routing binding | Where the availability adapter should observe one declared deployment | Capability permission, compatibility, or successful execution | Selected adapter configuration |
 | Operator override | Administrative enable/disable intent | Process health | Selected configuration policy |
 | Recent execution | Past success | Present readiness | Observability only |
 | Consumer-group membership | Transport member exists | Correct capability, capacity, or permission | Not eligibility evidence |
@@ -369,15 +424,28 @@ technology-neutral availability port to the configured logical `agent_id`.
 The adapter may use an operational endpoint, but no HTTP framework or payload
 shape is selected here.
 
-The check verifies the expected `agent_id`, registry/declaration revision or
-equivalent configuration identity, capability name/version, command support,
-terminal-event support, non-draining state, and required Agent dependencies
-from ADR-0007. A timeout, identity mismatch, unsupported declaration, invalid
-response, or connection failure yields an unavailable/unknown observation and
-fails closed.
+The availability adapter resolves `agent_id` through its trusted
+environment-specific readiness-routing binding. That binding is tied to the
+expected deployment declaration digest and contains opaque adapter target
+information and indirect credential/trust references. URLs, hosts, ports,
+certificates, credential values, and protocol objects remain inside deployment
+configuration and the adapter; they never enter portable commands, events,
+workflow models, or capability code.
+
+The check verifies the expected `agent_id`, Agent-loaded deployment declaration
+identity, capability name/version, command support, terminal-event support,
+non-draining state, and required Agent dependencies from ADR-0007. It does not
+require the Agent to know the complete Registry revision. A missing or invalid
+route, credential failure, identity/digest mismatch, wrong-environment target,
+stale replacement route, unsupported declaration, timeout, invalid response,
+or connection failure yields an unavailable/unknown observation and fails
+closed. Reachability cannot create a Registry binding, widen capability or
+contract support, or make an undeclared deployment eligible.
 
 Results may be cached for a short configured TTL. The cache key includes
-deployment, capability/contract set, environment, and registry revision.
+deployment, deployment declaration digest, readiness-routing identity,
+capability/contract set, and environment. An unrelated Registry revision change
+does not invalidate the observation when all of those values remain unchanged.
 Equivalent accepted `request_id` replay bypasses readiness and current
 selection. New requests with no eligible candidate return
 `AGENT_TEMPORARILY_UNAVAILABLE` before workflow creation. Workflow retrieval
@@ -388,23 +456,28 @@ Event Bus, Agent recovery, and `task_result_deadline`, not Registry mutation.
 
 Availability stores an observation time and uses local monotonic age for TTL
 decisions. Wall-clock UTC may be retained for audit but does not establish
-distributed order. A registry revision mismatch invalidates the observation
-immediately.
+distributed order. A changed deployment declaration digest, environment
+binding, readiness-routing identity, or reported Agent-loaded declaration
+identity invalidates that deployment's observation immediately. A change to an
+unrelated declaration changes the complete Registry revision but does not
+invalidate this observation.
 
 Orchestrator restart begins with no trusted availability cache. Agent restart,
 crash, or network partition can produce a false-positive window no longer than
 the TTL plus detection/clock margin. A failed refresh marks the observation
-unknown or stale; it does not extend the old result indefinitely. A new
-manifest revision, process drain response, identity mismatch, or explicit
-disable invalidates cached readiness immediately. Stale and unknown fail closed
-for new dispatch.
+unknown or stale; it does not extend the old result indefinitely. A changed
+deployment declaration/routing identity, process drain response, Agent-loaded
+identity mismatch, or explicit disable invalidates cached readiness
+immediately. An unrelated Registry revision change does not. Stale and unknown
+fail closed for new dispatch.
 
 ### 16. Registration and Refresh Lifecycle
 
 The lifecycle is:
 
-1. load the complete trusted declaration revision;
-2. validate structure, semantics, provenance, identity, and environment;
+1. load the complete trusted Registry revision and its deployment declarations;
+2. validate structure, semantics, provenance, identity, environment, and every
+   readiness-routing binding without exposing adapter details to domain logic;
 3. reject duplicate, conflicting, unknown, or ambiguous declarations;
 4. derive an immutable compatibility index;
 5. initialize candidate availability as unknown and optionally start a
@@ -412,16 +485,25 @@ The lifecycle is:
 6. expose Registry readiness and allow workflow queries independently of Agent
    readiness;
 7. refresh an absent or stale observation on demand before a new submission;
-8. invalidate observations by age, failure, revision, drain, or disablement;
+8. invalidate observations by age, failure, deployment declaration/routing
+   identity change, drain, or disablement;
 9. apply configuration changes by process restart in the first slice;
 10. stop new selection before safe declaration removal; and
-11. record safe load, validation, observation, selection, and change evidence.
+11. construct one stable selection intent before workflow acceptance and
+    record safe supplementary load, validation, observation, and change
+    evidence.
 
 Steps 1–6 are startup work, but Step 5 never blocks platform/API readiness on
 the Agent. Steps 7–8 are runtime work. Optional background prewarming may
 reduce latency but cannot extend TTL or change fail-closed semantics. Step 9 is
 operator/restart based. Dynamic registration, leases, and push refresh are
 future behavior. No partial revision becomes visible.
+
+Selection is not complete at logging. Before entering the ADR-0006 workflow
+submission transaction, the Orchestrator freezes the candidate, compatibility,
+active Registry revision, deployment declaration digest, policy, and bounded
+availability evidence into one stable selection intent. Section 26 defines its
+atomic durability boundary.
 
 ### 17. Atomic Registry Revision
 
@@ -443,6 +525,13 @@ leaves already running processes on their prior valid snapshot, while instances
 configured for the failed revision remain unready. Rollback redeploys a prior
 trusted revision. The used revision is durably recorded with selection.
 
+A Registry revision change caused only by an unrelated deployment does not
+change an Agent's declaration identity or invalidate its readiness. A changed
+binding, declaration digest, readiness route, environment, or applicable
+selection policy does invalidate the affected candidate evidence. One
+submission transaction uses one captured snapshot and one stable selection
+intent; it never combines declarations from two revisions.
+
 ### 18. Multi-Orchestrator Consistency
 
 In steady state, all first-slice Orchestrators use the same trusted revision.
@@ -457,10 +546,11 @@ Availability observations may differ within the bounded TTL. This can change
 whether an otherwise compatible new request is temporarily accepted, but
 cannot permit an incompatible deployment. Concurrent submissions remain
 protected by ADR-0004/ADR-0006 request idempotency. Each accepted selection
-records `agent_id`, registry revision, and selection evidence. Revision
-divergence is observable; an unapproved old instance is drained through
-deployment coordination rather than assumed to detect the new artifact.
-Cache warm-up begins unknown.
+atomically records `agent_id`, complete Registry revision, deployment
+declaration digest, and the same stable selection intent. Revision divergence
+is observable; an unapproved old instance is drained through deployment
+coordination rather than assumed to detect the new artifact. Cache warm-up
+begins unknown.
 
 ### 19. Candidate Lookup
 
@@ -473,6 +563,11 @@ availability metadata.
 The Registry does not publish commands, choose partitions, create workflows,
 mutate workflow state, or execute tasks. Ordering makes results reproducible;
 it is not the selection policy.
+
+Lookup is evaluated against one captured Registry snapshot. Its result includes
+the deployment declaration digest and readiness-routing identity needed to
+validate availability evidence. Lookup does not create durable selection
+evidence by itself.
 
 ### 20. Selection Policy Boundary
 
@@ -487,6 +582,12 @@ versioned. Stable priority is the preferred first extension. Round-robin,
 weighted, least-loaded, and locality-aware policies are not selected. The
 selected target is logical `agent_id`, never a process instance.
 
+After choosing the candidate, the Orchestrator constructs one stable selection
+intent. If no workflow transaction committed, it may discard that intent,
+re-evaluate current candidates, and construct a new intent as an explicit new
+selection attempt. It must first resolve any unknown transaction outcome and
+must not change the candidate or evidence inside a database transaction retry.
+
 ### 21. Multiple Deployments for One Capability
 
 The model permits distinct `agent_id` bindings for equivalent implementations,
@@ -495,9 +596,11 @@ and deprecation states. Capability-name equality alone does not make them
 interchangeable. Environment boundaries are applied before candidate return.
 
 Different deployments require distinct `agent_id` values. Multiple replicas of
-one deployment share its `agent_id`; the Event Bus consumer group distributes
-work among them. Registry ordering is deterministic, but a future selection
-policy must explicitly choose among multiple eligible deployments.
+one deployment share its `agent_id`. Instances consuming the same logical
+subscription use that subscription's configured consumer-group identity; a
+future deployment may have multiple logical subscriptions and transport group
+identities. Registry ordering is deterministic, but a future selection policy
+must explicitly choose among multiple eligible deployments.
 
 ### 22. Capacity and Load Information
 
@@ -582,15 +685,34 @@ The accepted task/attempt selection durably retains:
 - capability name/version;
 - Agent implementation identity/version;
 - selected command and terminal-event contract versions;
-- registry revision;
+- complete Registry revision;
+- selected deployment declaration revision/digest;
 - selection-policy identity/version;
 - availability classification and observation time or evidence reference; and
 - selection timestamp.
+
+Before the ADR-0006 workflow submission transaction, the Orchestrator
+constructs one immutable selection intent containing those values. The same
+transaction atomically commits that intent with the accepted-request mapping,
+workflow, task, task attempt, transition history, immutable selected command,
+and Orchestrator outbox. A workflow, task, attempt, or command outbox record
+must never exist without complete selection evidence.
+
+Database transaction retry preserves the exact selection intent, including its
+semantic selection time and readiness observation, even when that observation
+ages during retry. The bounded retry is the same acceptance attempt.
+Reselection is allowed only after a definitively uncommitted attempt is
+abandoned, any unknown commit outcome is resolved, current candidates are
+re-evaluated, and a new stable intent is created. Commit success followed by
+API response loss resolves through the accepted-request mapping and returns the
+stored selection without rerunning readiness or selection.
 
 Volatile endpoint, hostname, process, consumer-member, partition, and raw
 health detail are excluded. This evidence explains why the selection was
 compatible without reconstructing a lost in-memory Registry. It does not make
 the observation a guarantee that execution subsequently succeeded.
+Logs and any optional Registry audit sink are supplementary; this atomic
+workflow selection record is authoritative.
 
 ### 27. Event Bus Routing Relationship
 
@@ -598,10 +720,19 @@ Registry selection produces logical `agent_id` plus capability/contract
 identity. The Event Bus adapter maps that target to deployment-owned transport
 routing under ADR-0005.
 
+Readiness routing is different: the availability adapter maps `agent_id` plus
+deployment declaration digest to the trusted operational target used to
+observe that deployment. Event Bus routing delivers `ExecuteTask`; readiness
+routing performs a bounded observation. They may both be indexed by
+`agent_id`, but have different protocols, credentials, failure behavior, and
+adapter ownership.
+
 Topic, partition, consumer-group name, broker host, and process membership are
 adapter configuration and never domain identity. Routing may be configured by
 deployment and indexed internally by `agent_id`, but portable contracts and
-Registry domain queries do not expose broker topology.
+Registry domain queries do not expose broker topology. Readiness URLs, hosts,
+ports, certificates, and trust material likewise remain adapter configuration.
+Neither routing mapping grants a capability declaration or eligibility.
 
 ### 28. Failure Behavior
 
@@ -609,8 +740,13 @@ Registry domain queries do not expose broker topology.
 | --- | --- | --- |
 | Missing/invalid/partial configuration | Instance unready; fail closed | Queries and accepted replay remain available when persistence/API are usable |
 | Duplicate/conflicting declaration or ambiguous compatibility | Reject entire revision | Prior valid process snapshot may continue during controlled rollback |
+| Missing/invalid readiness route, credential failure, or wrong environment | Candidate unavailable/unknown; create nothing | Audit safe classification; correct trusted deployment configuration |
+| Agent-loaded declaration identity mismatch or stale replacement route | Candidate ineligible; invalidate cached observation | Existing commands keep their recorded logical target and recover normally |
 | Readiness timeout, stale result, or all unavailable | `AGENT_TEMPORARILY_UNAVAILABLE`; create nothing | Already-dispatched work continues to deadline/recovery |
-| Revision changes during submission | Retry against one snapshot or reject | Never record a mixed revision |
+| Revision changes during selection before transaction intent | Re-evaluate against one snapshot or reject | Never record a mixed revision |
+| Observation ages during database transaction retry | Preserve the same stable selection intent | If committed, audit the original semantic selection time; reselection only after definitive noncommit |
+| Crash after selection before transaction | Create no workflow records; select again on retry | No log or transient intent is authoritative |
+| Commit succeeds but API response is lost | Resolve accepted `request_id` and return stored workflow/selection | Never rerun readiness or selection |
 | Stale Orchestrator revision | Remove instance from submission readiness | It must not silently dispatch under old policy |
 | Selected Agent fails after acceptance | No reselection of the same attempt | Event Bus recovery and `task_result_deadline` apply |
 | Refresh failure | Mark observation unknown/stale | Do not extend readiness indefinitely |
@@ -619,8 +755,11 @@ Registry domain queries do not expose broker topology.
 Equivalent accepted `request_id` replay returns the existing workflow without
 Registry lookup. Conflicting replay still returns `REQUEST_ID_CONFLICT`.
 Workflow retrieval remains available. Registry failure does not mutate
-workflows or create application retries. Liveness can remain healthy while
-Registry readiness for new submissions is false.
+workflows or create application retries. Process liveness can remain healthy
+and persistence-backed retrieval/replay can remain operational while Registry
+or full core/API readiness is false. One unavailable deployment affects
+capability eligibility, not process liveness. Ordinary short Agent saturation
+does not flap the whole Orchestrator readiness signal.
 
 ### 29. Security and Trust
 
@@ -631,6 +770,9 @@ The Registry requires:
 - exact manifest, provenance, identity, environment, and contract validation;
 - no unauthorized Agent self-registration or capability widening;
 - stable deployment identity and anti-spoofing checks on readiness;
+- trusted readiness-routing bindings associated with `agent_id`, declaration
+  digest, and environment;
+- indirect credential/trust references with no raw secrets in routes;
 - environment separation and explicit production enablement approval;
 - restricted readiness endpoints and authenticated transport as appropriate;
 - no secrets, credentials, private endpoints, or sensitive topology in
@@ -646,20 +788,27 @@ signing service, identity provider, or secrets manager.
 
 Without selecting a backend, signals include:
 
-- Registry load, validation, activation, rollback, and active revision;
+- Registry load, validation, activation, rollback, and active complete
+  Registry revision;
+- deployment declaration digest, Agent-loaded identity match, and
+  readiness-routing validation;
 - declaration, deployment, capability, and compatible-candidate counts;
 - invalid, duplicate, conflicting, and deprecated declarations;
 - availability classification, age, stale count, refresh latency, and failure;
 - candidate lookup input classification, outcome, and no-candidate reason;
 - selected deployment and selection-policy version;
+- selection-intent construction and atomic workflow-acceptance disposition;
 - revision mismatch and cache warm-up across Orchestrators;
 - drain, disable, removal, and deprecated-version use; and
 - readiness false-positive/negative evidence discovered later.
 
 Safe context may include capability/version, `agent_id`, implementation
-version, registry revision, selection-policy version, availability class, and
-workflow/task identifiers. Credentials, raw health bodies, private endpoints,
-and sensitive topology are excluded by default.
+version, Registry revision, deployment declaration digest, selection-policy
+version, availability class, and workflow/task identifiers. Process, Registry,
+core/API, capability-eligibility, and deployment-availability signals are
+reported separately. Credentials, routing targets, raw health bodies, private
+endpoints, and sensitive topology are excluded by default. Logs never replace
+the durable atomic selection record.
 
 ### 31. Local Development
 
@@ -668,6 +817,11 @@ or multiple Orchestrators on the same revision, and multiple Test Agent process
 instances under one logical deployment. It supports controlled invalid,
 unavailable, stale, mismatch, restart, and revision scenarios on Windows,
 Linux, Docker, and Unraid.
+
+Local deployment configuration supplies a readiness-routing binding for the
+Test Agent without placing its host, port, or credentials in portable
+contracts. Tests can replace the availability adapter target independently of
+Event Bus routing.
 
 Unit/component tests may use direct Registry domain objects, in-memory
 configuration, controlled clocks, and fake availability ports. Contract tests
@@ -689,14 +843,25 @@ Tests align with `docs/testing/README.md` and cover:
 - **Loading:** success, missing/partial/invalid input, failed activation,
   immutable atomic replacement, rollback, and multi-Orchestrator mismatch.
 - **Availability:** ready, unavailable, timeout, stale, restart, network
-  partition, drain, saturation, dependency failure, cache invalidation, and
+  partition, drain, saturation, dependency failure, declaration-digest change,
+  unchanged digest across unrelated Registry revision, cache invalidation, and
   recovery.
+- **Readiness routing:** missing/invalid route, credential failure, identity
+  mismatch, wrong environment, stale replacement route, secret rejection, and
+  separation from Event Bus routing.
 - **Selection:** zero/one/multiple candidates, deterministic set, stable
   priority extension, unavailable/disabled candidate, and durable selected
   `agent_id` plus revision.
 - **Failure:** configuration loss, all unavailable, post-dispatch failure,
   accepted replay and retrieval during Registry outage, rolling deployment,
   stale instance, and no partially accepted workflow.
+- **Atomic selection:** crash after selection before transaction, commit then
+  API-response loss, retry preserving identical evidence, observation becoming
+  stale during retry, Registry rollout during concurrent submission, and no
+  workflow/task/attempt/outbox without complete selection intent.
+- **Readiness layers:** process live with unavailable capability, Registry
+  invalid with safe query/replay degradation, one unavailable Agent, ordinary
+  saturation, and independent Registry/core/capability/deployment signals.
 - **Security:** unauthorized declaration, spoofed identity, untrusted readiness,
   environment crossover, restricted administration, and audit evidence.
 
@@ -725,6 +890,10 @@ atomic boundary, Git/release history provides version and audit evidence, and
 the same artifact can initialize multiple Orchestrators. Availability remains
 a separate runtime observation, so file staleness is detected by revision
 rather than health leases. Migration is through the Registry loader port.
+The same trusted environment configuration category supplies readiness-routing
+bindings, but their opaque targets and credential/trust references are consumed
+only by the availability adapter and do not become Registry domain data or
+portable contracts.
 
 Python objects are useful validated runtime representations but cannot be the
 cross-component or Git-owned authority. PostgreSQL could provide transactional
@@ -762,7 +931,9 @@ Technology-neutral capabilities remain explicit for:
 - loading one trusted immutable Registry snapshot and revision;
 - validating declarations, provenance, conflicts, and compatibility;
 - finding deterministic compatible candidates;
-- observing one deployment's availability;
+- resolving and validating an adapter-owned readiness route for one declared
+  `agent_id` and deployment declaration digest;
+- observing one deployment's availability without exposing its route;
 - invalidating stale observations;
 - exposing the active revision and Registry readiness; and
 - recording safe Registry and selection audit evidence.
@@ -780,16 +951,24 @@ Vertical Slice 01 uses:
 - a versioned trusted configuration-backed Registry;
 - one immutable fully validated snapshot per Orchestrator process;
 - one declared Test Agent deployment and `text.word-count` `1.0`;
+- distinct complete Registry revision, deployment declaration digest, and
+  ephemeral process identity;
 - exact capability matching and ADR-0004 exact declared contract support;
 - restart-based Registry revision changes;
-- one technology-neutral Agent readiness check with a bounded cache TTL;
+- one trusted readiness-routing binding behind a technology-neutral Agent
+  readiness check with a bounded cache TTL;
 - `ready`, `unavailable`, `draining`, `stale`, and `unknown` observations;
 - fail-closed eligibility for new submissions;
 - accepted-request replay and workflow queries independent of readiness;
+- atomic selection intent committed with the accepted workflow, task, attempt,
+  command, transition history, and Orchestrator outbox;
+- distinct process, Registry, core/API, capability-eligibility, and
+  deployment-availability signals;
 - no database Registry authority, dynamic registration, heartbeat topic,
   service-discovery platform, load-based selection, or hot reload; and
 - durable `agent_id`, capability/contract versions, implementation version,
-  Registry revision, selection-policy version, and bounded readiness evidence.
+  Registry revision, deployment declaration digest, selection-policy version,
+  and bounded readiness evidence.
 
 ### 36. Coherent Capability Registry Architecture
 
@@ -801,12 +980,16 @@ The decision is:
   independent and compatibility is explicitly declared;
 - trusted deployment configuration is the initial authority;
 - stable `agent_id` represents a logical environment-scoped deployment;
-- one complete immutable revision is validated and activated atomically;
+- the complete Registry revision and per-deployment declaration digests are
+  distinct, and Agents report only their loaded declaration identity;
+- one complete immutable Registry revision is validated and activated
+  atomically;
 - static permission and dynamic readiness are separate;
-- bounded direct readiness observation is selected initially and stale/unknown
-  fails closed;
-- all Orchestrators require the same declaration revision but may have bounded
-  observation differences without consensus;
+- trusted adapter-owned readiness routing enables bounded direct observation;
+  reachability grants no permission and stale/unknown fails closed;
+- steady-state Orchestrators use the same complete Registry revision, with only
+  explicitly approved rolling overlap and bounded observation differences
+  without consensus;
 - Registry lookup returns a deterministic candidate set; the Orchestrator
   selection policy selects;
 - the first policy requires exactly one configured eligible candidate;
@@ -814,11 +997,13 @@ The decision is:
 - volatile load is not a selection input;
 - drain stops new selection without rewriting accepted work;
 - upgrades use expand-and-contract;
-- configuration is authoritative, memory is cache, and workflow selection is
-  durable audit;
-- Event Bus routing remains an adapter concern;
+- configuration is authoritative, memory is cache, and the stable selection
+  intent commits atomically with workflow acceptance;
+- readiness routing and Event Bus routing are separate adapter concerns;
 - equivalent request replay and workflow retrieval do not depend on Registry
   availability;
+- process liveness, Registry readiness, core/API readiness, capability
+  eligibility, and deployment availability remain distinct;
 - declarations and readiness are least-privilege trust boundaries;
 - observability and tests expose revision, compatibility, and freshness
   failures; and
@@ -828,15 +1013,17 @@ The decision is:
 
 | Guarantee | Authority and validator | Revision/identity | Failure window and fail-closed behavior | Durable evidence and proof |
 | --- | --- | --- | --- | --- |
-| Only declared capability is selectable | Trusted configuration; Registry validator | Registry revision, capability, `agent_id` | Invalid/ambiguous revision never activates | Selection audit; declaration/conflict tests |
+| Only declared capability is selectable | Trusted configuration; Registry validator | Registry revision, deployment declaration digest, capability, `agent_id` | Invalid/ambiguous revision never activates | Atomic selection record; declaration/conflict tests |
 | Contract-compatible dispatch | Manifest support plus ADR-0004; Registry and command producer | Capability and exact command/event versions | Unknown version yields no candidate | Task contract fields and revision; cross-version tests |
 | Atomic Registry view | Complete artifact; Orchestrator loader | Immutable revision | Partial/failed load exposes no new snapshot | Active-revision audit; partial/reload/rollback tests |
-| Fresh-enough availability | Agent readiness port; Registry availability policy | `agent_id`, capability, observation age | False-positive bounded by TTL; stale/unknown is ineligible | Selection observation; controlled-clock and process/network tests |
-| Multi-Orchestrator compatibility | Same deployment artifact; each Orchestrator | Expected Registry revision | Mismatch makes stale instance submission-unready | Workflow revision audit; rolling/mismatch tests |
+| Fresh-enough availability | Trusted readiness route, Agent-loaded identity, and Registry availability policy | `agent_id`, deployment declaration digest, route identity, observation age | Route/digest mismatch or stale/unknown is ineligible; false-positive bounded by TTL | Atomic selection evidence; controlled-clock, wrong-route, digest, and process/network tests |
+| Multi-Orchestrator compatibility | Same deployment artifact; each Orchestrator | Complete Registry revision plus per-deployment digests | Unapproved Registry mismatch makes stale instance submission-unready; unchanged deployment digest can retain readiness | Workflow revision/digest audit; rolling/mismatch tests |
 | Deterministic candidates | Active snapshot; Registry lookup | Revision plus lookup criteria | No runtime trial; ambiguity fails closed | Lookup/selection audit; ordering and multiple-candidate tests |
 | Replay survives Registry outage | Accepted-request store; Workflow API | `request_id`, workflow identity | No Registry re-evaluation for accepted replay | Accepted-request record; outage replay tests |
-| Historical selection remains interpretable | Workflow/task persistence; Orchestrator | `agent_id`, capability/contracts, Registry/policy revisions | Removal cannot erase evidence | Durable task record; drain/removal/replay tests |
+| Atomic interpretable selection | ADR-0006 workflow transaction; Orchestrator | Stable intent with `agent_id`, capability/contracts, Registry/deployment/policy revisions | Pretransaction crash creates nothing; retry preserves intent; lost response resolves accepted mapping | Durable workflow/task/attempt/command/outbox evidence; crash/retry/lost-response/completeness tests |
 | Reachability cannot grant permission | Trusted declaration and security policy; Registry | Environment and provenance | Spoofed readiness cannot add a binding | Safe security audit; spoof/environment tests |
+| Readiness layers remain independent | Orchestrator operations and Registry/capability policies | Process, Registry, core/API, capability, and deployment signals | Agent outage blocks only affected new selection; Registry outage may degrade full readiness while query/replay continue | Operation records and metrics; unavailable-Agent, invalid-Registry, replay/query, and saturation tests |
+| Routing boundaries stay separate | Trusted environment configuration; readiness and Event Bus adapters | `agent_id`, deployment digest, independent route identities | A missing readiness route makes the candidate unavailable; neither route changes declaration permission | Adapter boundary, wrong-route, secret, and Event Bus/readiness separation tests |
 | Broker topology stays internal | Deployment routing config; Event Bus adapter | Logical `agent_id` | Missing route fails publication/operation, never changes identity | Command target and adapter diagnostics; boundary tests |
 
 ### 37. Consequences
@@ -844,6 +1031,9 @@ The decision is:
 #### Positive Consequences
 
 - Compatibility, permission, readiness, selection, and routing are explicit.
+- Global Registry identity, deployment declaration identity, and process
+  identity cannot be conflated.
+- Complete selection evidence cannot diverge from workflow acceptance.
 - The first slice remains simple, Git-first, local, and reproducible.
 - Immutable revisions make candidate decisions explainable and rollback safe.
 - Future dynamic discovery can replace adapters without changing Registry
@@ -855,6 +1045,8 @@ The decision is:
 - Readiness caches necessarily permit bounded false positives and negatives.
 - Multiple Orchestrators may temporarily disagree on availability.
 - Operators must coordinate revision promotion and Agent readiness.
+- Operators must maintain trusted readiness-routing bindings separately from
+  Event Bus routing.
 - Multiple-candidate scheduling remains deliberately limited.
 
 #### Migration Impact
@@ -866,9 +1058,10 @@ sources must preserve authority, revision, audit, and fail-closed semantics.
 
 #### Developer Impact
 
-Developers must keep static declaration separate from observations, pass
-Registry revision through selection audit, use exact compatibility, and avoid
-infrastructure types in domain code.
+Developers must keep static declaration separate from observations, distinguish
+Registry and deployment declaration revisions, construct stable selection
+intent, use exact compatibility, and keep readiness/Event Bus routing types out
+of domain code.
 
 #### CI Impact
 
@@ -899,11 +1092,15 @@ declaration-signing policy becomes necessary.
 
 | Risk | Mitigation |
 | --- | --- |
-| Stale Registry/readiness data | Immutable revisions, bounded TTL, revision invalidation, fail closed |
+| Stale Registry/readiness data | Immutable Registry revisions, bounded TTL, deployment-scoped identity invalidation, fail closed |
+| Unrelated Registry change makes a healthy Agent unready | Key observations by deployment declaration and routing identity, not the complete Registry revision |
+| Agent is required to understand global Registry revision | Compare Agent-loaded declaration identity with only the expected deployment digest |
 | Incompatible Agent selection | Exact declared intersections and no syntax-only inference |
 | Duplicate/conflicting declarations | Reject the complete revision |
 | Unauthorized registration | Trusted source and no first-slice self-registration |
 | Readiness false positive/negative | Bound cache window, observe it, and rely on post-dispatch deadline recovery |
+| Missing, stale, or wrong-environment readiness route | Validate trusted route binding and declaration digest; fail candidate closed |
+| Readiness reachability grants capability permission | Require trusted declaration and compatibility independently |
 | Agent unavailable after dispatch | Preserve selected attempt; Event Bus/outcome/deadline recovery |
 | Rolling deployment mismatch | Expected revision gate and durable revision audit |
 | One stale Orchestrator dispatches | Remove mismatched instance from submission readiness |
@@ -917,6 +1114,9 @@ declaration-signing policy becomes necessary.
 | Discovery service exceeds deployment need | Select no dedicated service |
 | Registry outage blocks replay | Accepted replay and retrieval bypass Registry |
 | Missing audit evidence | Persist `agent_id`, versions, Registry/policy revisions, and selection evidence |
+| Selection log exists but workflow evidence does not | Commit one stable selection intent in the ADR-0006 workflow transaction; logs remain supplementary |
+| Transaction retry silently changes selection | Preserve intent through retry; reselect only after definitive noncommit and unknown-outcome resolution |
+| One Agent outage flaps the entire API | Separate deployment/capability eligibility from process, Registry, and core/API readiness |
 | Environment crossover | Environment-scoped trust and validation |
 | Stale `agent_id` reused incorrectly | Stable ownership, provenance, and no reassignment without explicit migration |
 
@@ -925,7 +1125,8 @@ declaration-signing policy becomes necessary.
 - ADR-0001 through ADR-0007 remain Accepted.
 - Vertical Slice 01 has one configured Test Agent deployment and capability.
 - Deployment configuration can be delivered identically to Orchestrator
-  instances and identified by a stable revision.
+  instances and identifies both the complete Registry revision and each
+  deployment declaration digest.
 - The Agent exposes bounded readiness through a technology-neutral adapter.
 - Orchestrator persistence can retain selection audit fields.
 - Clocks are sufficient for local age measurement but not distributed order.
@@ -938,7 +1139,8 @@ declaration-signing policy becomes necessary.
 These do not leave the core Registry model undecided:
 
 1. What exact YAML or JSON manifest format and schema are used?
-2. What exact digest or release identifier forms the Registry revision?
+2. What exact digest or release identifier forms the Registry revision and
+   each deployment declaration identity?
 3. Where is deployment configuration mounted or injected?
 4. What readiness timeout, cache TTL, and stale threshold fit measured startup
    and failure detection?
@@ -962,39 +1164,54 @@ execution.
 
 - [ ] Registry definition and Orchestrator ownership are approved.
 - [ ] Registry responsibilities exclude scheduling, routing, and execution.
-- [ ] Capability, implementation, deployment, process, and consumer identities
-      remain distinct.
+- [ ] Capability, implementation, deployment, complete Registry revision,
+      deployment declaration, Agent-loaded declaration, process, and consumer
+      identities remain distinct.
 - [ ] Capability naming and independent version ownership are explicit.
 - [ ] Exact first-slice compatibility and ADR-0004 contract rules align.
 - [ ] Trusted configuration is the first-slice declaration authority.
 - [ ] Declaration ownership, provenance, and environment trust are explicit.
 - [ ] Stable deployment identity supports replicas and multiple deployments.
+- [ ] Instances sharing a logical Event Bus subscription use its configured
+      consumer group without making that group deployment identity.
 - [ ] Static authority, observations, derived data, cache, and audit are
       separated.
 - [ ] Administrative, observed, and derived availability states are distinct.
 - [ ] Availability inputs state what they do and do not prove.
 - [ ] Readiness checks are bounded, identity-aware, and independent of queries.
+- [ ] Readiness routing is trusted adapter configuration associated with
+      `agent_id`, deployment declaration digest, and environment, with indirect
+      credential/trust references and no portable topology.
 - [ ] Accepted-request replay bypasses current Registry selection.
-- [ ] Monotonic age, revision mismatch, and fail-closed staleness are approved.
+- [ ] Monotonic age, deployment declaration/routing mismatch, and fail-closed
+      staleness are approved without invalidating Agents for unrelated Registry
+      changes.
 - [ ] Load, validation, observation, refresh, invalidation, and audit lifecycle
       is complete.
 - [ ] One complete immutable Registry revision activates atomically.
-- [ ] Multi-Orchestrator consistency requires the same declaration revision
-      without introducing consensus.
+- [ ] Multi-Orchestrator consistency requires the same steady-state complete
+      Registry revision, with controlled rolling overlap and no consensus.
 - [ ] Candidate lookup is deterministic and does not perform selection.
 - [ ] The first selection policy requires exactly one eligible candidate.
+- [ ] One stable selection intent commits atomically with accepted request,
+      workflow, task, attempt, history, command, and Orchestrator outbox.
+- [ ] Transaction retry preserves selection intent; reselection requires
+      definitive noncommit and a new explicit selection attempt.
 - [ ] Multiple deployments use distinct `agent_id`; replicas share one.
 - [ ] Correctness does not depend on volatile load.
 - [ ] Drain, disable, removal, and historical identity retention are explicit.
 - [ ] Rolling upgrade follows expand-and-contract without synchronized release.
 - [ ] Configuration authority and nonpersistent observation/cache are approved.
-- [ ] Durable workflow audit captures selection interpretation fields.
-- [ ] Event Bus routing remains behind the adapter.
+- [ ] Durable workflow audit captures both Registry and deployment declaration
+      identities and is authoritative over supplementary logs.
+- [ ] Readiness routing and Event Bus routing remain distinct adapter concerns.
 - [ ] Every failure preserves replay/query behavior and fails new selection
       closed where required.
 - [ ] Least privilege, anti-spoofing, environment separation, and no secrets
       align with `SECURITY.md`.
 - [ ] Observability is sufficient without selecting a backend.
+- [ ] Process liveness, Registry readiness, core/API readiness, capability
+      eligibility, and deployment availability are distinct.
 - [ ] Local development needs no external discovery system.
 - [ ] Tests distinguish in-memory proof from real process/network behavior.
 - [ ] Dedicated Registry technologies are rejected for the initial scale.
