@@ -15,6 +15,7 @@ technical and structural choices.
 | [ADR-0006](ADR-0006-persistence-state-and-recovery.md) | Persistence, State, and Recovery | Accepted |
 | [ADR-0007](ADR-0007-agent-execution-model-and-lifecycle.md) | Agent Execution Model and Lifecycle | Accepted |
 | [ADR-0008](ADR-0008-capability-registry-and-agent-discovery.md) | Capability Registry and Agent Discovery | Accepted |
+| [ADR-0009](ADR-0009-observability-telemetry-and-audit-correlation.md) | Observability, Telemetry, and Audit Correlation | Proposed |
 
 ## Naming
 
