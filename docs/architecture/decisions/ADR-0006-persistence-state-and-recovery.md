@@ -1,7 +1,7 @@
 # ADR-0006: Persistence, State, and Recovery
 
-- **Status:** Proposed
-- **Date:** 2026-07-26
+- **Status:** Accepted
+- **Date:** 2026-07-27
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -30,12 +30,13 @@ The accepted ADRs do not conflict on persistence ownership or messaging
 semantics. The following nonbinding Vertical Slice 01 text requires explicit
 interpretation:
 
-- its Agent transaction requires command receipt, outcome, and event outbox to
-  commit atomically, while its recovery text also describes a crash after a
-  receipt is stored but before an outcome is stored. Both cannot be durable
-  failure windows in the first-slice transaction. This ADR chooses the atomic
-  transaction: before that commit, deterministic work may be repeated; after
-  it, the receipt, outcome, and event outbox all exist;
+- its Agent transaction requires a completed command receipt, outcome, terminal
+  event, and event outbox to commit atomically, while its recovery text also
+  describes a crash after a receipt is stored but before an outcome is stored.
+  Both cannot be durable failure windows in the first-slice transaction. This
+  ADR chooses the atomic transaction: before that commit, deterministic work
+  may be repeated; after it, the completed receipt, outcome, event, and event
+  outbox all exist;
 - its logical-record list includes a configured manifest even though the
   Capability Registry is configuration-backed. This ADR treats the manifest as
   configuration authority and any database copy as rebuildable diagnostic
@@ -73,13 +74,14 @@ table.
 
 | Durable responsibility | Owner | Classification | Purpose |
 | --- | --- | --- | --- |
-| Workflow current state | Orchestrator | Authoritative business state | Current five-state snapshot, result or safe failure, revision, and recovery timestamps |
+| Workflow current state | Orchestrator | Authoritative business state | One current state selected from the five accepted workflow states, result or safe failure, revision, and recovery timestamps |
 | Workflow transition history | Orchestrator | Append-only audit history | Every accepted logical state transition and its cause |
 | Accepted API request | Orchestrator | Authoritative idempotency state | `request_id`, canonical fingerprint, fingerprint-policy version, workflow identity, and initial acceptance result |
 | Task and task attempt | Orchestrator | Authoritative business state | Selected Agent, attempt identity, command identity, deadline, and terminal outcome relationship |
 | Orchestrator outbox | Orchestrator | Transport recovery state | One immutable `ExecuteTask` publication and recoverable publication disposition |
-| Orchestrator inbox | Orchestrator | Transport recovery and deduplication state | Durable processing disposition for one consumer and event `message_id` |
-| Agent command receipt | Agent deployment | Business-idempotency and transport-recovery state | Relationship among `task_attempt_id`, command `message_id`, command digest, and retained outcome |
+| Orchestrator domain inbox | Orchestrator | Transport recovery and deduplication state | Durable processing disposition after a validated event `message_id` is established |
+| Transport rejection or quarantine recovery | Consuming component | Pre-domain transport recovery state | Stable disposition and quarantine progress for a broker delivery that lacks trusted domain identity |
+| Agent completed command receipt | Agent deployment | Business-idempotency and transport-recovery state | Proof that a validated command identity is durably associated with its accepted outcome and terminal event |
 | Agent outcome | Agent deployment | Authoritative Agent business state | The one accepted result for a `task_attempt_id` |
 | Agent event outbox | Agent deployment | Transport recovery state | One immutable terminal event and recoverable publication disposition |
 | Claim or lease metadata | Record owner | Disposable operational metadata | Short ownership of outbox publication work; not workflow or Agent execution state |
@@ -87,7 +89,8 @@ table.
 
 The current workflow snapshot is authoritative for queries. Transition history
 is a mandatory audit companion, not a projection built from the Event Bus.
-Outbox, inbox, receipt, claim, and publication records are not workflow state.
+Outbox, domain inbox, transport rejection, completed receipt, claim, and
+publication records are not workflow state.
 Derived state is limited to rebuildable query projections, aggregate
 operational counters, and an optional diagnostic copy of the
 configuration-backed capability manifest. Losing derived state must not change
@@ -160,8 +163,10 @@ to:
 - an accepted-request repository for atomic request arbitration;
 - task and task-attempt repositories;
 - an Orchestrator outbox repository;
-- an Orchestrator inbox or consumer-deduplication repository;
-- an Agent receipt and outcome repository;
+- an Orchestrator domain-inbox or consumer-deduplication repository;
+- a transport rejection or quarantine-recovery repository owned by each
+  consuming component;
+- an Agent completed-receipt and outcome repository;
 - an Agent event-outbox repository; and
 - an outbox claim repository capability.
 
@@ -186,8 +191,8 @@ methods without losing correctness:
 - crash-safe, exclusive, expiring outbox claims;
 - append-only transition recording in the same transaction as current state;
 - isolation and durability adequate for each transaction; and
-- deterministic recovery queries for unpublished, claimed, expired, and
-  nonterminal work.
+- deterministic recovery queries for not-attempted, unconfirmed,
+  unknown-outcome, claimed, expired, and nonterminal work.
 
 An alternative adapter must prove these capabilities even if it implements
 them differently.
@@ -230,10 +235,14 @@ together. `DISPATCHED` means the command is durably recorded, not published.
 
 #### Workflow Outcome-Processing Transaction
 
+This transaction begins only after the consumer has validated the immutable
+message identity required by ADR-0004.
+
 One transaction:
 
 1. locks or conditionally selects the current workflow aggregate;
-2. inserts or resolves the inbox key `(consumer_id, message_id)`;
+2. inserts or resolves the domain-inbox key
+   `(logical_consumer_id, validated_message_id)`;
 3. validates the immutable message identity, expected `task_attempt_id`,
    current revision, and legal `DISPATCHED` terminal transition;
 4. applies `COMPLETED` or `FAILED` to the workflow, task, and attempt;
@@ -245,12 +254,48 @@ record and required domain effects commit together. A duplicate returns the
 stored processing disposition. Late or conflicting outcomes cannot change a
 terminal workflow and receive a stable recorded disposition.
 
+#### Pre-Identity Transport-Rejection Transactions
+
+A broker record that cannot establish a trusted ADR-0004 `message_id` never
+enters the domain inbox. The consuming component instead identifies the
+delivery by stable transport metadata: logical subscription, physical topic or
+equivalent source, partition, and offset. A SHA-256 digest of the original
+received bytes may supplement that identity for integrity and diagnosis.
+Topic, partition, offset, and the digest are transport metadata and never
+become fields in the portable domain-message envelope.
+
+The quarantine failure window is:
+
+1. receive the invalid broker record;
+2. in a short transaction, create or resolve the unique transport-delivery
+   locator and its stable opaque `rejection_id`, safe failure classification,
+   and original-bytes digest when retained;
+3. publish the quarantine record outside the database transaction using the
+   stable `rejection_id`;
+4. after broker acknowledgment, durably record quarantine confirmation in a
+   short transaction; and
+5. commit the source offset only after that durable confirmation.
+
+Malformed JSON, a missing or invalid `message_id`, an unparseable envelope,
+conflicting duplicate properties, and equivalent pre-identity damage follow
+this path. A crash before Step 2 leaves no rejection record and redelivery
+retries classification. A crash after Step 2 resumes the same rejection. A
+crash or lost acknowledgment after Step 3 may cause duplicate quarantine
+publication, but every copy preserves the same `rejection_id`. A crash after
+Step 4 but before Step 5 resolves the confirmed rejection on redelivery and
+commits the source offset without another required quarantine publication.
+
+A permanently rejected message with an already validated `message_id` may use
+the domain inbox for its stable processing disposition. Its quarantine
+publication status remains transport recovery state and must still satisfy the
+same acknowledge-before-source-offset rule.
+
 #### Agent Outcome Transaction
 
 Actual task execution occurs outside a database transaction. After deterministic
 work completes, one transaction:
 
-1. creates or resolves the command receipt;
+1. creates or resolves the completed command receipt;
 2. enforces one outcome per `task_attempt_id`;
 3. stores the outcome and first terminal timestamp;
 4. stores the immutable `TaskCompleted` or `TaskFailed` bytes and
@@ -265,8 +310,10 @@ one durable outcome, not exactly-once computation.
 
 Claiming an eligible outbox record is a short database transaction. Broker
 publication occurs outside it. Broker acknowledgment is recorded in another
-short transaction guarded by the claim token. No database and Event Bus
-distributed transaction exists.
+short transaction guarded by the claim token. Publication attempt certainty is
+also recorded durably as defined in Section 13. No database and Event Bus
+distributed transaction exists, and the database cannot infer broker
+acceptance when the transport outcome is unknown.
 
 ### 6. Workflow State Model
 
@@ -296,6 +343,12 @@ outcome wins only when its durable outcome-processing transaction accepts the
 deadline transition wins and the event is late. This defines a deterministic
 durable-acceptance boundary; an in-memory receive timestamp cannot overrule
 committed state after a crash.
+
+The deadline transition does not establish whether an in-flight or
+unacknowledged broker publication was accepted. A command that was confirmed
+or may have been published can still reach the Agent after the workflow becomes
+`FAILED`. Its terminal event is processed as late, remains diagnosable, and
+cannot reopen or replace the terminal workflow state.
 
 The workflow snapshot is rebuilt only for recovery testing or repair
 verification. Normal queries read the snapshot. Verification can fold ordered
@@ -365,12 +418,13 @@ The required scenarios behave as follows:
 | Scenario | Control |
 | --- | --- |
 | Two API requests with one `request_id` | Unique request identity; winner commits, loser reads and compares the stored policy/fingerprint |
-| Two Orchestrators process one event | Unique inbox key plus short workflow lock and revision check |
-| Duplicate Event Bus delivery | Consumer/message inbox uniqueness; domain state validation remains a second guard |
+| Two Orchestrators process one valid event | Unique domain-inbox key plus short workflow lock and revision check |
+| Duplicate valid Event Bus delivery | Logical-consumer/message inbox uniqueness; domain state validation remains a second guard |
+| Duplicate pre-identity invalid delivery | Unique transport-delivery locator resolves one stable rejection identity |
 | Late task outcome | Terminal-state and expected-attempt validation |
 | Conflicting outcomes | First valid terminal transition wins; later conflict is retained as a safe disposition and cannot overwrite |
 | Concurrent outbox publishers | `SKIP LOCKED` eligibility, short claim, expiring token, and token-guarded completion |
-| Multiple Agent instances receive one command | Broker group ownership reduces concurrency; Agent receipt and one-outcome uniqueness remain authoritative |
+| Multiple Agent instances receive one command | Broker group ownership reduces concurrency; Agent completed-receipt and one-outcome uniqueness remain authoritative |
 | Crashed transaction owner | Database rollback removes uncommitted work; committed claim leases expire; broker redelivers unacknowledged work |
 
 Pessimistic locks are kept short and never cover Agent work or broker calls.
@@ -420,8 +474,13 @@ Database-enforced uniqueness applies to:
 - `workflow_id`, `task_id`, and `task_attempt_id`;
 - task attempt number within one task;
 - command and event `message_id` within the producing outbox;
-- `(consumer_id, message_id)` within each consumer inbox;
-- one Agent receipt identity relationship for a `task_attempt_id`;
+- `(logical_consumer_id, validated_message_id)` within each domain inbox;
+- the pre-identity transport-delivery locator composed of logical subscription,
+  physical source, partition, and offset;
+- the platform-created `rejection_id` associated with one transport-delivery
+  locator;
+- one Agent completed-receipt identity relationship for a
+  `task_attempt_id`;
 - one Agent outcome and one terminal event identity per `task_attempt_id`; and
 - outbox message identity and per-workflow/channel creation sequence.
 
@@ -432,6 +491,11 @@ The same `message_id` intentionally appears in its producer outbox, one or more
 broker records after duplicate publication, and the inbox of every independent
 consumer. Different consumers therefore record the same message independently;
 `message_id` alone is not globally unique across all inbox rows.
+
+Transport delivery coordinates and `rejection_id` are operational identities,
+not domain-message fields. The optional original-bytes digest detects or
+diagnoses inconsistent redelivery but does not replace the unique transport
+delivery locator.
 
 Application prechecks improve error reporting but never replace constraints.
 
@@ -475,7 +539,8 @@ Both component outboxes follow these rules:
   state stored separately from immutable message content;
 - lost acknowledgments may cause duplicate publication with identical bytes,
   key, and `message_id`;
-- unpublished records survive restart;
+- records without durably confirmed broker acknowledgment survive restart,
+  including attempts whose outcome is unknown;
 - publishers may run concurrently through short claims;
 - claims expire after process failure and use a unique fencing token so a stale
   owner cannot finalize a newer claim;
@@ -485,6 +550,22 @@ Both component outboxes follow these rules:
 - a poison record blocks only later records for the same
   `(logical_channel, workflow_id)` when order requires it, not unrelated
   workflows or channels.
+
+Publication certainty has three minimum semantic states:
+
+- **not attempted or definitively not accepted:** no publication attempt has
+  crossed the broker handoff, or the adapter has trustworthy evidence that the
+  broker did not accept it;
+- **broker acknowledgment durably confirmed:** the broker acknowledged
+  acceptance and that acknowledgment was committed to persistence; and
+- **attempted, outcome unknown:** an attempt crossed the broker handoff but no
+  trustworthy acceptance or rejection was durably established.
+
+Unknown is not equivalent to unpublished. The database retains the immutable
+record, original `message_id`, attempt evidence, and unknown certainty. Recovery
+may republish the same logical message, producing an allowed duplicate. It
+must never reset the record to “not attempted” or claim that database state
+proves the broker did not accept it.
 
 Outbox order is not global. Each component assigns a durable creation sequence
 within `(logical_channel, workflow_id)`. A publisher may claim only the earliest
@@ -504,53 +585,98 @@ must match the current token, so a stale publisher may at worst cause a
 duplicate broker publication and cannot overwrite the newer owner's durable
 state.
 
+Retry exhaustion does not automatically skip a poison record. The record and
+its ordering scope remain blocked until an explicitly authorized operator
+assigns a technology-neutral terminal disposition such as manually resolved,
+abandoned, superseded, or unrecoverable. The action must preserve the immutable
+original record and record the authorizer, timestamp, safe reason
+classification, supporting audit evidence, and assessed impact on workflow
+correctness.
+
+Later records in the same `(logical_channel, workflow_id)` scope may proceed
+only when that terminal disposition explicitly concludes that continuation is
+safe. If skipping the record would violate an active workflow's domain
+correctness, the workflow fails closed and later publication does not continue.
+Retry exhaustion alone never authorizes continuation.
+
 ### 14. Inbox and Consumer Deduplication
 
-The deduplication key is `(consumer_id, message_id)`. Consumer identity is a
-stable logical subscription or handler identity, not a process instance.
+#### Domain Inbox
 
-For a valid message, the inbox processing disposition is inserted or finalized
-in the same transaction as all required domain effects. It may retain a bounded
-safe result summary needed to answer duplicates. It is never marked completed
-before those effects commit.
+The domain inbox is used only after the complete immutable message has been
+parsed sufficiently to establish a trusted, contract-valid `message_id`. Its
+key is `(logical_consumer_id, validated_message_id)`. Logical consumer identity
+is a stable subscription or handler identity, not a process instance.
 
-- A crash before commit leaves no completed inbox record and the broker message
-  remains unacknowledged.
+The processing disposition is inserted or finalized in the same transaction as
+all required domain effects. It may retain a bounded safe result summary needed
+to answer duplicates. It is never marked completed before those effects
+commit.
+
+- A crash before commit leaves no completed domain-inbox record and the broker
+  message remains unacknowledged.
 - A crash after commit but before broker acknowledgment causes redelivery; the
   consumer returns the stored disposition and acknowledges without repeating
   the transition.
-- The same message delivered to another consumer has a different deduplication
-  key and is processed independently.
-- A duplicate whose original result was success returns success; a duplicate
-  whose original disposition was late, conflict, or permanent rejection
-  returns that same safe disposition.
+- The same message delivered to another logical consumer has a different key
+  and is processed independently.
+- A duplicate whose original result was success, late, conflict, or permanent
+  rejection returns the same safe disposition.
 
-Permanently invalid messages are not labeled successfully processed. Their
-inbox or rejection-recovery record distinguishes validation failure,
-authorization failure, unsupported contract, and other safe classifications.
-ADR-0005 quarantine acknowledgment must complete before the source offset
-advances. If a crash occurs first, redelivery resumes the same quarantine
-disposition rather than applying domain effects.
+A message with a validated identity that later fails authorization, semantic,
+or supported-contract checks is never labeled successfully processed. Its
+stable rejection disposition may be recorded in the domain inbox, while
+quarantine-publication progress remains transport recovery state.
 
-Deduplication cleanup is safe only after the related broker retention and
-authorized redrive horizon. Replay after that horizon does not receive the
-message-level deduplication guarantee; workflow transition checks and Agent
-outcome uniqueness remain defenses, but side-effecting replay requires a
-separate policy.
+#### Transport Rejection and Quarantine Recovery
 
-### 15. Agent Receipt and Execution Idempotency
+When trusted domain identity cannot be extracted, no domain-inbox record is
+created. A separate recovery record is unique by logical subscription,
+physical topic or equivalent source, partition, and offset. It owns one stable
+`rejection_id`, safe failure classification, optional SHA-256 digest of the
+original received bytes, quarantine-publication certainty, and source-offset
+completion status.
+
+These broker coordinates are adapter-owned transport metadata. They remain
+outside the ADR-0004 envelope and are not copied into the domain message.
+
+The recovery sequence and crash behavior are the five-step boundary in Section
+5. Redelivery resolves the existing transport locator. Lost quarantine
+acknowledgment may cause duplicate quarantine publication, but every attempt
+uses the same `rejection_id` and remains diagnosable. Durable quarantine
+confirmation followed by a source-offset commit is the only successful
+terminal path; no malformed message is treated as domain-processed.
+
+Domain-inbox and transport-rejection cleanup are safe only after the related
+broker retention and every authorized redrive horizon. Replay after that
+horizon does not receive the same durable deduplication guarantee; workflow
+transition checks and Agent outcome uniqueness remain defenses, but
+side-effecting replay requires a separate policy.
+
+### 15. Agent Completed Receipt and Execution Idempotency
 
 The Agent model distinguishes:
 
-- delivery or observation in process, which is not durable acceptance;
+- in-memory command observation, which is not durable acceptance or a work
+  claim;
+- a future optional execution claim or lease, which is absent from Vertical
+  Slice 01;
 - deterministic task execution outside a transaction;
-- the completed command receipt, outcome, and event outbox, which commit
-  together;
+- the completed durable command receipt, outcome, terminal event, and event
+  outbox, which commit together;
 - event publication state; and
 - broker command acknowledgment.
 
-The durable receipt retains `task_attempt_id`, command `message_id`, a digest of
-the immutable command bytes, and the outcome relationship.
+The completed durable receipt retains `task_attempt_id`, command `message_id`,
+a digest of the immutable command bytes, and the outcome relationship. It
+proves that the command identity was durably associated with one accepted
+outcome and that the outcome, terminal event, and event outbox committed.
+Redelivery can therefore return the stored outcome or republish the stored
+event.
+
+It does not prove that execution was durably claimed before work, computation
+started only once, computation occurred exactly once, or an external side
+effect was fenced.
 
 | Input condition | Behavior |
 | --- | --- |
@@ -603,21 +729,33 @@ Orchestrator and Agent publishers use the same recovery contract.
 
 | Failure | Recovery |
 | --- | --- |
-| Publisher restart | Scan eligible unpublished, expired-claim, and retryable-failed records |
-| Database commit before publication | Publish the durable immutable record |
-| Broker acknowledgment loss | Republish the same bytes and `message_id`; consumer deduplicates |
-| Crash after broker acceptance | Claim expires; another publisher republishes if acknowledgment was not durably recorded |
+| Publisher restart | Scan not-attempted, definitively-not-accepted, unknown-outcome, expired-claim, and retryable-failed records |
+| Database commit before first publication attempt | Publish the durable immutable record unless a workflow deadline safely suppresses the definitively unaccepted command |
+| Broker acknowledgment durably confirmed | Retain the immutable record and confirmation; no recovery publication is required |
+| Broker acceptance followed by lost acknowledgment | Preserve unknown certainty and republish the same bytes and `message_id` when recovery retries; consumers deduplicate |
+| Crash during or after an in-flight attempt | Claim expires; because acceptance may have occurred, recovery preserves unknown certainty and may republish |
 | Malformed stored message | Mark an integrity-failed disposition, retain bytes securely, alert, and continue unrelated workflows |
 | Unsupported stored contract | Quarantine the outbox record for operator action; never rewrite it to a newer contract |
-| Repeated publication failure | Retain failed state, attempts, next eligibility or terminal operator-required disposition |
+| Repeated publication failure | Retain failed state and attempts; block the ordering scope until retry resumes or an authorized terminal operator disposition resolves it |
 | Broker outage | Pause publication, preserve backlog, fail readiness when policy requires, and resume after recovery |
-| Expired workflow deadline | Atomically fail the workflow and visibly suppress an unpublished command; a possibly accepted command remains safe as a late duplicate |
+| Deadline before first attempt or after definitive nonacceptance | Atomically fail the workflow and visibly suppress further publication while preserving the immutable outbox record |
+| Deadline during an in-flight or unknown-outcome attempt | Atomically fail the workflow, retain uncertainty for reconciliation, and allow recovery to republish the same logical command; any Agent outcome is late |
 | Concurrent publishers | Claim token and expiration ensure one current owner; stale owners cannot mark a newer claim published |
 | Graceful shutdown | Stop claiming, finish or relinquish in-flight work within a bound, and leave unconfirmed records recoverable |
 
+A relational database cannot decide whether the broker accepted an
+unknown-outcome attempt. Suppression is permitted only for a command that was
+never attempted or is known not to have been accepted. Confirmed or uncertain
+commands can still arrive after `task_result_deadline`; their events are late
+and cannot reopen the terminal workflow.
+
 A failed record blocks only its workflow and logical channel when publishing a
 later record would violate order. It cannot block unrelated workflow keys or
-the other logical channel. No outgoing message is silently discarded.
+the other logical channel. After retry exhaustion, only the authorized,
+audited terminal disposition in Section 13 can release that scope, and only
+when continuing is safe. An active workflow fails closed when skipping would
+break correctness. No outgoing message is silently discarded or automatically
+skipped.
 
 ### 18. Ordering Across Persistence and Event Bus
 
@@ -643,6 +781,13 @@ No relationship is inferred between `task-commands` and `task-outcomes` topic
 offsets. Database commit timestamps and broker timestamps are diagnostic only
 and cannot establish cross-system causality; identifiers and explicit
 causation do.
+
+Retry exhaustion preserves the ordering barrier for the affected
+`(logical_channel, workflow_id)`. Later records in that scope cannot be claimed
+until an authorized terminal disposition records why continuation is safe.
+When it is not safe, the workflow fails closed and the barrier remains until
+the operator completes the documented terminal resolution. Other workflow keys
+and channels continue independently.
 
 ### 19. Deadlocks, Serialization Failures, and Retries
 
@@ -685,8 +830,9 @@ The initial PostgreSQL database contains separately owned component schemas:
 
 - the Orchestrator schema owns accepted requests, workflows, tasks, attempts,
   transitions, its inbox, its outbox, and publisher metadata; and
-- one Test Agent deployment schema owns command receipts, outcomes, its event
-  outbox, and publisher metadata shared by that deployment's instances.
+- one Test Agent deployment schema owns completed command receipts, outcomes,
+  its event outbox, and publisher metadata shared by that deployment's
+  instances.
 
 Runtime roles can use only their component schema. They cannot directly query
 or mutate another component's records. Application cross-schema transactions
@@ -723,7 +869,7 @@ component-owned schemas and roles**.
 This preserves the two required local transaction boundaries:
 
 - Orchestrator workflow state with its command outbox; and
-- Agent receipt and outcome with its event outbox.
+- Agent completed receipt and outcome with its event outbox.
 
 Those transactions never span components, so the schemas can later move to
 separate physical databases without changing domain or message contracts.
@@ -748,8 +894,8 @@ All durability-dependent operations fail closed.
 | Workflow submission | Create nothing durably; return a safe temporary/internal failure and require the same `request_id` on retry |
 | Workflow retrieval | Return no stale in-memory state; report dependency failure |
 | Orchestrator event processing | Do not acknowledge the Event Bus record |
-| Orchestrator outbox publishing | Stop claiming or updating records; committed backlog remains |
-| Agent command handling | Do not acknowledge work that requires a receipt/outcome commit |
+| Orchestrator outbox publishing | Stop claiming or updating records; committed backlog and every publication-certainty state remain unchanged |
+| Agent command handling | Do not acknowledge work that requires a completed-receipt/outcome commit |
 | Agent event publication | Preserve committed event outbox; resume later |
 | Health | Liveness may remain healthy; readiness becomes unhealthy when required persistence or schema compatibility is absent |
 | Shutdown | Stop intake, bound in-flight completion, roll back incomplete transactions, and leave messages unacknowledged |
@@ -757,6 +903,11 @@ All durability-dependent operations fail closed.
 In-memory buffering cannot substitute for a required durable write. Recovery
 resumes from database records and unacknowledged broker messages after
 connectivity and schema compatibility return.
+
+Loss of persistence during an in-flight broker publication cannot be converted
+to definitive nonacceptance. Recovery reads the last durable certainty state;
+if the attempt may have crossed the broker handoff, it is treated as unknown
+and reconciled or republished with the same immutable identity.
 
 Agent unavailability does not affect workflow queries, but persistence
 unavailability necessarily does because the database is the workflow source of
@@ -771,36 +922,40 @@ Exact periods are deployment policy, but relationships are architectural:
   idempotency horizon;
 - accepted-request policy data remains at least as long as duplicate
   submissions can be honored and cannot point to a deleted workflow;
-- inbox/deduplication records remain at least as long as broker retention plus
-  every authorized quarantine/redrive window;
-- Agent receipts and outcomes remain at least as long as a command can be
-  replayed or an outcome must be queried or republished;
+- domain-inbox and transport-rejection records remain at least as long as
+  broker retention plus every authorized quarantine/redrive window;
+- Agent completed receipts and outcomes remain at least as long as a command
+  can be replayed or an outcome must be queried or republished;
 - completed outboxes and publication metadata remain until acknowledgment,
   recovery, audit, backup, and lost-acknowledgment windows are satisfied;
-- failed or quarantined records remain until authorized disposition and audit
-  requirements complete; and
+- failed, quarantined, and terminally disposed outbox records retain their
+  immutable original content, authorization, reason, impact assessment, and
+  audit evidence until all recovery and audit requirements complete; and
 - transition history follows workflow audit and privacy policy and is not
   discarded merely because current state is terminal.
 
 Cleanup is bounded, restartable, idempotent, observable, and ordered by
-dependency. It never deletes deduplication or outcomes while corresponding
-messages remain replayable. It records safe counts, oldest eligible age, last
-progress, and failures. Storage-pressure cleanup cannot silently shorten a
-correctness window.
+dependency. It never deletes deduplication, rejection identity, completed
+receipts, outcomes, or poison-record disposition evidence while corresponding
+messages remain replayable or an ordering decision remains auditable. It
+records safe counts, oldest eligible age, last progress, and failures.
+Storage-pressure cleanup cannot silently shorten a correctness window.
 
 ### 24. Backup, Restore, and Disaster Recovery
 
 Infrastructure must provide consistent database backups and, where the selected
 deployment supports it, point-in-time recovery. Backups include both component
-schemas, migration state, outboxes, inboxes, receipts, outcomes, and transition
-history. Restore procedures and data integrity are tested, not inferred from a
-successful backup command.
+schemas, migration state, outboxes, domain inboxes, transport-rejection
+records, completed receipts, outcomes, and transition history. Restore
+procedures and data integrity are tested, not inferred from a successful backup
+command.
 
 Database restore and Event Bus restore or replay are coordinated:
 
-- restored unpublished outboxes may republish with stable IDs;
-- broker replay after database restore is deduplicated by restored inboxes and
-  authoritative state;
+- restored outboxes without confirmed acknowledgment may republish with stable
+  IDs according to their retained certainty;
+- broker replay after database restore is deduplicated by restored domain
+  inboxes, transport-rejection records, and authoritative state;
 - consumer offsets are broker state, not database truth, and may be reset only
   under an explicit recovery plan;
 - restored Agent outcomes permit stable event republication;
@@ -834,8 +989,8 @@ Persistence requires:
   rotation;
 - restricted database and backup administration with auditable use;
 - parameterized SQL and runtime validation at every trust boundary;
-- no secrets in workflow, outbox, inbox, receipt, transition, failure, or
-  migration records;
+- no secrets in workflow, outbox, domain-inbox, transport-rejection, completed
+  receipt, transition, failure, or migration records;
 - minimized workflow input and Agent outcome retention;
 - protected access to full workflow input, outcomes, outbox bytes, and
   backups; and
@@ -856,11 +1011,15 @@ Without selecting a backend, components expose safe signals for:
 - connection-pool use, waiters, timeouts, and saturation;
 - workflow revision and transition conflicts;
 - equivalent and conflicting `request_id` reuse;
-- duplicate message detection and inbox growth;
+- duplicate valid-message detection, domain-inbox growth, and
+  transport-rejection growth;
 - outbox backlog count, oldest age, claims, publication attempts, and failed
-  records;
-- Agent receipt, command-digest, and outcome conflicts;
-- expired deadlines and suppressed outbox messages;
+  records, including not-attempted, confirmed, and unknown-outcome certainty;
+- poison-blocked ordering scopes, terminal operator dispositions,
+  authorizations, and reason classifications;
+- Agent completed-receipt, command-digest, and outcome conflicts;
+- expired deadlines, safely suppressed messages, uncertain publications, and
+  late outcomes;
 - cleanup eligibility, progress, and failure;
 - migration version and compatibility;
 - backup/restore status where infrastructure exposes it; and
@@ -907,11 +1066,21 @@ Required real-database integration and resilience coverage includes:
   serialization retry;
 - outbox: commit before publisher start, broker outage, lost acknowledgment,
   duplicate publication, crash and restart, concurrent publishers,
-  per-workflow/channel order, poison record isolation, deadline suppression,
-  and claim takeover;
-- inbox: crash before commit, crash after commit before broker acknowledgment,
-  duplicate message, independent consumers, permanent rejection, cleanup, and
-  replay;
+  per-workflow/channel order, poison record isolation, retry-exhaustion
+  blocking, authorized terminal resolution, unsafe-continuation failure,
+  deadline before the first publication attempt, deadline during an in-flight
+  publication, broker acceptance followed by lost acknowledgment, republishing
+  after deadline, late Agent outcome, no workflow reopening, and claim
+  takeover;
+- domain inbox: crash before commit, crash after commit before broker
+  acknowledgment, duplicate validated `message_id`, independent logical
+  consumers, valid-identity permanent rejection, cleanup, and replay;
+- transport rejection: malformed JSON, missing or invalid `message_id`,
+  unparseable envelope, conflicting duplicate properties, stable
+  source-coordinate identity, optional byte-digest mismatch, crash before and
+  after quarantine publication, lost quarantine acknowledgment, duplicate
+  quarantine publication with one `rejection_id`, and crash after quarantine
+  confirmation before source-offset commit;
 - Agent durability: duplicate and conflicting commands, different bytes under
   one message ID, crash before/during/after execution and around outcome/event
   publication, and one durable outcome per attempt;
@@ -965,9 +1134,13 @@ The selected architecture is:
 - optimistic workflow revisions plus short row locks for transition
   application;
 - transactional Orchestrator and Agent outboxes;
-- atomic consumer inbox/domain updates;
-- atomic Agent receipt/outcome/event-outbox persistence after deterministic
-  work;
+- atomic valid-message domain-inbox/domain updates;
+- separate durable pre-identity transport-rejection and quarantine recovery;
+- atomic Agent completed-receipt/outcome/terminal-event/event-outbox
+  persistence after deterministic work;
+- explicit not-attempted, confirmed, and unknown outbox-publication certainty;
+- authorized terminal disposition before a poison outbox ordering barrier can
+  be released;
 - short skip-locked outbox claims with expiring fenced tokens;
 - no Agent execution lease in Vertical Slice 01;
 - bounded database transaction and publication retries;
@@ -981,21 +1154,20 @@ The selected architecture is:
 | Guarantee | Durable record | Transaction and enforcement | Crash window and recovery | Required proof |
 | --- | --- | --- | --- | --- |
 | One workflow per accepted `request_id` | Accepted request plus workflow | Submission transaction; unique `request_id` and fingerprint policy | Before commit: nothing; after commit/lost response: retry resolves existing | Concurrent equivalent/conflicting and lost-response tests |
-| No state-to-command loss | Workflow, transitions, Orchestrator outbox | One submission transaction; immutable outbox ID | Commit before publish: publisher recovers; lost ack: duplicate same ID | Commit/publisher crash/lost-ack tests |
+| No state-to-command loss | Workflow, transitions, Orchestrator outbox | One submission transaction; immutable outbox ID | Commit before publish: publisher recovers; lost ack remains unknown and may duplicate the same ID | Commit/publisher crash/lost-ack tests |
 | Legal workflow transitions only | Current workflow revision plus transition history | Outcome/deadline transaction; row lock, revision, state check | Rollback leaves old state; after commit redelivery sees inbox/terminal state | Duplicate, late, conflict, invalid-edge, two-instance tests |
-| One processed effect per consumer/message | Inbox disposition | Inbox and domain update transaction; unique `(consumer_id, message_id)` | Before commit redelivery retries; after commit/before offset duplicate returns disposition | Both crash-window and independent-consumer tests |
-| One durable Agent outcome | Receipt, outcome, Agent outbox | One Agent outcome transaction; unique attempt/outcome/event | Before commit deterministic recomputation; after commit publisher/receipt recovery | Every Agent crash-window and concurrency test |
-| Stable duplicate publication | Immutable outbox bytes and publication state | Precreated message ID; token-guarded publish finalization | Ack loss republishes same bytes; consumer deduplicates | Byte equality and duplicate-publication test |
+| One processed effect per valid consumer/message | Domain-inbox disposition | Inbox and domain update transaction; unique `(logical_consumer_id, validated_message_id)` | Before commit redelivery retries; after commit/before offset duplicate returns disposition | Both crash-window and independent-consumer tests |
+| Stable malformed-message quarantine | Transport rejection record | Unique subscription/source/partition/offset locator plus stable `rejection_id`; quarantine confirmation precedes source offset | Crash or lost acknowledgment may duplicate quarantine with the same rejection identity; confirmed redelivery advances the source | Pre-identity corruption and every quarantine crash-window test |
+| One durable Agent outcome | Completed receipt, outcome, terminal event, Agent outbox | One Agent outcome transaction; unique attempt/outcome/event | Before commit deterministic recomputation; after commit publisher/completed-receipt recovery | Every Agent crash-window and concurrency test |
+| Honest publication certainty | Immutable outbox bytes, stable message ID, and certainty state | Token-guarded attempt and acknowledgment updates never equate unknown with unattempted | Ack loss retains unknown and may republish the same bytes; confirmed acceptance remains confirmed | First-attempt, in-flight, lost-ack, and duplicate-publication tests |
 | Publisher ownership recovery | Outbox claim metadata | Short claim transaction; expiry and fencing token | Crash leaves expiring claim; new owner takes over; stale owner cannot finalize | Concurrent publisher, expiry, and stale-token tests |
-| Per-workflow/channel order | Outbox creation sequence | Earliest-eligible claim rule plus broker key | Failed item blocks only its pair; recovery resumes same order | Concurrent publisher and poison-record ordering tests |
-| Deadline reaches terminal state | Workflow, transition, attempt, outbox disposition | Deadline transaction; lock/revision and visible suppression | Race with publish/event serializes; late event cannot reopen terminal state | Publish/deadline/event race and restart tests |
+| Per-workflow/channel order | Outbox creation sequence and terminal operator disposition | Earliest-eligible claim rule plus broker key; retry exhaustion preserves the barrier | Only authorized safe disposition releases later records; unsafe skip fails the workflow closed | Concurrent publisher, poison blocking, disposition, and ordering tests |
+| Deadline reaches terminal state | Workflow, transition, attempt, outbox certainty | Deadline transaction; lock/revision; suppression only for definite nonacceptance | In-flight or unknown publication is retained and may republish; late event cannot reopen terminal state | Before-attempt, in-flight, unknown, republish-after-deadline, and late-event tests |
 | Historical audit matches current state | Snapshot plus transition history | Every transition transaction writes both | No partial commit; mismatch after external corruption raises incident | Fold-and-compare integrity test |
-| Restore can resume transport work | Backed-up outboxes, inboxes, receipts, outcomes | Consistent database backup plus coordinated broker procedure | Older/newer recovery points cause replay or republication, never silent assumption | Restore with broker replay and offset-reset tests |
+| Restore can resume transport work | Backed-up outboxes, domain inboxes, rejection records, completed receipts, outcomes | Consistent database backup plus coordinated broker procedure | Older/newer recovery points cause replay or republication, never silent assumption | Restore with broker replay and offset-reset tests |
 
 None of these guarantees means an irreversible external effect occurs exactly
 once. The first Test Agent has no such effect.
-
-## Consequences
 
 ### 31. Consequences
 
@@ -1020,8 +1192,8 @@ once. The first Test Agent has no such effect.
   add operating responsibilities.
 - One physical database is a shared failure domain and not highly available.
 - Exactly-once computation and side effects remain intentionally unprovided.
-- Transition, inbox, receipt, and outbox records increase storage and cleanup
-  work.
+- Transition, domain-inbox, transport-rejection, completed-receipt, and outbox
+  records increase storage and cleanup work.
 - Explicit SQL and concurrency behavior require careful review and
   real-database tests.
 - PostgreSQL-specific claiming and error classification exist inside adapters.
@@ -1084,20 +1256,26 @@ Review or supersede this ADR when:
 - cross-workflow transactions or global ordering become required; or
 - retention, privacy, or archival requirements exceed the selected model.
 
-## 32. Risks and Mitigations
+### 32. Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
 | Incorrect transaction boundary | Name every atomic unit, review repository composition, and failure-inject before/after every commit |
 | State commits without outgoing message | Require same transaction and prove outbox recovery |
+| Malformed message has no trusted `message_id` | Use a separate unique transport-delivery locator and stable `rejection_id`; never invent domain identity |
+| Quarantine publication duplicates after lost acknowledgment | Preserve one `rejection_id`, durable publication certainty, and source coordinates so duplicates remain diagnosable |
 | Duplicate durable Agent outcome | Enforce unique attempt outcome and atomically store event outbox |
+| Completed receipt is mistaken for a pre-execution claim | Name it explicitly, record it only with outcome/event commit, and test allowed deterministic recomputation |
 | Stale workflow write | Require revision predicates and short aggregate locks |
 | Write skew | Place first-slice invariant under one owner row or constraint; use Serializable only for a proven multi-row invariant |
 | Deadlock or serialization failure | Keep lock order and transactions short; bounded full-transaction retry from stable intent |
 | Lock contention | Observe waits, avoid network/work inside transactions, and measure before changing strategy |
 | Long transaction | Execute Agent work and publish to broker outside database transactions |
-| Outbox backlog | Observe count/age, recover claims, isolate poison records, and relate alerts to deadlines |
-| Inbox growth | Tie retention to broker replay horizon and use restartable cleanup |
+| Unknown publication is treated as unpublished | Persist explicit certainty, retain immutable identity, and permit same-message republication without claiming broker rejection |
+| Deadline silently suppresses a possibly published command | Suppress only definite nonacceptance; retain and reconcile unknown attempts, and reject late outcomes without reopening |
+| Poison record is skipped after retries | Preserve the ordering barrier until an authorized audited terminal disposition proves continuation safe; otherwise fail closed |
+| Outbox backlog | Observe count/age, recover claims, isolate poison records, expose blocked scopes, and relate alerts to deadlines |
+| Domain-inbox or transport-rejection growth | Tie retention to broker replay and redrive horizons and use restartable cleanup |
 | Premature cleanup | Enforce dependency order and test cleanup followed by delayed replay |
 | Database and broker restore mismatch | Coordinate recovery points, preserve IDs, rehearse replay/republication, and keep writes closed during reconciliation |
 | Agent crash during external side effect | Prohibit treating first-slice outcome uniqueness as protection; require a future side-effect policy |
@@ -1112,7 +1290,7 @@ Review or supersede this ADR when:
 | Unknown commit result creates duplicates | Query by precreated stable identifiers before retry and let constraints arbitrate |
 | Clock error expires claims or workflows early | Use database-observed operational lease time, bounded margins, and semantic deadline tests; do not derive business order from clock alone |
 
-## 33. Assumptions
+### 33. Assumptions
 
 - ADR-0001 through ADR-0005 remain Accepted.
 - Vertical Slice 01 retains one deterministic, non-side-effecting Test Agent,
@@ -1132,7 +1310,7 @@ Review or supersede this ADR when:
 - No managed PostgreSQL or Oracle service is assumed.
 - No external Agent side effect occurs in the first slice.
 
-## 34. Open Questions
+### 34. Open Questions
 
 These questions do not leave core technology or guarantees undecided:
 
@@ -1152,7 +1330,7 @@ These questions do not leave core technology or guarantees undecided:
 11. Which operational thresholds make readiness unhealthy or trigger alerts?
 12. What separate execution policy governs the first side-effecting Agent?
 
-## 35. Explicitly Out of Scope
+### 35. Explicitly Out of Scope
 
 This ADR does not decide:
 
@@ -1167,7 +1345,7 @@ This ADR does not decide:
 - side-effecting Agent execution beyond requiring a later decision; or
 - a managed cloud database service.
 
-## 36. Acceptance Checklist
+### 36. Acceptance Checklist
 
 - [ ] PostgreSQL is approved as the initial persistence technology.
 - [ ] The Oracle-versus-PostgreSQL rationale, including owner expertise,
@@ -1184,26 +1362,36 @@ This ADR does not decide:
       workflow, task, attempt, three logical transitions, and command outbox.
 - [ ] `RECEIVED`, `PENDING`, and `DISPATCHED` remain separate logical
       transitions even when committed together.
-- [ ] Outcome processing atomically combines inbox disposition, transition,
-      history, and required state.
-- [ ] Agent receipt, outcome, terminal event, and event outbox commit together
-      after deterministic execution.
+- [ ] Valid-message outcome processing atomically combines domain-inbox
+      disposition, transition, history, and required state.
+- [ ] Agent completed receipt, outcome, terminal event, and event outbox commit
+      together after deterministic execution.
+- [ ] The completed receipt is not a pre-execution claim, exactly-once
+      computation proof, or side-effect fence.
 - [ ] No database/Event Bus distributed transaction or exactly-once side-effect
       claim is made.
 - [ ] Read Committed, unique constraints, revisions, short row locks, and
       skip-locked fenced claims are approved.
 - [ ] Identity and uniqueness rules cover requests, workflows, tasks, attempts,
-      messages, consumers, outcomes, and outboxes.
+      messages, consumers, transport deliveries, rejections, outcomes, and
+      outboxes.
 - [ ] ADR-0004 request fingerprint and historical-policy behavior is preserved.
-- [ ] Immutable outbox bytes, asynchronous publication, lost-acknowledgment
-      duplicates, and restart recovery are approved.
-- [ ] Consumer inbox records commit with domain effects and distinguish success
-      from permanent rejection.
+- [ ] Immutable outbox bytes, asynchronous publication, explicit
+      not-attempted/confirmed/unknown certainty, lost-acknowledgment duplicates,
+      and restart recovery are approved.
+- [ ] Domain-inbox records require validated immutable `message_id` values and
+      commit with domain effects.
+- [ ] Pre-identity malformed deliveries use a separate durable transport
+      rejection identity, quarantine recovery flow, and source-offset barrier.
 - [ ] Agent duplicate, conflict, byte-integrity, and crash-window behavior is
       approved.
 - [ ] No Agent execution lease is required for the deterministic Test Agent.
-- [ ] Publisher claim expiry, fencing, poison isolation, deadline suppression,
-      and graceful shutdown are approved.
+- [ ] Publisher claim expiry, fencing, and graceful shutdown are approved.
+- [ ] Deadline suppression applies only to definite broker nonacceptance;
+      uncertain commands remain reconcilable and late events cannot reopen
+      workflows.
+- [ ] Poison retry exhaustion preserves its ordering barrier until an
+      authorized audited terminal disposition determines continuation is safe.
 - [ ] Ordering is limited to the component transaction and
       `(logical_channel, workflow_id)` publication path.
 - [ ] Persistence retries preserve all identifiers, timestamps, and immutable
@@ -1213,7 +1401,8 @@ This ADR does not decide:
 - [ ] Persistence failures fail closed and required messages remain
       unacknowledged.
 - [ ] Retention relationships prevent premature loss of idempotency,
-      deduplication, outcome, and recovery evidence.
+      deduplication, rejection identity, completed receipt, outcome, poison
+      disposition, and recovery evidence.
 - [ ] Database backup/restore is coordinated with broker replay and offsets.
 - [ ] Security, privacy, least privilege, parameterization, redaction, and
       secure backup requirements align with `SECURITY.md`.
@@ -1230,6 +1419,14 @@ This ADR does not decide:
       treated as accepted architecture.
 - [ ] Reviewers confirm consistency with ADR-0001 through ADR-0005, Vertical
       Slice 01, the test strategy, `SECURITY.md`, and `AGENTS.md`.
+
+The review completed on 2026-07-27 found the architecture-level persistence
+decisions complete. Pre-identity malformed deliveries have durable transport
+identity, completed Agent receipt semantics are explicit, unknown broker
+publication remains uncertain and recoverable, and poison outbox ordering has
+an authorized terminal-resolution rule. The remaining questions in Section 34
+are bounded implementation or deployment policy. No conflict remains with
+ADR-0001 through ADR-0005 or the intended Vertical Slice 01 behavior.
 
 ## Related Decisions
 
