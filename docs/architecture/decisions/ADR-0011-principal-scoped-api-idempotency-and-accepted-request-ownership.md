@@ -95,21 +95,44 @@ The selected logical accepted-request identity is:
 All four values are required for identity and uniqueness:
 
 - `environment` is trusted deployment/security context, not client input;
-- `operation` is a stable, version-aware semantic API operation identity
-  resolved by the API adapter, not an arbitrary URL or client-supplied value;
+- `operation` is a stable semantic command identity resolved from trusted
+  application/API configuration, not client input or a technical route;
 - `idempotency_scope_id` is the trusted internal replay partition described in
   Section 2; and
 - `request_id` remains the client-visible identity for one intended submission
   within that partition.
 
+Three normalized references have separate meanings:
+
+- `idempotency_scope_id` partitions accepted-request uniqueness and replay;
+- `owner_subject_id` identifies the current workflow ownership subject; and
+- `acceptance_actor_id` identifies the authenticated principal that performed
+  the original submission.
+
+They may resolve to the same subject, but they are not required to. Equality is
+an authorization-policy result, never a persistence invariant. A service or
+API client may be authorized to submit for another owner, and a tenant- or
+client-scoped replay partition may coexist with user-level workflow ownership.
+Neither owner nor actor identity is inferred from `idempotency_scope_id`.
+
 The request fingerprint is not part of the uniqueness key. It determines
 whether reuse of an existing key is an equivalent replay or a conflict.
 `workflow_id` and `correlation_id` are also not accepted-request identity.
 
-The current Workflow API has one workflow-submission operation. A future
-operation or incompatible operation generation receives a distinct stable
-operation identity when sharing `request_id` values could otherwise create
-false replay equivalence.
+The current Workflow API has the semantic `workflow.submit` operation.
+Compatible API or schema evolution retains that identity; request-shape
+evolution is normally handled by `fingerprint_policy_version`. For example,
+`POST /v1/workflows` and `POST /v2/workflows` may both resolve to
+`workflow.submit` when they represent the same logical submission. A genuinely
+independent `workflow.simulate` command uses a different operation identity.
+
+Operation identity is not derived directly from a URL, HTTP path, handler name,
+media type, deployment version, or API-version string. Aliases between old and
+new routes may resolve to the same semantic operation. A new identity is
+introduced only when the platform intentionally defines an independently
+idempotent business operation. Changing it requires explicit contract review,
+migration, and compatibility analysis and must never be used merely to avoid
+an existing request conflict.
 
 ### 2. `idempotency_scope_id`
 
@@ -131,26 +154,27 @@ It is:
 - nonsecret but protected as internal security metadata.
 
 After successful authentication, the trusted API security adapter resolves the
-normalized principal and active security policy to one stable replay
+authenticated principal and active security policy to one stable replay
 partition. On first authorized provisioning of that partition, the trusted
 adapter boundary creates an opaque platform identifier and durably associates
-it with the stable normalized subject or security-domain mapping selected by
-policy. Creation and concurrent first resolution are atomic. Subsequent
-requests look up the persisted mapping; they do not regenerate the identifier.
+it with the replay-scope mapping selected by policy. Creation and concurrent
+first resolution are atomic. Subsequent requests look up the persisted
+mapping; they do not regenerate the identifier.
 
-The selected mapping may represent one human principal, machine principal, API
-client, or deliberately shared security domain. Sharing is explicit policy,
-not an inference from equal roles, tenant-looking claims, email domains,
-credential issuers, or request contents.
+The selected mapping may represent a shared API client, machine integration,
+individual security scope, or deliberately shared security domain. Sharing is
+explicit policy, not an inference from equal roles, tenant-looking claims,
+email domains, credential issuers, owners, actors, or request contents. It does
+not itself grant disclosure or workflow authority.
 
 The scope must:
 
 - remain stable for the lifetime of accepted requests in that replay
   partition;
 - survive credential refresh, key rotation, certificate renewal, provider
-  token changes, and replacement credentials that preserve the normalized
-  principal mapping;
-- remain durably reserved when a principal is disabled or deleted so
+  token changes, and replacement credentials that preserve the trusted
+  replay-scope mapping;
+- remain durably reserved when its mapped subject is disabled or deleted so
   historical identity cannot be reassigned;
 - use a tombstoned historical mapping rather than recycling an identifier;
 - be changed, split, merged, or aliased only by an explicit versioned and
@@ -165,6 +189,21 @@ The first local-development slice uses one explicit synthetic
 claimed, inherited, or silently converted into a production principal's
 scope.
 
+The original complete accepted-request key is immutable. A scope migration or
+alias is an internal, versioned lookup-resolution rule, not a rewrite of that
+historical identity. Every record retains its original environment, operation,
+scope, and `request_id`, with exactly one canonical accepted-request record for
+each historical complete key.
+
+Alias resolution is deterministic, environment-scoped, and audited. Aliases
+are never public. Cycles are prohibited; chains are bounded or normalized to
+one canonical target. Conflicting or ambiguous aliases fail closed. Split,
+merge, and tenant migrations preflight collisions and cannot make two
+historical workflows canonical for one resolved replay identity. Multiple
+active scopes cannot silently acquire replay rights to one historical key.
+Ownership transfer creates no alias, and scope migration transfers no
+ownership unless a separate authorized ownership operation is included.
+
 ### 3. API Contract
 
 Clients remain unaware of `idempotency_scope_id`.
@@ -178,6 +217,11 @@ The external API continues to expose only:
 No scope identifier, owner persistence reference, principal mapping, or
 fingerprint version becomes a public field. Existing request and success
 representations remain unchanged.
+
+Routes and API versions are adapters for the configured semantic operation.
+Compatible aliases such as `POST /v1/workflows` and `POST /v2/workflows` may
+both resolve to `workflow.submit`; route or version changes do not themselves
+create a new idempotency partition.
 
 ADR-0004 response semantics are refined as follows:
 
@@ -207,9 +251,11 @@ Uniqueness applies to the complete tuple, not to `request_id` alone and not to
 
 Replay lookup must receive environment, operation, and
 `idempotency_scope_id` from trusted adapter context. Client data can supply
-only `request_id`. A normal API lookup never searches all scopes and then
-filters the result; scope is part of the lookup predicate and authorization
-boundary from the start.
+only `request_id`. Operation comes from trusted application/API configuration,
+not the URL, handler, media type, deployment version, API-version string, or
+client choice. A normal API lookup never searches all scopes and then filters
+the result; scope is part of the lookup predicate and authorization boundary
+from the start.
 
 Concurrent first submissions for the same complete key arbitrate through
 database uniqueness. The transaction loser reads the committed mapping inside
@@ -240,8 +286,12 @@ An accepted replay requires all of:
   fingerprint profile.
 
 The operation is checked in both the accepted-request key and the fingerprint
-profile's semantic definition. This intentional defense prevents one
-operation's request body from being treated as another operation's replay.
+profile's semantic definition. Compatible request-shape evolution stays under
+the same semantic operation and is compared through the historical
+`fingerprint_policy_version`. A genuinely independent business operation uses
+a separate identity. This prevents one operation's request body from being
+treated as another operation's replay without using route or schema changes to
+evade a conflict.
 
 The same complete key with a different fingerprint is a conflict. A matching
 fingerprint in a different key is not a replay. Fingerprints never grant
@@ -273,6 +323,10 @@ rule, or digest algorithm creates a new `fingerprint_policy_version` for new
 acceptances while historical profiles remain supported for the full
 replay-retention horizon.
 
+A fingerprint-policy change does not change or rekey the semantic operation.
+Introducing a new operation identity is a separate contract decision with
+explicit migration and compatibility analysis.
+
 A compatibility adapter may translate a later representation into historical
 semantics, but it cannot reinterpret the original request. If the historical
 profile or required adapter is unavailable, ambiguous, or unsafe, replay fails
@@ -285,19 +339,42 @@ an assumed version.
 
 ### 7. Ownership Model
 
-Accepted-request ownership and workflow ownership are recorded together at
-acceptance and refer to the same normalized authorization subject. The owner
-may be an individual principal or an explicitly modeled security-domain
-subject according to active policy.
+The model uses three independent normalized references:
 
-The durable ownership evidence contains:
+| Reference | Meaning | Authority |
+| --- | --- | --- |
+| `idempotency_scope_id` | Internal uniqueness and replay partition | Trusted API security adapter and scope-mapping policy |
+| `owner_subject_id` | Current workflow ownership subject | Acceptance or later ownership policy |
+| `acceptance_actor_id` | Authenticated principal that performed the original submission | Authentication evidence at acceptance |
 
-- the stable owner subject reference and subject category;
-- the owner environment and applicable security-domain scope;
-- the authenticated submitter/actor reference when different from the owner;
-- the authorization decision and policy revision that permitted acceptance;
-  and
-- immutable original-owner evidence plus additive ownership-change history.
+`owner_subject_id` may represent an individual principal, business subject, or
+explicitly modeled security-domain subject. It controls no access by itself;
+current authorization policy interprets ownership for disclosure and
+administration. It may differ from the subject represented by the replay
+scope.
+
+`acceptance_actor_id` records who submitted the request. It is immutable
+acceptance evidence. An actor may submit for another owner only through
+explicit current policy or future explicit delegation. The platform resolves
+and authorizes the owner; an arbitrary caller cannot choose another owner
+merely by supplying or guessing an identifier. This ADR adds no public owner
+field.
+
+Durable evidence retains:
+
+- immutable original `owner_subject_id` and owner subject category;
+- current `owner_subject_id` and applicable ownership scope;
+- immutable `acceptance_actor_id`;
+- environment;
+- authorization decision and policy revision;
+- scope-mapping revision; and
+- reason, delegation, approval, and additive ownership-change evidence where
+  applicable.
+
+Scope, owner, and actor may resolve to the same subject, but equality is a
+policy result rather than a storage invariant. A service actor may submit for
+an authorized user or business owner. A shared client or tenant replay scope
+may contain workflows with distinct user-level owners.
 
 Ownership is independent of access-token text, key ID, session, certificate,
 provider token subject syntax, or any other credential representation.
@@ -314,14 +391,17 @@ owner, actor, reason, approval where required, policy revision, and effective
 time. It does not silently change the accepted-request key or
 `idempotency_scope_id`.
 
-Future tenant support maps a stable tenant/security-domain subject into the
-same ownership model. It does not redefine `request_id` or expose
-`idempotency_scope_id`.
+A scope migration does not change original or current ownership unless a
+separate authorized ownership operation is included. Future tenant support may
+use a tenant/security-domain subject for scope, ownership, or both, but those
+remain separately recorded decisions. It does not redefine `request_id` or
+expose `idempotency_scope_id`.
 
 ### 8. Disclosure Rules
 
 Workflow ownership controls disclosure. Idempotency scope controls the replay
 partition. They are related evidence but are never interchangeable.
+`acceptance_actor_id` supplies attribution and does not grant later access.
 
 The API applies these rules:
 
@@ -331,6 +411,8 @@ The API applies these rules:
   scope;
 - an equivalent replay returns identifiers and state only after current
   authorization permits workflow disclosure;
+- workflows in the same idempotency scope may have different owners, and
+  same-scope membership never bypasses owner-based authorization;
 - a fingerprint conflict returns no existing workflow, owner, scope,
   fingerprint, acceptance time, or security evidence;
 - when the caller lacks permission to learn that a same-scope mapping exists,
@@ -340,6 +422,13 @@ The API applies these rules:
   indistinguishable where enumeration resistance is required; and
 - an operator may cross ownership boundaries only through an explicit
   permission and auditable operator path.
+
+Ordinary authorized replay may emit structured operational/security telemetry
+and any access audit required by policy or data classification. Optional
+telemetry failure does not block a correct replay. When policy requires
+security audit for a conflict or denied/hidden mapping access, that evidence
+must be durable before the protected classification is disclosed. Audit
+failure never permits duplicate workflow creation.
 
 The platform does not claim perfect timing-side-channel elimination. It does
 require normalized errors, bounded response detail, no cross-scope identifiers,
@@ -352,20 +441,40 @@ and tests that prevent direct existence disclosure.
 | Same scope, operation, `request_id`, and fingerprint | Return existing identifiers and current state only if currently authorized; never create another workflow |
 | Same scope, operation, and `request_id`, different fingerprint | Return safe `REQUEST_ID_CONFLICT` only when authorized to learn the mapping classification; never create another workflow |
 | Different scope, same operation and `request_id` | Treat as an independent identity without discovering or blocking the first scope |
-| Same scope and `request_id`, different operation | Treat as a different accepted-request identity; operation-specific authorization and validation still apply |
-| Credential rotation or replacement | Resolve the same scope and ownership; replay behavior is unchanged |
-| Principal disablement | Retain mapping, ownership, fingerprint, and audit; deny new submission or replay disclosure unless an explicit current policy permits it |
-| Principal deletion | Tombstone the principal/scope mapping; never recycle the scope; historical records remain interpretable and inaccessible without authorized recovery |
-| Ownership transfer | Change current disclosure authority, not the original accepted-request key; a new owner's normal request in another scope is not automatically a replay |
-| Scope migration | Preserve the original key and resolve only through explicit versioned aliases or mapping history; preflight collisions and fail closed on ambiguity |
+| Same scope and `request_id`, independently defined operation | Treat as a different accepted-request identity; operation-specific authorization and validation still apply |
+| Compatible API version or renamed route | Resolve to the same semantic operation and preserve replay |
+| Fingerprint-policy evolution | Keep the same operation and compare through the stored historical profile |
+| Unauthorized or accidental operation-identity change | Reject or fail compatibility validation; never rekey to evade a conflict |
+| Same scope with different owners | Resolve replay by key, then authorize disclosure against the stored current owner |
+| Service actor submitting for another owner | Permit only through explicit policy; store actor and owner separately |
+| Credential rotation or replacement | Resolve the same actor principal and scope mapping; current ownership remains independently unchanged |
+| Acceptance-actor disablement | Deny that actor's new action; retain immutable actor evidence, key, scope, and current owner |
+| Owner disablement | Apply current disclosure policy; retain accepted identity, replay scope, and actor evidence |
+| Replay-scope subject disablement | Retain the scope mapping and history but deny new resolution as policy requires |
+| Principal deletion | Tombstone actor, owner, and scope relationships independently; never recycle historical references |
+| Ownership transfer | Change current disclosure authority without rekeying or creating a scope alias; a new owner's normal request in another scope is not automatically a replay |
+| One old scope to one new scope | Add one versioned alias to the immutable historical key after collision preflight; ownership is unchanged |
+| Scope split | Define explicit request-resolution rules for each target, prohibit overlapping rights to one historical key, and fail closed on ambiguity |
+| Scope merge | Preflight all complete-key collisions; never make two workflows canonical for one resolved identity |
+| Tenant migration | Coordinate versioned scope lookup and, only when separately authorized, ownership migration; preserve original evidence |
+| Alias collision, ambiguity, or cycle | Reject activation and fail closed without changing canonical records |
+| Partially applied migration | Keep the previous complete mapping revision active or mark resolution unavailable; never expose a mixed revision |
+| Stale component mapping revision | Reject scoped lookup/acceptance or require refresh; never resolve under stale rules |
+| Mapping rollback | Preserve all newer mappings and canonical records; activate only a compatible audited revision and never restore global lookup |
+| Tombstoned source scope | Preserve historical lookup only for explicitly authorized migration/recovery; never reactivate or recycle it implicitly |
 | Operator replay or retrieval | Use explicit operator permission and durable audit; never impersonate the original scope or silently change ownership |
-| Future tenant migration | Explicitly migrate ownership and scope mappings, preserve original key/history, check collisions, and retain historical replay compatibility |
 | Historical fingerprint profile unavailable | Fail closed without creating another workflow |
+| Policy-required replay/conflict audit unavailable | Deny the relevant disclosure or privileged action; preserve existing workflow and never create a duplicate |
+| Optional replay telemetry unavailable | Return an otherwise authorized equivalent replay; correctness and state remain unchanged |
 | Lost original API response | Retry in the same resolved scope returns the committed workflow when fingerprint and authorization checks pass |
 
 Operator access does not turn an operator's normal `POST` into a replay of
 another scope. Any future administrative replay operation is a distinct
 authorized operation and is out of scope as an API contract here.
+
+Normal API lookup cannot enumerate aliases, migration history, other owners,
+or other scopes. Alias resolution yields at most one canonical historical key
+under one active mapping revision before fingerprint and disclosure checks.
 
 ### 10. Persistence Model
 
@@ -373,19 +482,21 @@ The authoritative logical accepted-request record stores at minimum:
 
 - `request_id`;
 - environment;
-- stable operation identity;
+- configured semantic operation identity;
 - `idempotency_scope_id`;
 - immutable request fingerprint;
 - `fingerprint_policy_version`, resolving semantic policy,
   canonical serialization, and digest algorithm versions;
-- current owner subject reference and owner scope;
-- immutable original-owner and authenticated acceptance-actor references;
+- immutable original `owner_subject_id`, current `owner_subject_id`, and
+  applicable ownership scope;
+- immutable `acceptance_actor_id`;
 - normalized security evidence, including authorization decision/policy
-  revision and scope-mapping revision, without raw credentials;
+  revision, scope-mapping revision, environment, and reason/delegation evidence
+  where applicable, without raw credentials;
 - workflow reference and initial acceptance result;
 - acceptance time and correlation reference needed for audit; and
-- migration, tombstone, or compatibility references needed to preserve
-  historical lookup.
+- immutable original-key, alias/mapping-revision, tombstone, collision, or
+  compatibility references needed to preserve historical lookup.
 
 The accepted-request mapping, workflow, task, first attempt, logical
 transitions, and command outbox keep the ADR-0006 ownership and transaction
@@ -405,6 +516,19 @@ Persistence lookup ports accept trusted environment, operation, scope, and
 normal API path. Cross-scope search is restricted to explicitly authorized
 migration, reconciliation, or operator capabilities.
 
+Every accepted-request record keeps its original complete key. There is
+exactly one canonical record per historical key. Internal alias records name
+an environment, mapping revision, source scope/key rule, and one canonical
+target. Persistence constraints or equivalent activation validation prohibit
+cycles, unbounded chains, ambiguous targets, and two canonical workflows for
+one resolved replay identity. Active mapping revisions are atomic; normal
+requests never observe a partially applied revision.
+
+Scope split, merge, one-to-one migration, tenant migration, rollback, and
+tombstone resolution are performed through versioned mapping records rather
+than accepted-request updates. Ownership records change only through their
+separate authorized transaction.
+
 Accepted-request retention remains at least as long as the API duplicate
 horizon and workflow-retention obligation. A tombstone must preserve the
 complete key, fingerprint profile, owner/security evidence required for safe
@@ -415,48 +539,63 @@ disclosure, workflow or terminal replay reference, and migration history.
 Audit aligns with ADR-0009 and remains separate from operational logs and
 traces.
 
-Durable evidence is required for:
+Mandatory durable coupled audit is required for:
 
 - first acceptance, including complete accepted-request key references,
-  fingerprint version, owner, authenticated actor, authorization decision,
-  policy revision, workflow reference, and outcome;
-- equivalent replay, including actor, resolved scope reference, operation,
-  request reference, fingerprint profile, authorization outcome, and returned
-  or denied disposition;
-- conflicting replay, including safe fingerprint/profile references,
-  authorization/disclosure outcome, and no raw request content;
-- scope creation, aliasing, split, merge, migration, disablement effect, and
-  tombstone;
-- ownership transfer or tenant migration, including previous/new owner, actor,
-  reason, approval where required, policy revision, and effective time; and
+  `fingerprint_policy_version`, original/current owner, `acceptance_actor_id`,
+  authorization decision, policy revision, scope-mapping revision, workflow
+  reference, and outcome;
+- every accepted-request or workflow-state mutation;
+- ownership mutation, including previous/current owner, actor, reason,
+  delegation or approval where required, policy revision, and effective time;
+- security-relevant scope creation or migration, including aliasing, split,
+  merge, mapping revision, disablement effect, and tombstone mutation; and
 - operator lookup, override, replay, repair, or migration action.
 
 Acceptance evidence commits with the accepted-request and workflow transaction.
 Ownership or scope mutation and their business audit commit together or
-neither commits. Equivalent replay and conflict evidence must be durable before
-existing identifiers or a mapping-specific conflict classification is
-disclosed; if required audit is unavailable, the request fails safely without
-creating or changing a workflow.
+neither commits. Failure of acceptance or mutation audit rolls back the
+transaction.
+
+An ordinary authorized equivalent replay may rely on the immutable original
+acceptance evidence, the current authorization decision, structured
+operational/security telemetry, and an access audit when required by data
+classification or policy. It need not create a new business-coupled durable
+record before returning existing identifiers.
+
+A conflict or denied/hidden mapping access creates durable security audit when
+policy, classification, abuse-detection rules, or operator access requires it.
+The external response never depends on exposing protected owner, scope,
+fingerprint, alias, or workflow information.
 
 Privileged operator or migration actions use ADR-0009 administrative security
 audit. They fail closed when the action can still be stopped. Corrections are
 additive; audit history, original ownership, original key, and historical
 fingerprint evidence are never rewritten.
 
-Logs and traces may reference safe identifiers but cannot replace this audit.
-Raw credentials, token claims, full workflow input, raw request bodies, and
-fingerprint source material are excluded.
+Failure of optional or best-effort replay telemetry does not block correctness.
+Failure of policy-required security audit blocks the relevant disclosure or
+privileged action. Existing workflow state is never changed because replay
+audit failed, and no duplicate workflow is created when replay cannot be
+disclosed.
+
+Logs and traces may reference safe identifiers but cannot replace required
+audit. Raw credentials, token claims, full workflow input, raw request bodies,
+and fingerprint source material are excluded.
 
 ### 12. Authorization
 
-The security adapter must authenticate the caller, authorize the semantic
-operation, and resolve trusted environment and `idempotency_scope_id` before
-accepted-request lookup or creation.
+The security adapter must authenticate the caller as `acceptance_actor_id`,
+resolve the semantic operation and trusted environment from configuration,
+resolve `idempotency_scope_id`, resolve the proposed `owner_subject_id`, and
+authorize the actor to submit for that owner before accepted-request lookup or
+creation. This adds no client-controlled owner or operation field.
 
 Authorization responsibilities are:
 
 - `idempotency_scope_id` partitions replay and uniqueness;
-- workflow ownership and current policy control disclosure;
+- `owner_subject_id` and current policy control workflow disclosure;
+- `acceptance_actor_id` records who acted but grants no later access;
 - operation permission controls submission or operator action;
 - environment limits every decision;
 - fingerprint comparison classifies content but grants no permission; and
@@ -465,30 +604,44 @@ Authorization responsibilities are:
 
 No permission is inferred from knowledge of `request_id`, `workflow_id`,
 `correlation_id`, fingerprint, scope, tenant-looking claim, or owner reference.
-An idempotency scope must never appear as the authenticated principal in policy
-or audit.
+An idempotency scope must never appear as the authenticated principal or owner
+in policy or audit. Owner and actor are never inferred from the scope.
 
 ### 13. Principal Lifecycle
 
 Principal and credential lifecycle follow these rules:
 
 - credential refresh, rotation, renewal, and like-for-like replacement retain
-  the normalized principal, owner, and `idempotency_scope_id`;
-- principal disablement prevents new actions and replay disclosure under
-  ordinary policy but preserves accepted mappings and ownership evidence;
-- re-enablement of the same stable principal restores the same scope mapping
-  subject to current policy;
-- principal deletion creates a durable tombstone and never frees the scope or
-  owner reference for reuse;
+  the normalized actor principal and `idempotency_scope_id`; current ownership
+  remains independently unchanged;
+- acceptance-actor disablement prevents that actor's new actions but changes
+  neither historical actor evidence nor current ownership;
+- owner disablement changes disclosure and administration only through current
+  policy and leaves the accepted key, scope, and actor evidence unchanged;
+- disablement of a subject mapped to a replay scope prevents new authorized
+  scope resolution as policy requires but preserves the mapping and accepted
+  records;
+- re-enablement of the same stable subject restores only its applicable actor,
+  owner-policy, or scope-mapping relationship under current policy;
+- principal deletion tombstones its actor, owner, and scope relationships
+  independently and never frees any historical reference for reuse;
 - a replacement that represents a different principal does not inherit scope
   or ownership merely because it uses the same name, email, client label, role,
   or credential issuer;
 - ownership transfer changes authorization ownership through an explicit
-  audited operation but does not rekey historical accepted requests;
+  audited operation but does not rekey historical accepted requests or create
+  a scope alias;
 - scope migration changes replay resolution only through an explicit,
-  versioned, collision-checked, audited mapping;
-- tenant migration coordinates scope mapping, current ownership, authorization
-  policy, and historical aliases without rewriting original evidence; and
+  deterministic, versioned, collision-checked, audited alias mapping and does
+  not change ownership;
+- scope aliases prohibit cycles, ambiguous targets, unbounded chains, partial
+  active revisions, and silent replay-right acquisition;
+- tenant migration coordinates scope mapping and, only through a separate
+  authorized operation, current ownership, without rewriting original
+  evidence;
+- stale components must refresh to the active mapping revision or fail closed;
+- rollback preserves mappings introduced by newer revisions and never restores
+  global lookup assumptions; and
 - historical accepted requests remain valid records even when no current
   principal may retrieve them.
 
@@ -504,17 +657,21 @@ independently in different trusted scopes.
 
 The logical migration sequence is:
 
-1. Add trusted environment, stable operation, `idempotency_scope_id`, complete
-   fingerprint-version, ownership, and security-evidence capabilities without
-   removing the global key.
+1. Add trusted environment, configured semantic operation,
+   `idempotency_scope_id`, immutable original/current `owner_subject_id`,
+   immutable `acceptance_actor_id`, complete fingerprint-version, scope-mapping
+   revision, and security-evidence capabilities without removing the global
+   key.
 2. Create durable scope mappings. Existing single-principal local-development
    records map to an explicit legacy synthetic scope for their known
-   environment and workflow-submission operation.
-3. Backfill historical owner and fingerprint-version evidence only from
-   authoritative deployment, contract, and acceptance facts. Ambiguous records
-   are blocked for reconciliation rather than guessed.
+   environment and configured `workflow.submit` operation.
+3. Backfill historical owner, actor, operation, and fingerprint-version
+   evidence only from authoritative deployment, contract, authentication, and
+   acceptance facts. Do not infer owner or actor from the scope. Ambiguous
+   records are blocked for reconciliation rather than guessed.
 4. Validate that every retained accepted mapping has a complete composite key,
-   fingerprint profile, owner reference, and workflow/tombstone integrity.
+   fingerprint profile, original/current owner, actor, mapping revision, and
+   workflow/tombstone integrity.
 5. Add and verify composite uniqueness and scoped lookup behavior while a
    compatibility deployment can still read the earlier model.
 6. Deploy scoped arbitration and dual-version historical replay support before
@@ -524,14 +681,39 @@ The logical migration sequence is:
 8. Retain migration revision, alias/tombstone, collision, and reconciliation
    evidence for the historical replay horizon.
 
+Operation migration maps routes and API versions to reviewed semantic commands.
+Compatible route renames and API/schema versions keep `workflow.submit` and
+use fingerprint-policy compatibility. A new operation identity is activated
+only for an independently idempotent business command after contract,
+collision, replay, and rollback review.
+
+Scope migration preserves the original key and follows these behaviors:
+
+| Migration case | Required behavior |
+| --- | --- |
+| One old scope to one new scope | Add one deterministic, versioned internal alias after collision preflight; retain the old canonical record and ownership |
+| Scope split | Define nonoverlapping resolution rules; no two target scopes gain silent rights to the same historical key |
+| Scope merge | Preflight every environment/operation/`request_id` collision; reject if two historical workflows would become canonical for one resolved identity |
+| Tenant migration | Migrate scope lookup independently from ownership; a separate authorized ownership operation is required when ownership also changes |
+| Collision or ambiguous target | Fail closed, keep the prior mapping revision active, and require audited reconciliation |
+| Partially applied migration | Never activate partial rules; atomically retain or restore the previous complete revision |
+| Stale component | Reject startup or lookup/acceptance under the stale revision until refreshed |
+| Mapping rollback | Activate only a compatible audited revision while preserving newer mappings and canonical records |
+| Tombstoned source scope | Preserve historical recovery resolution but prohibit implicit reactivation, reuse, or new acceptance |
+
+Aliases are internal and environment-scoped. Resolution is deterministic,
+cycle-free, bounded or normalized to one canonical target, and produces at
+most one canonical historical key. Normal API lookup cannot enumerate alias or
+migration history.
+
 If no schema or accepted-request data exists when implementation begins, the
 initial schema implements the composite model directly and records that no
 data migration was required.
 
-An environment containing records whose original principal, environment,
-operation, or fingerprint profile cannot be established must not enable
-multi-principal acceptance. Recovery requires an authorized, audited
-classification or isolation decision.
+An environment containing records whose original environment, semantic
+operation, scope, original/current owner, acceptance actor, or fingerprint
+profile cannot be established must not enable multi-principal acceptance.
+Recovery requires an authorized, audited classification or isolation decision.
 
 Rollback must not discard new-scope mappings or accept duplicate workflows.
 Once different scopes have accepted the same `request_id`, software that
@@ -546,9 +728,11 @@ explicit compatibility plan.
   `request_id`.
 - Replay identity survives credential rotation without making credentials part
   of persistence keys.
-- Ownership and replay partitioning have separate, testable meanings.
+- Scope, ownership, and acceptance actor have separate, testable meanings and
+  may intentionally refer to different subjects.
 - Database uniqueness still arbitrates concurrent first acceptance.
 - Existing public API fields and request fingerprints remain compatible.
+- Compatible route and schema evolution preserves semantic operation identity.
 - Historical fingerprint behavior becomes explicit across semantic,
   serialization, and digest evolution.
 - Future tenant/security-domain models can be introduced without redefining
@@ -562,8 +746,11 @@ explicit compatibility plan.
   `request_id` for the whole scope even when disclosure is denied.
 - Ownership transfer does not automatically transfer replay lookup; a separate
   scope migration may be required.
-- Durable replay/conflict audit adds write load to otherwise read-oriented
-  requests.
+- Required security audit for classified conflicts, denied access, or
+  privileged replay adds write load, while ordinary equivalent replay does not
+  require an unconditional durable write.
+- Alias revisions, collision preflight, cycle prevention, and stale-component
+  gating add migration complexity.
 - Rollback becomes constrained after duplicate `request_id` values exist in
   different scopes.
 
@@ -572,25 +759,32 @@ explicit compatibility plan.
 - Global uniqueness is replaced by composite uniqueness after additive
   backfill and compatibility validation.
 - Existing single-principal records receive a known legacy synthetic scope and
-  ownership only when authoritative facts support that mapping.
+  separate owner and actor references only when authoritative facts support
+  those mappings.
 - Historical fingerprint metadata may require explicit profile backfill.
+- Historical routes and versions require reviewed semantic-operation mapping;
+  they are not used directly as key values.
+- Scope migration retains immutable keys and adds versioned alias resolution
+  rather than rewriting accepted-request records.
 - Multi-principal API enablement waits until scoped lookup, uniqueness,
   disclosure, audit, and rollback compatibility are proven.
 
 #### Developer Impact
 
 - API code receives scope only from trusted security context.
-- Domain logic keeps ownership, authorization, fingerprint, and idempotency
-  concepts separate.
+- Domain logic keeps actor, ownership, authorization, fingerprint,
+  idempotency scope, and operation identity separate.
 - Persistence adapters must classify scoped equivalent replay, scoped
   conflict, unauthorized hidden mapping, and new request deterministically.
-- Tests require multiple principals, scopes, operations, credential versions,
-  ownership changes, fingerprint profiles, and migration states.
+- Tests require multiple principals, actors, owners, scopes, route versions,
+  operations, credential versions, fingerprint profiles, alias revisions, and
+  migration states.
 
 #### Operational Impact
 
-- Operators manage scope and owner mappings, migration revisions, ambiguous
-  historical rows, audit retention, and collision reconciliation.
+- Operators manage separate scope and owner mappings, actor evidence, semantic
+  operation mappings, migration revisions, ambiguous historical rows,
+  policy-required audit retention, and collision reconciliation.
 - Scope split, merge, transfer, and tenant migration are privileged changes,
   not direct database edits.
 - Deployments must prevent rollback to globally scoped software after
@@ -602,6 +796,8 @@ explicit compatibility plan.
 - Scope mapping and operator migration become privileged trust boundaries.
 - Incorrectly broad shared scopes can cause denial of service within that
   scope, although they do not authorize workflow disclosure.
+- Incorrect owner resolution can disclose data or attribute work to the wrong
+  subject; actor-for-owner authorization is mandatory.
 - Audit and retention contain protected ownership and security metadata.
 
 ### 16. Amendments to ADR-0004 and ADR-0006
@@ -614,16 +810,19 @@ unchanged.
 
 - Section 6's statement that `request_id` identifies one logical submission is
   scoped to one `(environment, operation, idempotency_scope_id)` partition.
-  Client generation, omission behavior, format, and immutability remain
-  unchanged.
+  Operation means the trusted configured semantic command, not a route or API
+  version. Client generation, omission behavior, format, and immutability
+  remain unchanged.
 - Section 8 submission replay and conflict behavior applies only after trusted
   scoped lookup and current disclosure authorization. The same `request_id` in
-  another scope is independent.
+  another scope is independent. Compatible routes or API versions may resolve
+  to the same semantic operation.
 - Section 12's global unique mapping and "never two workflows for one accepted
   `request_id`" language becomes one workflow per complete accepted-request
   key. Its semantic fingerprint, canonicalization, historical-policy, and
   conflict rules remain; Section 6 clarifies the information resolved by its
-  existing `fingerprint_policy_version`.
+  existing `fingerprint_policy_version`. Fingerprint-policy evolution does not
+  rekey the operation.
 - Section 9's `REQUEST_ID_CONFLICT` remains stable but cannot disclose another
   owner or scope. Authorization may require a non-disclosing response instead.
 - No API wire field, JSON Schema authority, identifier encoding, error format,
@@ -632,21 +831,26 @@ unchanged.
 #### ADR-0006 Amendments
 
 - Section 1's accepted-request record gains environment, operation,
-  `idempotency_scope_id`, complete fingerprint version, owner, and normalized
-  security evidence.
+  `idempotency_scope_id`, complete fingerprint version, immutable original and
+  current `owner_subject_id`, immutable `acceptance_actor_id`, mapping revision,
+  and normalized security evidence.
 - Section 5's submission transaction resolves the composite accepted-request
-  key rather than a globally unique `request_id`; its atomic workflow, task,
-  transitions, snapshot, and outbox behavior is unchanged.
+  key and configured semantic operation rather than a globally unique
+  `request_id`; its atomic workflow, task, transitions, snapshot, and outbox
+  behavior is unchanged.
 - Section 11's unique `request_id` within the Orchestrator acceptance domain is
   replaced by uniqueness of
   `(environment, operation, idempotency_scope_id, request_id)`.
 - Section 12's reservation, lookup, equivalence, conflict, retention, and
   tombstone rules apply within that complete key and current disclosure
-  authorization.
+  authorization. Historical keys stay immutable; versioned internal aliases
+  resolve migration without rewriting canonical records.
 - Section 30's guarantee becomes one workflow per complete accepted-request
   key, not per globally unique `request_id`.
-- Section 31's migration preservation requirements include scope, ownership,
-  security evidence, and complete fingerprint-version history.
+- Section 31's migration preservation requirements include scope, separate
+  original/current owner and actor evidence, semantic-operation mapping,
+  alias/mapping revisions, security evidence, and complete
+  fingerprint-version history.
 - PostgreSQL, persistence ownership, transaction isolation, repository
   boundaries, state transitions, outbox/inbox behavior, recovery, retention,
   backup, and every unrelated persistence decision remain unchanged.
@@ -655,14 +859,16 @@ unchanged.
 
 | Guarantee | Authoritative source | Enforcement point | Durable audit evidence | Failure behavior | Required tests |
 | --- | --- | --- | --- | --- | --- |
-| Accepted replay is deterministic | Complete accepted-request key plus stored historical fingerprint profile | API security adapter, Orchestrator arbitration, persistence uniqueness | Acceptance and replay disposition with key/profile references | Fail closed; never create a second workflow | Equivalent, conflicting, concurrent, lost-response, and unavailable-profile tests |
-| Ownership isolation controls disclosure | Current owner and versioned authorization policy | Workflow API and authorization port | Owner, actor, policy revision, allowed/denied disposition | Safe denial/not-found; no identifiers returned | Owner, delegate, shared-domain, disabled-owner, and unauthorized tests |
-| Identifier confidentiality crosses no scope | Trusted scoped lookup and safe error policy | API adapter and accepted-request repository | Cross-scope attempt classification without other-scope data | Treat caller's scope independently or deny safely | Same `request_id` across scopes, guessing, conflict, and timing-shape tests |
-| Principals cannot collide accidentally | Adapter-resolved scope mapping plus composite uniqueness | Security adapter and database constraint | Scope creation/mapping revision and acceptance | Transaction conflict resolved only inside the same complete key | Multi-principal concurrent-acceptance and broad-scope misconfiguration tests |
-| Credential rotation preserves replay | Stable principal-to-scope and owner mapping | Authentication/security adapter | Credential lifecycle reference and unchanged scope mapping | Deny if mapping is ambiguous; never create a replacement scope silently | Token/key/certificate rotation and replacement tests |
-| Historical replay survives evolution | Immutable original key, fingerprint profile, aliases, and tombstones | Compatibility adapter and persistence lookup | Profile/migration revision and replay disposition | Fail closed without duplicate creation | Old semantic/default/canonical/digest profile and retained-tombstone tests |
+| Accepted replay is deterministic | Complete accepted-request key plus stored historical fingerprint profile | API security adapter, Orchestrator arbitration, persistence uniqueness | Immutable acceptance evidence; policy-required access/security audit | Optional telemetry failure does not block; required audit failure blocks disclosure; never create a second workflow | Equivalent, conflicting, concurrent, lost-response, unavailable-profile, and audit-outage tests |
+| Scope, owner, and actor stay distinct | Scope mapping, current/original `owner_subject_id`, immutable `acceptance_actor_id`, and policy | Security and authorization adapters plus accepted-request persistence | Acceptance actor/owner/scope revisions and authorized ownership mutation | Reject unauthorized owner choice; no inference from scope | Same-scope different-owner, service-for-owner, shared-client/user-owner, transfer-without-rekey, and unauthorized-owner tests |
+| Ownership isolation controls disclosure | Current owner and versioned authorization policy | Workflow API and authorization port | Original/current owner, actor, policy revision, and policy-required access disposition | Safe denial/not-found; no identifiers returned and no duplicate created | Owner, delegate, shared-domain, disabled-owner, and unauthorized tests |
+| Identifier confidentiality crosses no scope | Trusted scoped lookup and safe error policy | API adapter and accepted-request repository | Policy-required cross-scope/denial security audit without protected data | Treat caller's scope independently or deny safely | Same `request_id` across scopes, guessing, hidden mapping, enumeration, and timing-shape tests |
+| Replay partitions cannot collide accidentally | Adapter-resolved scope mapping plus composite uniqueness | Security adapter and database constraint | Scope creation/mapping revision and acceptance | Transaction conflict resolved only inside the same complete key | Multi-principal concurrent-acceptance and broad-scope misconfiguration tests |
+| Semantic operation is stable | Reviewed application/API operation mapping | API adapter configuration and compatibility gate | Operation-mapping revision and contract review | Reject unauthorized mapping change; never rekey to avoid conflict | Two-version alias, route rename, independent operation, accidental-change, and fingerprint-only evolution tests |
+| Credential rotation preserves replay | Stable actor-to-scope mapping independent of ownership | Authentication/security adapter | Credential lifecycle reference and unchanged scope mapping | Deny if mapping is ambiguous; never create a replacement scope silently | Token/key/certificate rotation and replacement tests |
+| Historical replay survives evolution | Immutable original key, fingerprint profile, deterministic aliases, and tombstones | Compatibility adapter and persistence lookup | Profile and mapping revision; policy-required replay disposition | Fail closed without duplicate creation | Old fingerprint profiles, deterministic alias, cycle/chain, stale-revision, and tombstone tests |
 | Operator access is explicit | Operator permission, target, reason, and approval policy | Administrative/recovery boundary | ADR-0009 actor/action/target/reason/outcome evidence | Fail closed; no impersonation or ownership mutation | Authorized/unauthorized operator lookup, replay, transfer, and audit-outage tests |
-| Migration preserves compatibility | Reviewed migration revision and validated backfill | Deployment migration boundary and startup compatibility check | Backfill counts, ambiguity/collision disposition, activation and rollback evidence | Block multi-principal startup or rollback on ambiguity | Empty, legacy, ambiguous, collision, mixed-version, and rollback tests |
+| Migration preserves one canonical workflow | Immutable historical keys plus reviewed alias revision and collision preflight | Deployment migration boundary, alias resolver, and startup compatibility check | Backfill, alias, collision, activation, partial-failure, and rollback evidence | Keep prior revision or block lookup/startup; never expose two canonical workflows | One-to-one, split/merge collision, partial rollback, stale revision, ownership-unchanged, and duplicate-canonical tests |
 
 ### 18. Risks and Mitigations
 
@@ -671,16 +877,24 @@ unchanged.
 | Global `request_id` uniqueness survives accidentally | Remove it only through reviewed migration; require composite constraint and cross-scope concurrency tests |
 | Identifier guessing reveals another request | Scope the lookup before persistence access, authorize disclosure, and normalize safe errors |
 | Ownership leaks through replay or conflict | Return identifiers/classification only when authorized; store no owner or scope in public problems |
-| Ownership is derived from a credential | Persist stable normalized owner subject and original actor; credential lifecycle never rewrites ownership |
+| Scope, owner, and actor are conflated | Persist separate `idempotency_scope_id`, original/current `owner_subject_id`, and immutable `acceptance_actor_id`; equality is policy, not a constraint |
+| Unauthorized actor selects another owner | Resolve and authorize actor-for-owner through trusted policy; no arbitrary public owner selection |
+| Ownership is derived from a credential | Persist stable normalized owner and immutable actor; credential lifecycle never rewrites ownership |
+| Route or API version becomes operation identity | Resolve reviewed semantic command from configuration; aliases retain identity and fingerprint policy handles compatible shape changes |
+| Operation is rekeyed to avoid conflict | Require contract/migration review and reject unauthorized mapping changes |
 | Fingerprint evolution creates false replay or conflict | Store immutable semantic, canonicalization, and digest profile identity; retain historical adapters |
-| Scope migration creates duplicate or unreachable mappings | Preserve original keys, use explicit aliases/history, preflight collisions, audit, and fail closed on ambiguity |
+| Scope migration creates duplicate or unreachable mappings | Preserve original keys, use deterministic versioned aliases, preflight collisions, prohibit cycles/ambiguity, and fail closed |
+| Split or merge gives two workflows one resolved identity | Require collision preflight and exactly one canonical record for every resolved replay identity |
+| Stale or partial mapping revision misroutes replay | Activate complete revisions atomically; stale components refresh or fail closed; rollback preserves newer mappings |
+| Scope migration silently changes ownership | Treat ownership as a separate authorized transaction and test that aliases leave it unchanged |
 | Tenant evolution broadens a scope silently | Require explicit policy and migration; never infer tenant sharing from provider claims or roles |
 | Operator misuse crosses ownership boundaries | Separate permission, reason/approval, durable audit, no impersonation, and least-privilege recovery port |
 | Historical replay meaning is ambiguous | Preserve immutable profile and original key evidence; quarantine unresolved legacy records |
 | Shared scope member consumes an identifier | Make sharing deliberate, authorize disclosure independently, and use scoped client policy |
 | Principal deletion permits identity reuse | Tombstone principal/scope mappings and prohibit identifier recycling |
 | Rollback software assumes global uniqueness | Compatibility gate deployment and prohibit unsafe rollback after cross-scope duplicates exist |
-| Audit outage hides replay or mutation | Commit business mutation with audit and fail safely before mapping-specific disclosure |
+| Optional replay telemetry outage blocks safe reads | Keep ordinary replay telemetry best effort unless policy requires durable access audit |
+| Required audit outage hides disclosure or mutation | Roll back acceptance/mutation; block policy-required disclosure or privileged action; preserve workflow and never create a duplicate |
 | Scope is mistaken for an authorization principal | Keep it internal, exclude it from policy principal fields, and test authorization independently |
 
 ### 19. Open Questions
@@ -697,16 +911,22 @@ The architectural model is complete. These implementation choices remain:
 4. What exact canonical fingerprint-profile identifiers and compatibility
    artifact format are used?
 5. What exact ADR-0009 business and administrative audit record schemas store
-   acceptance, replay, conflict, ownership, scope migration, and operator
-   evidence?
-6. What bounded retention and rate controls apply to replay and conflict audit
-   records?
+   acceptance, policy-required replay/conflict access, ownership, scope
+   migration, and operator evidence?
+6. Which data classifications, abuse thresholds, and policies require durable
+   replay, conflict, or denied-access audit, and what bounded retention and
+   rate controls apply?
 7. What repository query names and database transaction statements implement
    scoped arbitration without exposing global lookup to the API path?
+8. What physical alias representation, maximum chain bound, normalization
+   method, mapping-revision protocol, and collision-preflight procedure are
+   used?
+9. What configuration representation and review mechanism maps routes and API
+   versions to semantic operation identities?
 
 These choices cannot weaken the complete key, internal-scope boundary,
-ownership/disclosure separation, historical fingerprint behavior, audit
-durability, or migration guarantees.
+ownership/disclosure separation, historical fingerprint behavior, required
+audit durability, or migration guarantees.
 
 ### 20. Acceptance Checklist
 
@@ -715,12 +935,27 @@ durability, or migration guarantees.
 - [ ] Accepted-request identity is
       `(environment, operation, idempotency_scope_id, request_id)`.
 - [ ] Every key element comes from the correct trusted or client boundary.
+- [ ] Operation is a trusted configured semantic command identity, never
+      client supplied or derived directly from route, handler, media type,
+      deployment version, or API-version string.
+- [ ] Compatible API/schema evolution and route aliases retain operation
+      identity; fingerprint-policy evolution does not rekey it.
+- [ ] New operation identity requires an independently idempotent business
+      command plus explicit contract, migration, and compatibility review.
+- [ ] Operation identity cannot change merely to evade an existing conflict.
 - [ ] Database uniqueness and concurrent arbitration apply to the complete
       key, not global `request_id`.
 - [ ] `idempotency_scope_id` is internal, opaque, stable, adapter-resolved, and
       never client supplied.
 - [ ] Idempotency scope is not a principal, role, tenant, owner, credential, or
       authorization policy.
+- [ ] `idempotency_scope_id`, current/original `owner_subject_id`, and immutable
+      `acceptance_actor_id` are separate normalized references.
+- [ ] The three references may be equal only as a policy result, never as a
+      persistence invariant.
+- [ ] Same-scope workflows may have different owners, and a service actor may
+      submit for another owner only through explicit policy.
+- [ ] Neither owner nor actor is inferred from `idempotency_scope_id`.
 - [ ] Scope creation, credential rotation, disablement, deletion, migration,
       tombstone, and audit behavior are explicit.
 - [ ] Public API fields remain limited to `request_id`, `correlation_id`, and
@@ -730,13 +965,16 @@ durability, or migration guarantees.
 - [ ] Conflicting fingerprints never create another workflow.
 - [ ] Different scopes may use the same `request_id` without discovery or
       blocking.
-- [ ] Credential rotation preserves scope, ownership, and replay.
+- [ ] Credential rotation preserves actor identity and replay scope while
+      ownership remains independently stable.
 - [ ] Principal disablement/deletion preserves history while denying
       unauthorized disclosure.
-- [ ] Ownership and original actor are stable normalized references independent
-      of credentials.
+- [ ] Original/current owner and immutable acceptance actor are stable
+      normalized references independent of credentials.
 - [ ] Ownership transfer and tenant migration are explicit, versioned, and
       audited without silently rekeying accepted requests.
+- [ ] Ownership transfer creates no alias, and scope migration changes no owner
+      without a separate authorized ownership operation.
 - [ ] Workflow ownership controls disclosure; idempotency scope controls replay
       partitioning.
 - [ ] Unauthorized equivalent and conflict cases do not reveal mapping
@@ -749,13 +987,31 @@ durability, or migration guarantees.
 - [ ] The accepted-request persistence record contains the complete key,
       fingerprint/profile, owner, security evidence, workflow reference, and
       migration history.
-- [ ] Acceptance, replay, conflict, ownership migration, scope migration, and
-      operator override have durable ADR-0009-aligned evidence.
+- [ ] First acceptance, every state/ownership mutation, security-relevant scope
+      mutation, and operator action have durable ADR-0009-aligned evidence.
+- [ ] Ordinary authorized equivalent replay does not unconditionally require a
+      new durable business-audit write.
+- [ ] Conflict and denied/hidden access use durable security audit when policy,
+      classification, abuse detection, or operator access requires it.
+- [ ] Optional replay telemetry failure does not block correctness;
+      policy-required audit failure blocks disclosure/action; acceptance or
+      mutation audit failure rolls back; no replay-audit failure changes state
+      or creates a duplicate.
 - [ ] The migration preserves existing API fields and known historical
       semantics and does not guess ambiguous ownership or fingerprint data.
 - [ ] Composite uniqueness is proven before global uniqueness is removed.
 - [ ] Mixed-version startup and rollback are blocked when they could create
       duplicates or misroute replay.
+- [ ] Every accepted request retains its immutable original complete key and
+      exactly one canonical record exists per historical key.
+- [ ] Aliases are internal, deterministic, versioned, environment scoped,
+      audited, cycle-free, bounded or normalized, and fail closed on ambiguity.
+- [ ] Split, merge, and tenant migration preflight collisions and cannot grant
+      multiple scopes silent rights or make two workflows canonical for one
+      resolved replay identity.
+- [ ] Partial migration, stale mapping revisions, rollback, and tombstoned
+      sources have explicit fail-closed behavior.
+- [ ] Normal API lookup cannot enumerate alias or migration history.
 - [ ] ADR-0004 amendments are limited to request identity and scoped
       replay/conflict/disclosure; existing fingerprint versioning is clarified,
       not replaced.
@@ -765,14 +1021,26 @@ durability, or migration guarantees.
       authentication, authorization, or audit architecture changes.
 - [ ] ADR-0010's idempotency, ownership, disclosure, lifecycle, and safe-error
       requirements are satisfied.
+- [ ] Required tests cover same-scope/different-authorized-owner,
+      service-for-owner, shared-client/user-owner, unauthorized owner choice,
+      ownership transfer without rekeying, and scope migration without
+      ownership transfer.
+- [ ] Required tests cover two API versions sharing one operation, route rename,
+      independent operation identity, unauthorized identity change, and
+      fingerprint-policy change without operation rekeying.
+- [ ] Required tests cover deterministic alias resolution, cycle rejection,
+      chain normalization, split/merge collision, stale revision, partial
+      rollback, unchanged ownership, cross-scope enumeration prevention, and
+      duplicate canonical-workflow prevention.
 - [ ] Remaining questions are implementation choices and do not leave the
       architectural model undecided.
 
-The architectural model in this ADR is internally complete. If ADR-0011 is
-Accepted, it resolves the sole accepted-request scope blocker identified by
-ADR-0010. ADR-0010 may then move through acceptance review without another
-idempotency architecture decision, provided its own remaining checklist is
-approved.
+The architectural model in this ADR is internally complete, all remaining
+questions are implementation choices, and ADR-0011 is ready for acceptance
+review while remaining Proposed. If ADR-0011 is Accepted, it resolves the sole
+accepted-request scope blocker identified by ADR-0010. ADR-0010 may then move
+through acceptance review without another idempotency architecture decision,
+provided its own remaining checklist is approved.
 
 ## Related Decisions
 
