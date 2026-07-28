@@ -46,7 +46,11 @@ identity without putting provider types or secrets in domain contracts.
 - ADR-0008 trusts configured readiness routes and declaration digests but
   defers runtime authentication. This ADR selects a generated,
   environment-scoped development readiness credential for Vertical Slice 01
-  and requires mutual authentication for production.
+  that authenticates the Orchestrator to the Agent. The Orchestrator performs
+  bounded development-only Agent endpoint verification but does not
+  cryptographically authenticate the Agent. Production requires mutually
+  authenticated, environment-bound, cryptographically protected component
+  identities.
 - ADR-0005 permits broker authentication and authorization but does not define
   logical permissions. This ADR defines the application authorization model
   without selecting or configuring Event Bus ACL syntax.
@@ -107,17 +111,21 @@ The mandatory principles are:
 ### 3. Trust Boundary Model
 
 Processes sharing a host or network are separate trust subjects. The selected
-boundary requirements are:
+boundary requirements are below. Effective reachability is evaluated across
+the process or container listener, container network reachability, host
+publication, reverse proxy or forwarding configuration, and every resulting
+route. A container-internal listener is not itself a host exposure, but it is
+not trusted merely because it is container-local.
 
 | Boundary | Identity and authentication | Authorization, confidentiality, and integrity | Replay/spoofing and credential scope | Failure, evidence, and Vertical Slice 01 |
 | --- | --- | --- | --- | --- |
-| External client → Workflow API | Human/machine principal; production credential or trusted gateway assertion validated by API adapter | Submit/read permission by environment and resource; protected channel outside explicit local mode | Validate issuer/channel, audience, expiry, environment; client credential cannot become component credential | Fail closed; first slice is loopback-only, single-developer, and uses one shared synthetic scope |
+| External client → Workflow API | Human/machine principal; production credential or trusted gateway assertion validated by API adapter | Submit/read permission by environment and resource; protected channel outside explicit local mode | Validate issuer/channel, audience, expiry, environment; client credential cannot become component credential | Fail closed; first slice has only an effective loopback host route, is single-developer, and uses one shared synthetic scope |
 | Operator → administration | Distinct operator/security principal with stronger authentication class | Action/resource/environment permission, reason, approval, separation of duties | Short session, replay-resistant privileged operation, no shared admin credential | Fail closed and durably audit; no administrative interface in first slice |
 | Workflow API/Orchestrator → PostgreSQL | Stable Orchestrator component principal with database credential | Only Orchestrator schemas/operations; protected connection | Credential scoped to environment and runtime, never migration/owner rights | Component not ready for writes; database audit/recovery evidence; selected logically |
 | Agent → Agent persistence | Stable Agent deployment principal | Only its declared Agent data boundary | Separate from Orchestrator and other deployments; rotation overlap | Agent not ready/admitted; receipt/outcome evidence; selected logically |
 | Orchestrator → Event Bus | Broker or protected-channel authentication establishes the transport principal; adapter policy maps it to expected Orchestrator class | Produce commands, consume terminal events only in environment | Broker ACL plus trusted-channel, contract, target, and domain checks; envelope/header claims never authenticate | Stop affected publication/consumption; outbox/inbox evidence; validate both brokers that expose and conceal producer identity |
 | Agent → Event Bus | Broker or protected-channel authentication establishes the Agent transport principal where exposed | Consume intended command subscription; produce terminal events only | Scope by environment, channel, expected logical producer and `agent_id`; stable IDs distinguish redelivery | Fail admission/publication; when producer identity is not exposed, ACLs restrict before delivery and consumers validate configured channel plus domain semantics |
-| Orchestrator → readiness | Generated development credential authenticates the Orchestrator; configured loopback route, response identity, expected `agent_id`, and declaration digest authenticate the Agent within the bounded slice | Credential grants only `readiness.query`; production requires a mutually authenticated protected channel | Development/environment binding, timeout, freshness and rate limits; credential separate from API/database/bus/telemetry | Agent becomes unavailable on failure; credential generated/injected outside source and removed at teardown |
+| Orchestrator → readiness | Generated development credential authenticates the Orchestrator to the Agent; the Orchestrator does not cryptographically authenticate the Agent in the first slice | Credential grants only `readiness.query`; bounded endpoint verification checks the configured loopback route, response contract, environment, `agent_id`, declaration digest, freshness/timeout, and safe response; production requires mutually authenticated, environment-bound, cryptographically protected component identities | Development/environment binding, rate limits, and credential separation from API/database/bus/telemetry; endpoint verification does not prove that the responder controls a credential-backed Agent principal | Agent becomes unavailable on failure; credential generated/injected outside source and removed at teardown; a local process can still take over the configured route or port |
 | Deployment pipeline → Registry | Automation principal and controlled artifact provenance | Author/create/promote/approve/activate are separate permissions | Revision/digest, environment promotion, rollback control | Invalid provenance fails activation; administrative audit; Git-backed flow selected |
 | Registry → Orchestrator | Trusted configured artifact loaded by authenticated component context | Loader validates complete revision, environment, provenance, schema, and approval | No self-registration; digest prevents unnoticed substitution | Core/selection readiness fails closed; load/activation evidence; selected |
 | Deployment configuration → Agent | Controlled artifact/injection boundary | Agent may load only its environment and deployment declaration | Digest, expected `agent_id`, no raw secret in declaration | Agent not ready on mismatch; startup evidence; selected |
@@ -249,10 +257,26 @@ Options:
 | Local-only interface | Useful containment only | Other local processes remain hostile | Defense in depth, never sole production trust |
 
 Vertical Slice 01 retains `LocalDevelopmentAuthorizationPolicy`: explicit
-development environment, loopback-only binding, a synthetic nonportable
-`local-development` principal, only workflow submit/read permissions, and a
-visible reduced-security warning. Wildcard, LAN, public, reverse-proxy-exposed,
-and externally published container bindings are prohibited.
+development environment, an effective host route restricted to loopback, a
+synthetic nonportable `local-development` principal, only workflow submit/read
+permissions, and a visible reduced-security warning.
+
+Deployment validation distinguishes the process or container listener,
+container network reachability, host publication, reverse proxy or forwarding,
+and the effective routes that result. A development container may listen on
+`0.0.0.0:8080` internally and publish `127.0.0.1:8080` on the host only when:
+
+- host publication is restricted to loopback, with no wildcard, LAN, public,
+  or other external route;
+- no reverse proxy, port forward, or equivalent route exposes the API;
+- untrusted containers and processes cannot reach the container network;
+- no production route or credential is present; and
+- deployment and startup validation confirm effective exposure, not merely
+  the container listener address.
+
+A host listener on `0.0.0.0`, LAN or public reachability, an externally
+reachable container network, reverse-proxy or forwarding exposure, shared-host
+or multi-user use, and externally reachable CI remain prohibited.
 
 All callers in this boundary are indistinguishable and share one ownership and
 idempotency scope. It is suitable only for isolated single-developer Vertical
@@ -262,10 +286,12 @@ runner, or LAN requires an explicit development credential or future API
 authentication adapter.
 
 Startup refuses the synthetic policy when the environment is not development,
-the bind is not loopback, forwarded/proxied traffic could expose it, production
-credentials or routes are present, or it receives administrative or
-sensitive-diagnostic permissions. It uses no client credential or identity
-provider and is not proof that a local caller is a particular human.
+the effective host route is not restricted to loopback, an untrusted process
+or container can reach the container network, forwarded/proxied traffic could
+expose it, production credentials or routes are present, or it receives
+administrative or sensitive-diagnostic permissions. It uses no client
+credential or identity provider and is not proof that a local caller is a
+particular human.
 
 ### 11. API Authorization and Workflow Ownership
 
@@ -465,18 +491,27 @@ Orchestrator development component class; is validated by the Agent; is
 replaceable without changing logical identity; is removed at teardown; and is
 never accepted outside development.
 
-The first slice does not claim full mutual authentication. The Orchestrator
-authenticates the Agent through the configured loopback route plus expected
-response identity, configured `agent_id`, environment, and declaration digest.
-Timeout, freshness, rate limit, and safe response checks also apply. This
-bounded mechanism is accepted only for isolated development. Production
-requires a mutually authenticated protected channel.
+The first slice uses one-way credential authentication: the Agent
+authenticates the Orchestrator by validating the generated readiness
+credential. The credential prevents unauthorized readiness callers from
+receiving a response, but it does not prove the identity of the responder to
+the Orchestrator.
+
+The Orchestrator instead performs **bounded development-only Agent endpoint
+verification**. It checks the configured loopback route, expected response
+contract, environment, configured `agent_id`, declaration digest,
+freshness/timeout, and safe response. These checks do not prove that the
+responder controls a credential-backed Agent principal. A local process that
+takes over the configured route or port can still impersonate the endpoint.
+This residual risk is accepted only for isolated single-developer
+development. Production requires mutually authenticated, environment-bound,
+cryptographically protected component identities.
 
 Unauthorized callers receive no capability, dependency, endpoint, credential,
-or detailed health data. Authentication, environment, identity, digest, or
-freshness failure makes that Agent unavailable for new selection without
-making workflow queries unavailable. Unauthenticated readiness is never a
-production option.
+or detailed health data. Caller-authentication failure or an endpoint
+contract, environment, `agent_id`, digest, freshness, or timeout mismatch makes
+that Agent unavailable for new selection without making workflow queries
+unavailable. Unauthenticated readiness is never a production option.
 
 ### 20. Registry Declaration Trust
 
@@ -511,9 +546,14 @@ collision-resistant but are always authorization-scoped by environment and
 security context.
 
 The unauthenticated local API boundary exists only in isolated single-developer
-development. Shared hosts, LAN/CI access, forwarded traffic, production routes,
-or production credentials require authenticated isolation rather than the
-synthetic principal.
+development. Isolation is based on effective reachability, not the process or
+container listener alone. A container-internal wildcard listener is allowed
+only when host publication is loopback-only, the container network is
+inaccessible to untrusted containers and processes, and no proxy, forward,
+external route, production route, or production credential exists. Host
+wildcard listeners, externally reachable container networks, shared hosts,
+LAN/externally reachable CI access, and forwarded or proxied traffic require
+authenticated isolation rather than the synthetic principal.
 
 ### 22. Persistence Security
 
@@ -842,7 +882,7 @@ export, and administrative disclosure.
 | Compromised Agent | No Orchestrator/peer data access; target/capability limits | Outcome/integrity/readiness anomalies | Revoke/drain, quarantine, replace, reconcile | Authorized capability side effects |
 | Compromised Orchestrator | Agent admission and persistence separation | Unexpected channel/policy/audit behavior | Revoke, stop, restore/reconcile | Command authority is high impact |
 | Malicious operator | Separation, approval, least privilege | Durable administrative audit/alerts | Revoke role/session, reconcile | Collusion or approved misuse |
-| Spoofed readiness | Development credential authenticates Orchestrator; loopback route/response identity/environment/digest checks Agent | Identity/digest/route mismatch | Mark unavailable, replace credential/route | First slice lacks cryptographic Agent authentication; accepted only in isolated development |
+| Spoofed readiness | Development credential authenticates the Orchestrator to the Agent; bounded endpoint verification checks route, response contract, environment, `agent_id`, digest, freshness/timeout, and safe response | Contract/environment/identity/digest/route/freshness mismatch | Mark unavailable, replace credential/route | The Orchestrator does not cryptographically authenticate the Agent; a local process can take over the route or port, accepted only in isolated single-developer development |
 | Unauthorized Registry change | Git review, provenance, approval, digest | Activation/audit mismatch | Reject/rollback revision | Trusted pipeline compromise |
 | Cross-environment routing | Separate credentials, ACLs, policy | Crossover security event | Reject, isolate, revoke, reconcile | Misconfiguration availability loss |
 | Forged producer | Broker authentication/ACL, trusted adapter context, logical producer/domain checks | Transport/channel/claim mismatch | Reject/quarantine, revoke | Some brokers do not expose per-message producer identity to consumers |
@@ -858,7 +898,7 @@ export, and administrative disclosure.
 | Policy rollback attack | Versioned approved activation | Revision/audit mismatch | Reject or restore approved revision | Compromised approver |
 | Audit tampering | Append-only application behavior and access separation | Integrity/reconciliation checks | Isolate, restore, incident handling | Backend-admin compromise |
 | Same-host lateral movement | Separate credentials/users/containers, no locality trust | Cross-principal access attempts | Revoke/redeploy/isolate host | Host-admin compromise |
-| Untrusted local tooling | Loopback-only single-developer mode, no production routes/credentials | Visible mode/startup refusal | Stop, clean credentials/environment | Every local caller shares all synthetic-scope workflows |
+| Untrusted local tooling | Effective loopback-only single-developer route, isolated container network, no proxy/forward or production routes/credentials | Visible mode and startup/deployment exposure validation | Stop, clean credentials/environment, remove route | Every permitted local caller shares all synthetic-scope workflows |
 
 ### 40. Supply-Chain and Artifact Trust
 
@@ -879,26 +919,35 @@ credentials. No signing or vulnerability-scanning platform is selected.
 Local development uses no production credential, route, Registry binding,
 policy, or data. Vertical Slice 01 selects the explicit unauthenticated
 `LocalDevelopmentAuthorizationPolicy` described in Section 10, with synthetic
-local principal and scope, loopback-only bind, visible warning, narrow
-submit/read permission, redacted logs, isolated persistence/broker credentials,
-and cleanup on teardown. All callers are indistinguishable and may read/replay
-workflows in that shared synthetic ownership scope; there is no individual
-developer attribution.
+local principal and scope, an effective host route restricted to loopback,
+visible warning, narrow submit/read permission, redacted logs, isolated
+persistence/broker credentials, and cleanup on teardown. All callers are
+indistinguishable and may read/replay workflows in that shared synthetic
+ownership scope; there is no individual developer attribution.
 
 This risk is accepted only for isolated single-developer Vertical Slice 01.
-Wildcard, LAN, public, reverse-proxy-exposed, externally published container,
-shared-workstation, shared-host, and multi-user CI use is prohibited. Access
-from another machine, CI runner, shared host, or LAN requires an explicit
-development API credential or future authentication adapter.
+An internal container listener such as `0.0.0.0:8080` is allowed only with
+host publication such as `127.0.0.1:8080`, no other effective route, no
+proxy/forward, and a container network inaccessible to untrusted containers or
+processes. Host wildcard, LAN, public, reverse-proxy, externally reachable
+container-network, shared-workstation, shared-host, multi-user CI, and
+externally reachable CI use is prohibited. Access from another machine, CI
+runner, shared host, or LAN requires an explicit development API credential or
+future authentication adapter.
 
-Startup refuses when the environment is not development, bind is not loopback,
-forwarding could expose the API, production credentials/routes are present, or
+Deployment and startup refuse the synthetic policy when the environment is
+not development, effective exposure is not restricted to host loopback, an
+untrusted process or container can reach the container network, forwarding or
+proxying could expose the API, production credentials/routes are present, or
 the synthetic policy has administrative or sensitive-diagnostic permissions.
 
 Readiness uses its separate generated development credential, protected
-injection, loopback route and expected Agent identity/digest checks, and
-teardown removal. Fake identities/credentials support repeatable tests; local
-convenience never becomes a production default.
+injection, teardown removal, and bounded development-only Agent endpoint
+verification. The Agent authenticates the Orchestrator; the Orchestrator checks
+the route, response contract, environment, `agent_id`, declaration digest,
+freshness/timeout, and safe response but does not cryptographically
+authenticate the Agent. Fake identities/credentials support repeatable tests;
+local convenience never becomes a production default.
 
 ### 42. Testing Strategy
 
@@ -936,11 +985,19 @@ Tests follow `docs/testing/README.md`:
   credential, skew, fail closed, selected read-only degradation.
 - **Confidentiality:** no secret in logs/traces/Registry/messages, safe public
   errors, protected diagnostics and data classes.
-- **Local/readiness:** generated credential scope/injection/removal,
-  Orchestrator authentication, expected response identity/digest, rejection
-  outside development, loopback-only API, refusal of wildcard/LAN/proxy/
-  published-container bindings, production-route/credential refusal, shared
-  synthetic ownership, and prohibited admin/sensitive permissions.
+- **Local/readiness:** generated credential scope/injection/removal and Agent
+  authentication of the Orchestrator; proof that unauthorized callers receive
+  no readiness response; bounded endpoint verification of configured loopback
+  route, response contract, environment, `agent_id`, declaration digest,
+  freshness/timeout, and safe response; explicit proof that this does not
+  cryptographically authenticate the Agent; process/container listener versus
+  host-publication validation; permitted container
+  `0.0.0.0:8080` → host `127.0.0.1:8080`; rejection of host wildcard,
+  LAN/public, proxy/forward, externally reachable container network, untrusted
+  container/process network access, shared-host/multi-user, externally
+  reachable CI, and production-route/credential configurations; effective
+  route verification, shared synthetic ownership, and prohibited
+  admin/sensitive permissions.
 
 Fast tests use fake credentials and identities. Integration/resilience/security
 tests are required to prove real certificate/token validation, broker ACLs,
@@ -954,7 +1011,7 @@ authorization, and secret ports. Product/provider types never cross them.
 
 | Option | Fit for humans, machines, components, and local use | Portability, lifecycle, complexity, and decision |
 | --- | --- | --- |
-| Generated development credential | Machine/local only; no human federation | Selected for first-slice readiness only, file-injected and `readiness.query` scoped; not selected for the first-slice API or production |
+| Generated development credential | One-way machine/local caller authentication only; no human federation and no responder proof | Selected for first-slice readiness only: file-injected and `readiness.query` scoped, it authenticates the Orchestrator to the Agent but does not cryptographically authenticate the Agent to the Orchestrator; not selected for the first-slice API or production |
 | HTTP Basic | Human/machine password on every request | Portable but weak lifecycle/delegation and broad replay impact; rejected |
 | API keys | Simple machine client | Portable/offline, weak identity/delegation, manual rotation; rejected as production standard |
 | Signed bearer tokens | Human/machine claims, audience/expiry | Portable and offline validation, but key/revocation/replay complexity; supported class, format deferred |
@@ -982,8 +1039,8 @@ Unraid. Entra/cloud stores need connectivity; Keycloak, SPIRE, and Vault add
 services unsuitable for the minimal one/two-machine slice. OAuth/OIDC and
 SPIFFE preserve future migration through standards, but no provider, token,
 PKI, workload-identity, or secret product is selected. The generated readiness
-credential is a bounded development mechanism, not a production service
-identity standard.
+credential plus endpoint verification is a bounded development mechanism, not
+mutual authentication or a production service identity standard.
 
 ### 44. Initial Vertical Slice Decision
 
@@ -992,8 +1049,11 @@ Vertical Slice 01 uses:
 - explicit development environment and stable local Orchestrator and Test Agent
   deployment identities, distinct from process IDs;
 - `LocalDevelopmentAuthorizationPolicy` with no client credential, synthetic
-  local principal and `idempotency_scope_id`, loopback-only unpublished bind,
-  visible warning, shared ownership/replay, and submit/read only;
+  local principal and `idempotency_scope_id`, an effective host route
+  restricted to loopback, visible warning, shared ownership/replay, and
+  submit/read only; a container-internal wildcard listener is allowed only
+  with loopback-only host publication, isolated container networking, and no
+  proxy, forward, or other effective route;
 - trusted Git/configuration-backed Registry with no Agent self-registration;
 - distinct injected database and Event Bus credentials and logical
   producer/consumer permissions;
@@ -1001,9 +1061,11 @@ Vertical Slice 01 uses:
   capability/version, contract, environment, and attempt;
 - a generated, protected, file-injected development readiness credential,
   separate from every other credential and scoped only to `readiness.query`;
-  the Agent validates the Orchestrator, while the Orchestrator validates the
-  Agent through loopback route, response identity, environment, expected
-  `agent_id`, declaration digest, timeout, and freshness;
+  the Agent authenticates the Orchestrator, while the Orchestrator performs
+  bounded development-only Agent endpoint verification of the configured
+  loopback route, response contract, environment, expected `agent_id`,
+  declaration digest, freshness/timeout, and safe response without
+  cryptographically authenticating the Agent;
 - no raw token or secret in message, contract, Registry, log, or trace;
 - file/injected local secrets, mandatory redaction and ADR-0009 audit
   boundaries;
@@ -1056,7 +1118,7 @@ defense-in-depth security with:
 | Trusted Agent emits outcome | Agent principal + admitted attempt | Broker-exposed transport principal when available, otherwise ACL/trusted channel; Orchestrator validates domain claims | `terminal_event.produce`; expected Agent class/attempt/channel/env | Credential bound | Agent outcome/outbox + Orchestrator inbox | Reject/quarantine; unauthorized transport and forged producer tests |
 | Agent cannot widen capability | Registry/deployment revision + policy | Authenticated Agent and validated command | Execute intersection; Agent admission | Recorded revision + emergency revocation | Selection/admission/outcome evidence | Reject; declared/authenticated mismatch tests |
 | Registry activation controlled | Artifact provenance + admin policy | Automation/operator credential; loader validates | `registry.revision.manage`; environment | Immediate revision | Administrative audit | No activation; tamper/approval tests |
-| First-slice readiness bounded | Expected development Orchestrator/Agent identities + route/digest | Generated credential validated by Agent; Orchestrator validates loopback route/response identity/digest | `readiness.query`; `agent_id`/development | Credential lifetime + short freshness | Readiness identity/digest evidence | Agent unavailable; injection/scope/teardown/wrong-Agent tests |
+| First-slice readiness bounded | Generated credential proves the readiness caller is the expected development Orchestrator class; configured declaration supplies expected endpoint attributes | Agent validates the generated credential; Orchestrator verifies route, response contract, environment, `agent_id`, digest, freshness/timeout, and safe response but does not cryptographically authenticate the Agent | `readiness.query`; development only | Credential lifetime + short freshness | Caller-authentication and endpoint-verification evidence | Agent unavailable; credential/injection/scope/teardown, endpoint mismatch, and local route/port takeover tests |
 | Environment crossover rejected | Environment trust policy | Every credential/adapter validates environment | All actions; all enforcement points | Credential/policy bound | Security crossover audit | Reject/contain; cross-env tests |
 | Database least privilege | Database grants + component mapping | Database credential validated by PostgreSQL | Persistence permission/schema/env | Connection/credential bound | DB/application audit and records | Not-ready/denied; cross-schema tests |
 | No secret in contracts/telemetry | Classification and emission policy | Boundary validators/redactors | No secret export; contract/telemetry adapters | Policy revision | Security audit for violations | Reject/drop/rotate; leakage tests |
@@ -1149,7 +1211,7 @@ multiple production environments.
 | --- | --- |
 | Component identity confused with process | Stable logical principal; process ID diagnostics only |
 | `agent_id` treated as authentication | Credential-to-principal proof plus declaration intersection |
-| Network locality treated as trust | Loopback-only single-developer exception; refuse proxy/LAN/shared-host/production exposure |
+| Network locality treated as trust | Validate effective reachability across listener, container network, host publication, proxy/forwarding, and routes; allow container-internal wildcard only with loopback host publication and isolation; refuse host wildcard, proxy/LAN/public/shared-host/externally reachable CI or container-network, and production exposure |
 | Valid token treated as universal | Issuer/audience/environment/scope plus semantic permission |
 | Request replay crosses security scopes | Trusted adapter resolves stable `idempotency_scope_id`; block multi-principal production until ADR-0004/ADR-0006 are reconciled |
 | Workflow ID guessing | Authorization before disclosure and safe not-found |
@@ -1160,13 +1222,13 @@ multiple production environments.
 | Broker capability overstated | Model separately whether consumer adapter receives producer identity; never invent connection identity |
 | Producer claim/header treated as authentication | Treat payload, headers, topic, group, `agent_id`, and trace as claims only |
 | Broker ACL considered sufficient | Repeat contract, target, capability, environment, logical producer, and identity validation |
-| Readiness spoofing | Dedicated credential authenticates Orchestrator; loopback response identity/digest bounds development limitation |
+| Readiness spoofing | Dedicated credential authenticates only the Orchestrator caller; bounded endpoint verification checks route/contract/environment/`agent_id`/digest/freshness/safe response, while explicitly accepting local route or port takeover risk only in isolated single-developer development |
 | Registry tampering | Git review, provenance, complete revision, digest, approval |
 | Stale credential/policy cache | Maximum age, readiness, fail closed, visible revocation window |
 | Revocation delay or unsupported cancellation | Versioned emergency action defines admission/dependency/cancellation/completion/outcome/reconciliation; no inferred failure |
 | Rotation outage | Old/new overlap, staged validation, rollback |
 | Secret leakage | Injection, prohibition, redaction tests, immediate rotation |
-| Development bypass reaches production | Refuse nondevelopment, nonloopback, proxy exposure, production routes/credentials, and privileged synthetic policy |
+| Development bypass reaches production | Deployment/startup validate effective exposure and refuse nondevelopment, host wildcard, external container-network, proxy/forwarding, shared/remote, production routes/credentials, and privileged synthetic policy |
 | Shared local principal leaks workflows | Restrict to isolated single developer; authenticated adapter required for shared/remote access |
 | Operator escalation | Separate roles, semantic permissions, approval, audit |
 | Missing separation of duties | Author/build/approve/activate distinctions for high impact |
@@ -1187,9 +1249,16 @@ multiple production environments.
 - ADR-0001 through ADR-0009 remain Accepted.
 - Vertical Slice 01 remains explicitly development-only and has one synthetic
   API principal/`idempotency_scope_id`, one Orchestrator, and one Test Agent
-  deployment on an isolated single-developer loopback boundary.
+  deployment on an isolated single-developer boundary whose only effective host
+  API route is loopback.
+- A container-internal wildcard listener is permitted only with loopback-only
+  host publication, no proxy/forward/external route, and a container network
+  inaccessible to untrusted containers and processes.
 - The development deployment can generate, protect, inject, replace, and remove
   a readiness-only credential outside source control.
+- That readiness credential authenticates the Orchestrator to the Agent only.
+  Orchestrator endpoint verification does not cryptographically authenticate
+  the Agent, and a local process may take over the configured route or port.
 - PostgreSQL and the Event Bus can enforce distinct logical credentials and
   permissions selected in their accepted ADRs.
 - Deployment can inject secrets outside source control.
@@ -1201,10 +1270,12 @@ multiple production environments.
 ### 50. Open Questions
 
 1. How will formal ADR-0004/ADR-0006 amendment or supersession define
-   `idempotency_scope_id`, API semantics, accepted-request uniqueness,
-   replay/conflict lookup, migration/compatibility, and safe errors?
-2. What mutually authenticated readiness mechanism replaces the generated
-   development credential for production?
+   `idempotency_scope_id`, accepted-request uniqueness, replay/conflict
+   behavior, persistence lookup, migration/compatibility, and safe external
+   errors? This is the only remaining blocker to accepting ADR-0010.
+2. What environment-bound, cryptographically protected mutual component
+   authentication mechanism replaces the one-way readiness credential and
+   bounded endpoint verification for production?
 3. What token format, issuer/audience, and authentication adapter are selected
    for the first nonlocal API?
 4. What exact permission/role/policy document and revision naming formats apply?
@@ -1243,9 +1314,15 @@ implementation configuration are out of scope.
 - [ ] Hybrid roles, semantic permissions, bounded attributes, and local
       versioned policy are approved.
 - [ ] Permission taxonomy and environment/resource scopes are stable.
-- [ ] First-slice unauthenticated API is loopback-only, single-developer,
-      unpublished/unproxied, one shared synthetic scope, and cannot start with
+- [ ] First-slice unauthenticated API is single-developer, has only an effective
+      loopback host route and one shared synthetic scope, and cannot start with
       production routes/credentials or privileged permissions.
+- [ ] Effective exposure validation distinguishes process/container listener,
+      container network reachability, host publication, proxy/forwarding, and
+      the resulting routes.
+- [ ] A container-internal `0.0.0.0:8080` listener is permitted only with host
+      publication on `127.0.0.1:8080`, no other effective route, no
+      proxy/forward, and no untrusted container or process network access.
 - [ ] Future API access uses access credentials, never ID tokens as access
       tokens.
 - [ ] Workflow ownership, sharing, safe not-found, and correlation-group access
@@ -1255,9 +1332,11 @@ implementation configuration are out of scope.
       never derived from client/domain/session/credential identifiers.
 - [ ] Equivalent, conflicting, different-scope, disablement, scope-migration,
       operator, and local-development replay semantics are explicit.
-- [ ] The accepted-request conflict with ADR-0004/ADR-0006 blocks ADR-0010
-      acceptance until API, key, uniqueness, lookup, migration, compatibility,
-      and safe-error semantics are formally amended or superseded.
+- [ ] The accepted-request conflict with ADR-0004/ADR-0006 is the only blocker
+      to ADR-0010 acceptance and remains so until `idempotency_scope_id`,
+      accepted-request uniqueness, replay/conflict behavior, persistence
+      lookup, migration/compatibility, and safe external errors are formally
+      amended or superseded.
 - [ ] User, support, operator, security, automation, DBA, and break-glass
       responsibilities are separate.
 - [ ] Stable component principal survives restart and credentials are
@@ -1277,10 +1356,17 @@ implementation configuration are out of scope.
 - [ ] Message validation, redelivery, hostile replay, and no-signing decision
       are clear.
 - [ ] First-slice readiness uses a generated, protected, readiness-only
-      development credential plus loopback Agent identity/environment/digest
-      checks and teardown removal.
-- [ ] The first-slice one-way credential limitation is isolated to development;
-      production still requires a mutually authenticated protected channel.
+      development credential that the Agent validates to authenticate the
+      Orchestrator and that unauthorized callers cannot use to obtain a
+      readiness response.
+- [ ] The Orchestrator performs bounded development-only Agent endpoint
+      verification of the configured loopback route, response contract,
+      environment, `agent_id`, declaration digest, freshness/timeout, and safe
+      response, without claiming cryptographic Agent authentication.
+- [ ] The accepted readiness residual risk—that a local process can take over
+      the configured route or port—is isolated to single-developer
+      development; production requires mutually authenticated,
+      environment-bound, cryptographically protected component identities.
 - [ ] Registry author/provenance/approval/activation/rollback trust is explicit.
 - [ ] Environment credentials, data, Registry, bus, policy, and approval are
       isolated.
@@ -1321,9 +1407,11 @@ implementation configuration are out of scope.
 - [ ] Threat controls state detection, containment/recovery, and residual risk.
 - [ ] Supply-chain trust covers source, dependencies, images, configuration,
       migrations, artifacts, and Agents.
-- [ ] Local development refuses wildcard/LAN/public/proxy/published-container,
-      shared-host/CI, production credential/route, and privileged synthetic
-      policy configurations.
+- [ ] Local development refuses host wildcard, LAN/public, proxy/forward,
+      externally reachable container-network, untrusted container/process
+      network access, shared-host/multi-user, externally reachable CI,
+      production credential/route, and privileged synthetic policy
+      configurations.
 - [ ] Tests distinguish fast policy proof from real credential, ACL, network,
       process, and revocation proof.
 - [ ] Technology evaluation selects boundaries and first-slice behavior without
