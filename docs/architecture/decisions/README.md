@@ -17,6 +17,7 @@ technical and structural choices.
 | [ADR-0008](ADR-0008-capability-registry-and-agent-discovery.md) | Capability Registry and Agent Discovery | Accepted |
 | [ADR-0009](ADR-0009-observability-telemetry-and-audit-correlation.md) | Observability, Telemetry, and Audit Correlation | Accepted |
 | [ADR-0010](ADR-0010-security-identity-authorization-and-trust-boundaries.md) | Security, Identity, Authorization, and Trust Boundaries | Proposed |
+| [ADR-0011](ADR-0011-principal-scoped-api-idempotency-and-accepted-request-ownership.md) | Principal-Scoped API Idempotency and Accepted-Request Ownership | Proposed |
 
 ## Naming
 
