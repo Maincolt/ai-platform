@@ -1,8 +1,8 @@
 # ADR-0011: Principal-Scoped API Idempotency and Accepted-Request Ownership
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-28
-- **Supersedes:** Upon acceptance, only the global `request_id` uniqueness and
+- **Supersedes:** Only the global `request_id` uniqueness and
   related replay assumptions identified in Section 16 of ADR-0004 and ADR-0006
 - **Superseded by:** None
 
@@ -52,9 +52,9 @@ API idempotency and replay, request and workflow ownership, authorization and
 disclosure, persistence uniqueness, request-fingerprint identity, principal
 lifecycle, and migration from the earlier global request model.
 
-It narrowly amends ADR-0004 and ADR-0006. Until this ADR is Accepted, their
-global uniqueness rules remain binding and multi-principal production API use
-remains blocked as described by ADR-0010.
+It narrowly amends ADR-0004 and ADR-0006. Its acceptance supersedes their
+global uniqueness rules only as identified in Section 16 and resolves the
+multi-principal accepted-request blocker described by ADR-0010.
 
 ## Decision Drivers
 
@@ -918,7 +918,7 @@ explicit compatibility plan.
 
 ### 16. Amendments to ADR-0004 and ADR-0006
 
-Upon acceptance, this ADR supersedes only the following earlier requirements.
+This ADR supersedes only the following earlier requirements.
 Every unrelated decision in ADR-0004 and ADR-0006 remains Accepted and
 unchanged.
 
@@ -1193,12 +1193,11 @@ audit durability, or migration guarantees.
 - [ ] Remaining questions are implementation choices and do not leave the
       architectural model undecided.
 
-The architectural model in this ADR is internally complete, all remaining
-questions are implementation choices, and ADR-0011 is ready for acceptance
-review while remaining Proposed. If ADR-0011 is Accepted, it resolves the sole
-accepted-request scope blocker identified by ADR-0010. ADR-0010 may then move
-through acceptance review without another idempotency architecture decision,
-provided its own remaining checklist is approved.
+The acceptance review completed on 2026-07-28 found this architectural model
+internally complete. All remaining questions are implementation choices.
+ADR-0011 resolves the sole accepted-request scope blocker identified by
+ADR-0010, which may proceed through acceptance review without another
+idempotency architecture decision.
 
 ## Related Decisions
 

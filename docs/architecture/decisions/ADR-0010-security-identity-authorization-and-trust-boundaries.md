@@ -1,7 +1,7 @@
 # ADR-0010: Security, Identity, Authorization, and Trust Boundaries
 
-- **Status:** Proposed
-- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Date:** 2026-07-28
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -27,13 +27,13 @@ identity without putting provider types or secrets in domain contracts.
 - ADR-0004 makes the accepted-request mapping unique by `request_id`.
   Vertical Slice 01 repeats that global uniqueness. A multi-principal API must
   use an adapter-resolved `idempotency_scope_id` and construct the logical key
-  from environment, that scope, operation, and `request_id` to prevent one
+  from environment, operation, that scope, and `request_id` to prevent one
   security scope from discovering or blocking another through a guessed
   identifier. Vertical Slice 01 has one synthetic local-development scope, so
-  behavior is unchanged there. ADR-0010 remains Proposed until ADR-0004 and
-  ADR-0006 are formally amended or superseded to define API semantics,
-  persistence uniqueness, replay/conflict behavior, migration/compatibility,
-  and security-safe external errors.
+  behavior is unchanged there. ADR-0011 partially supersedes the global
+  accepted-request assumptions in ADR-0004 and ADR-0006 and defines scoped API
+  semantics, persistence uniqueness, replay/conflict and owner-intent behavior,
+  migration/compatibility, and security-safe external errors.
 - Vertical Slice 01 permits an unauthenticated local API only through
   `LocalDevelopmentAuthorizationPolicy`. This is compatible with an explicit
   development exception when it also requires development environment,
@@ -295,21 +295,23 @@ particular human.
 
 ### 11. API Authorization and Workflow Ownership
 
-Workflow acceptance durably records owner principal/security-domain reference,
-`idempotency_scope_id`, environment, authorization decision, and policy
-revision with the accepted request and workflow. The submitter receives read
-permission through ownership, not merely because submission permission exists.
-Additional principals may read only through explicit resource policy,
-delegation, or operator permission.
+Workflow acceptance durably records the immutable acceptance actor, immutable
+accepted owner intent, current workflow owner, `idempotency_scope_id`,
+environment, authorization decision, and policy revision with the accepted
+request and workflow. The current owner receives owner-based read eligibility
+under policy. The acceptance actor receives no read permission solely because
+it submitted the request. Additional principals may read only through explicit
+resource policy, delegation, or operator permission.
 
-Equivalent accepted-request replay requires the same idempotency security
-scope and current permission to view the workflow. A request conflict reveals
-no existing workflow data. Retrieval checks authorization before returning
-content. Unauthorized and nonexistent workflows use the same safe external
-response where policy requires enumeration resistance. Knowing
-`workflow_id`, `request_id`, or `correlation_id` grants nothing. Correlation
-group lookup authorizes every returned workflow or filters it without leaking
-membership.
+Equivalent accepted-request replay requires the same accepted-request key, an
+equivalent historical fingerprint, matching immutable accepted owner intent,
+and current authorization for the current workflow owner. A request conflict
+or owner-intent mismatch reveals no existing workflow data. Retrieval checks
+authorization before returning content. Unauthorized and nonexistent
+workflows use the same safe external response where policy requires
+enumeration resistance. Knowing `workflow_id`, `request_id`, or
+`correlation_id` grants nothing. Correlation group lookup authorizes every
+returned workflow or filters it without leaking membership.
 
 In local-development mode, every caller resolves to the same synthetic
 principal and `idempotency_scope_id`. Those callers may read and replay every
@@ -321,22 +323,27 @@ isolation exists.
 The trusted API security adapter creates or resolves a normalized
 `idempotency_scope_id`. It is stable across credential rotation,
 environment-scoped, nonsecret, not directly controlled by arbitrary client
-input, and able to represent an API client, machine principal, individual
-principal, or tenant/security domain according to the accepted client model.
-It is durably stored with accepted-request evidence.
+input, and able to partition a shared API client, machine integration,
+individual security scope, or explicitly shared security domain according to
+the accepted client model. It is not a principal, owner, role, tenant, or
+authorization grant. It is durably stored with accepted-request evidence.
 
 `idempotency_scope_id` is never inferred from `request_id`, workflow ID,
 correlation ID, token text, session ID, transient credential ID, or another
 possession-only value. The target multi-principal uniqueness key is logically:
 
-`environment + idempotency_scope_id + operation + request_id`.
+`(environment, operation, idempotency_scope_id, request_id)`.
 
 Operation separates request families. The canonical request fingerprint remains
 independently validated:
 
-- same scope, operation, and `request_id` with an equivalent fingerprint
-  returns existing identifiers and currently authorized state;
+- same scope, operation, and `request_id` with an equivalent historical
+  fingerprint and matching immutable accepted owner intent returns existing
+  identifiers and currently authorized state;
 - the same key with a conflicting fingerprint returns the stable safe conflict;
+- the same key with different resolved owner intent returns no existing
+  workflow and creates no duplicate under ADR-0011's safe non-disclosing
+  policy;
 - a different scope may use the same `request_id` without discovering or
   blocking the first mapping;
 - credential rotation preserves scope and replay behavior;
@@ -344,17 +351,19 @@ independently validated:
   disclosure unless an explicit current permission applies;
 - scope migration is an explicit versioned, audited migration that preserves
   old lookup/compatibility and cannot silently reassign ownership;
-- an operator retrieves under operator permission and audit policy rather than
-  changing or impersonating the idempotency scope; and
+- the current request actor is distinct from immutable original acceptance
+  attribution; an operator retrieves under operator permission and audit
+  policy rather than changing original attribution or impersonating the
+  idempotency scope; and
 - local-development requests use one synthetic scope that cannot later be
   claimed by a production identity.
 
-ADR-0004 and current ADR-0006/Vertical Slice language instead require global
-uniqueness by `request_id`. ADR-0010 remains Proposed until those decisions are
-formally amended or superseded to define API contract semantics, the
-accepted-request key, persistence uniqueness, replay lookup, conflict behavior,
-migration/compatibility, and security-safe external errors. The single-scope
-first slice retains existing behavior until then.
+ADR-0011 is authoritative for accepted-request identity, immutable acceptance
+actor and owner intent, current actor and owner, persistence uniqueness, replay
+lookup/equivalence, conflicts, scope migration, compatibility, and safe
+external errors. It partially supersedes only the conflicting global
+`request_id` assumptions in ADR-0004 and ADR-0006. The single-scope first slice
+retains its existing behavior.
 
 ### 13. Human User and Operator Separation
 
@@ -770,7 +779,7 @@ not rewritten by revocation.
 | Failure | Behavior |
 | --- | --- |
 | API authentication/authorization failure | Fail closed with safe indistinguishable response where needed; never create workflow |
-| Accepted-request lookup in another `idempotency_scope_id` | Treat as a separate scope without disclosure; current global ADR semantics block multi-principal production until reconciled |
+| Accepted-request lookup in another `idempotency_scope_id` | Treat as a separate ADR-0011 identity without disclosure; owner-intent mismatch in an occupied key also returns no workflow and creates no duplicate |
 | Identity provider/key unavailable | Never become anonymous; locally verifiable unexpired cached evidence may serve allowed reads within policy, otherwise fail closed |
 | Ordinary component credential expiry/rotation | Stop new connections after the bounded window; admitted work may finish under recorded policy; liveness may remain true while affected readiness is false |
 | Emergency revocation | Reject future admission and apply the recorded policy to future steps; never infer cancellation or business failure without ADR-0007 evidence |
@@ -886,7 +895,7 @@ export, and administrative disclosure.
 | Unauthorized Registry change | Git review, provenance, approval, digest | Activation/audit mismatch | Reject/rollback revision | Trusted pipeline compromise |
 | Cross-environment routing | Separate credentials, ACLs, policy | Crossover security event | Reject, isolate, revoke, reconcile | Misconfiguration availability loss |
 | Forged producer | Broker authentication/ACL, trusted adapter context, logical producer/domain checks | Transport/channel/claim mismatch | Reject/quarantine, revoke | Some brokers do not expose per-message producer identity to consumers |
-| Replayed API request | Adapter-resolved idempotency scope, fingerprint, authentication | Replay/conflict/scope audit | Return existing safely or treat different scope independently | Global-key conflict until ADR-0004/ADR-0006 are reconciled |
+| Replayed API request | Adapter-resolved idempotency scope, semantic operation, historical fingerprint, accepted owner intent, and current authorization under ADR-0011 | Replay/conflict/owner-mismatch/scope audit according to policy | Return existing safely only for equivalent authorized replay; otherwise deny safely or treat a different scope independently | Shared-scope identifier consumption remains possible, but cannot disclose or duplicate another owner's workflow |
 | Replayed message | Immutable ID, inbox/receipt, target/auth | Duplicate/conflict disposition | Deduplicate/quarantine | Stolen valid credential within scope |
 | Trace spoofing | ADR-0009 trust limits | Sanitization/drop metrics | Ignore context | Diagnostic confusion within accepted bounds |
 | Secret leakage | No-contract/log rules, redaction, injection | Secret scanning once configured, audit | Revoke/rotate and purge safely | Detection may be delayed |
@@ -1112,7 +1121,7 @@ defense-in-depth security with:
 | --- | --- | --- | --- | --- | --- | --- |
 | Authorized clients submit | Principal authority + active policy | Shared local-development context initially; future access credential validated by API | `workflow.submit`; API/Orchestrator; environment | Per request; cache bound | Accepted owner/scope/policy decision | No workflow; local-boundary and future credential tests |
 | Retrieval controlled | Workflow owner/share + current policy | Authenticated request at API | `workflow.read`; workflow/environment | Per read | Access/denial audit where policy requires | Safe not-found; ownership/guessing tests |
-| Replay cannot cross security scope | Adapter-resolved `idempotency_scope_id` + fingerprint policy | Authenticated/synthetic API context; API resolves scope | Environment/scope/operation/request key; API/Orchestrator | Stable across credential rotation | Mapping scope/fingerprint/revision | Separate scope without disclosure; equivalent/conflict/migration tests; ADR conflict blocks production |
+| Replay cannot cross security scope or owner intent | ADR-0011 scope mapping + accepted owner intent + fingerprint policy | Authenticated/synthetic current actor context; API resolves scope and owner intent | Environment/operation/scope/request key plus owner-intent equivalence; API/Orchestrator | Stable across credential rotation; original acceptance evidence immutable | Mapping scope/owner/actor/fingerprint/revision | Separate scope or owner mismatch without disclosure/duplication; equivalent/conflict/migration tests |
 | Only Orchestrator commands | Component principal + channel policy | Broker-exposed transport principal when available, otherwise pre-delivery ACL + configured trusted adapter channel | `command.produce`; expected logical producer/channel/environment plus domain checks | Credential/ACL cache bound | Orchestrator outbox + Agent receipt/rejection | Reject/quarantine; both broker-capability modes and forged claim tests |
 | Intended Agent consumes | Agent principal + declaration | Broker credential validated by adapter and Agent | `command.consume`; channel/`agent_id`/environment | Credential/policy bound | Receipt/admission audit | Reject; wrong-agent/cross-env tests |
 | Trusted Agent emits outcome | Agent principal + admitted attempt | Broker-exposed transport principal when available, otherwise ACL/trusted channel; Orchestrator validates domain claims | `terminal_event.produce`; expected Agent class/attempt/channel/env | Credential bound | Agent outcome/outbox + Orchestrator inbox | Reject/quarantine; unauthorized transport and forged producer tests |
@@ -1147,15 +1156,16 @@ defense-in-depth security with:
 - Local unauthenticated mode gives every local caller the same ownership and
   replay authority and is unusable on shared or remotely reachable hosts.
 - Multiple enforcement layers can disagree and require careful diagnostics.
-- Multi-principal `idempotency_scope_id` needs accepted API/persistence
-  contract, migration, and error-semantics follow-up.
+- Multi-principal idempotency adds the accepted-request scope, immutable
+  acceptance evidence, owner-intent equivalence, migration, and safe-error
+  complexity defined by ADR-0011.
 
 #### Migration Impact
 
-No security implementation exists. Multi-principal production use requires
-reconciling the `idempotency_scope_id` accepted-request key and compatibility,
-adding normalized principal/policy evidence, and selecting production
-credentials without changing domain identity.
+No security implementation exists. Multi-principal production implementation
+must realize ADR-0011's scoped accepted-request key, owner/actor evidence,
+compatibility, and migration rules; add normalized principal/policy evidence;
+and select production credentials without changing domain identity.
 
 #### Developer Impact
 
@@ -1213,7 +1223,7 @@ multiple production environments.
 | `agent_id` treated as authentication | Credential-to-principal proof plus declaration intersection |
 | Network locality treated as trust | Validate effective reachability across listener, container network, host publication, proxy/forwarding, and routes; allow container-internal wildcard only with loopback host publication and isolation; refuse host wildcard, proxy/LAN/public/shared-host/externally reachable CI or container-network, and production exposure |
 | Valid token treated as universal | Issuer/audience/environment/scope plus semantic permission |
-| Request replay crosses security scopes | Trusted adapter resolves stable `idempotency_scope_id`; block multi-principal production until ADR-0004/ADR-0006 are reconciled |
+| Request replay crosses security scopes or owners | Enforce ADR-0011 scoped lookup, immutable accepted owner intent, current authorization, safe mismatch behavior, and explicit migration |
 | Workflow ID guessing | Authorization before disclosure and safe not-found |
 | Overprivileged service credential | Separate DB/channel/action scopes and review |
 | Credentials shared across environments | Separate issuance/trust/configuration and crossover rejection |
@@ -1246,7 +1256,7 @@ multiple production environments.
 
 ### 49. Assumptions
 
-- ADR-0001 through ADR-0009 remain Accepted.
+- ADR-0001 through ADR-0009 and ADR-0011 remain Accepted.
 - Vertical Slice 01 remains explicitly development-only and has one synthetic
   API principal/`idempotency_scope_id`, one Orchestrator, and one Test Agent
   deployment on an isolated single-developer boundary whose only effective host
@@ -1269,24 +1279,25 @@ multiple production environments.
 
 ### 50. Open Questions
 
-1. How will formal ADR-0004/ADR-0006 amendment or supersession define
-   `idempotency_scope_id`, accepted-request uniqueness, replay/conflict
-   behavior, persistence lookup, migration/compatibility, and safe external
-   errors? This is the only remaining blocker to accepting ADR-0010.
-2. What environment-bound, cryptographically protected mutual component
+ADR-0011 resolves accepted-request identity, uniqueness, replay/conflict and
+owner-intent behavior, persistence lookup, migration/compatibility, and safe
+external errors. The remaining questions are bounded implementation,
+deployment, or future-architecture choices:
+
+1. What environment-bound, cryptographically protected mutual component
    authentication mechanism replaces the one-way readiness credential and
    bounded endpoint verification for production?
-3. What token format, issuer/audience, and authentication adapter are selected
+2. What token format, issuer/audience, and authentication adapter are selected
    for the first nonlocal API?
-4. What exact permission/role/policy document and revision naming formats apply?
-5. What credential lifetimes, rotation overlaps, validation-key cache age, and
+3. What exact permission/role/policy document and revision naming formats apply?
+4. What credential lifetimes, rotation overlaps, validation-key cache age, and
    revocation windows meet measured deployment needs?
-6. What Registry artifact provenance/tamper mechanism is required for
+5. What Registry artifact provenance/tamper mechanism is required for
    production?
-7. Which administrative audit backend and secret injection mechanism are used?
-8. What CA/workload identity, future identity provider, and production
+6. Which administrative audit backend and secret injection mechanism are used?
+7. What CA/workload identity, future identity provider, and production
    encryption requirements apply by data class?
-9. Is break-glass required, and if so what separately reviewed implementation
+8. Is break-glass required, and if so what separately reviewed implementation
    satisfies Section 36?
 
 ### 51. Explicitly Out of Scope
@@ -1332,11 +1343,10 @@ implementation configuration are out of scope.
       never derived from client/domain/session/credential identifiers.
 - [ ] Equivalent, conflicting, different-scope, disablement, scope-migration,
       operator, and local-development replay semantics are explicit.
-- [ ] The accepted-request conflict with ADR-0004/ADR-0006 is the only blocker
-      to ADR-0010 acceptance and remains so until `idempotency_scope_id`,
-      accepted-request uniqueness, replay/conflict behavior, persistence
-      lookup, migration/compatibility, and safe external errors are formally
-      amended or superseded.
+- [ ] ADR-0011 resolves the ADR-0004/ADR-0006 accepted-request conflict with
+      scoped uniqueness, actor/owner separation, owner-intent replay
+      equivalence, persistence lookup, migration/compatibility, and safe
+      external errors.
 - [ ] User, support, operator, security, automation, DBA, and break-glass
       responsibilities are separate.
 - [ ] Stable component principal survives restart and credentials are
@@ -1416,10 +1426,16 @@ implementation configuration are out of scope.
       process, and revocation proof.
 - [ ] Technology evaluation selects boundaries and first-slice behavior without
       selecting enterprise products.
-- [ ] Reviewers confirm consistency with ADR-0001 through ADR-0009, Vertical
-      Slice 01, testing guidance, `SECURITY.md`, and `AGENTS.md`.
-- [ ] Remaining open questions are bounded except the explicitly identified
-      accepted-request scope blocker.
+- [ ] Reviewers confirm consistency with ADR-0001 through ADR-0009, ADR-0011,
+      Vertical Slice 01, testing guidance, `SECURITY.md`, and `AGENTS.md`.
+- [ ] Remaining open questions are bounded implementation, deployment, or
+      future-architecture choices and do not block this decision.
+
+The acceptance review completed on 2026-07-28 found the security architecture
+internally complete. ADR-0011 resolves the prior accepted-request blocker.
+The remaining questions are deliberately bounded and do not leave identity,
+authentication, authorization, trust boundaries, replay, disclosure, failure,
+audit, local-development, or production security requirements undecided.
 
 ## Related Decisions
 
@@ -1432,6 +1448,7 @@ implementation configuration are out of scope.
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md)
 - [ADR-0008: Capability Registry and Agent Discovery](ADR-0008-capability-registry-and-agent-discovery.md)
 - [ADR-0009: Observability, Telemetry, and Audit Correlation](ADR-0009-observability-telemetry-and-audit-correlation.md)
+- [ADR-0011: Principal-Scoped API Idempotency and Accepted-Request Ownership](ADR-0011-principal-scoped-api-idempotency-and-accepted-request-ownership.md)
 
 ## References
 
