@@ -1,6 +1,6 @@
 # ADR-0012: Correlation ID Normalization
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-30
 - **Supersedes:** Upon acceptance, only ADR-0004's requirement to reject an API
   request solely because its client-supplied `Correlation-Id` is invalid
