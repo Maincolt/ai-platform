@@ -2,9 +2,10 @@
 
 - **Status:** Architecture-aligned implementation plan
 - **Implementation status:** Not started
-- **Architecture review date:** 2026-07-28
-- **Implementation readiness:** Blocked only by the Accepted-ADR conflict in
-  [Section 24](#24-unresolved-architectural-blocker)
+- **Architecture review date:** 2026-07-30
+- **Implementation readiness:** Previous correlation-header blocker resolved
+  by Accepted ADR-0012; pending a separate final implementation-readiness
+  review
 
 ## 1. Purpose and Authority
 
@@ -15,11 +16,13 @@ workflow without calling an AI model or performing an external side effect.
 All Accepted ADRs are authoritative. Later explicit amendments take precedence
 over the clauses they supersede. In particular, ADR-0011 replaces only the
 global `request_id` assumptions in ADR-0004 and ADR-0006; their other decisions
-remain binding.
+remain binding. ADR-0012 supersedes ADR-0004 only for invalid client-supplied
+`Correlation-Id` behavior and confirms and clarifies ADR-0009 correlation
+replacement behavior.
 
 This document is subordinate to:
 
-- [ADR-0001 through ADR-0011](../architecture/decisions/README.md);
+- [ADR-0001 through ADR-0012](../architecture/decisions/README.md);
 - the [platform architecture](../architecture/README.md);
 - the [platform test strategy](../testing/README.md);
 - the repository [security policy](../../SECURITY.md); and
@@ -203,6 +206,41 @@ Secrets never appear in source, images, URLs, command lines, contracts,
 Registry declarations, events, logs, traces, examples, or committed
 configuration.
 
+### Correlation Trust Boundary
+
+Every API invocation that reaches the application boundary establishes a safe
+effective correlation identifier before correlation metadata enters logs,
+traces, commands, events, audit metadata, persistence, or an API response. The
+bounded, centrally defined validation profile uses the ADR-0004 canonical
+lowercase UUIDv7 format.
+
+| Request-header condition | Trust-boundary behavior |
+| --- | --- |
+| Valid `Correlation-Id` | Preserve it as the invocation's effective external correlation identifier |
+| Missing `Correlation-Id` | Generate a safe platform-controlled effective correlation identifier |
+| Malformed, unsafe, unsupported, noncanonical, or oversized `Correlation-Id` | Discard it and generate a safe platform-controlled effective correlation identifier |
+
+Only the effective value crosses the API trust boundary. An invalid raw value
+is never echoed, logged, traced, persisted, audited, published, or otherwise
+propagated. Validation is deterministic, length-bounded before parsing,
+resource-bounded, and independent of telemetry availability.
+
+Correlation metadata is independent from:
+
+- `request_id` and the complete accepted-request identity;
+- `idempotency_scope_id` and request fingerprinting;
+- replay classification;
+- workflow, task, and attempt identity;
+- inbox and outbox deduplication;
+- message identity;
+- ownership and authorization;
+- trace identity; and
+- trusted producer evidence.
+
+Duplicate correlation identifiers are permitted. Equality does not establish a
+business relationship, grant authority, deduplicate work, serialize requests,
+or otherwise affect correctness.
+
 ## 5. Workflow API Contract
 
 The canonical JSON Schemas, OpenAPI 3.1.1 description, examples, and runtime
@@ -248,6 +286,31 @@ timestamps, and either the deterministic result or safe terminal failure. It
 authorizes before disclosure. Unauthorized and nonexistent workflows both use
 the policy-selected safe `404 WORKFLOW_NOT_FOUND` response for this slice.
 
+### Correlation Header Contract
+
+For every API response that can safely be produced, the `Correlation-Id`
+response header contains the current invocation's effective correlation
+identifier:
+
+- a valid client value is preserved;
+- a missing value is replaced by a generated platform-controlled value; and
+- an invalid value is discarded and replaced by a generated
+  platform-controlled value.
+
+An invalid value alone never causes an otherwise valid business request to
+fail. On first workflow acceptance, the invocation's effective value becomes
+the workflow's durable `correlation_id` and is persisted atomically with the
+accepted workflow. The response body for an accepted workflow, replay, or
+authorized query contains that durable workflow correlation.
+
+An accepted-request replay is a new API invocation and may establish a
+different effective correlation identifier. Its response header contains the
+current invocation value while its response body contains the existing
+workflow's original durable `correlation_id`. Replay does not rewrite the
+workflow, accepted-request mapping, command, events, or original correlation,
+and creates no asynchronous activity solely to propagate the new invocation
+value.
+
 ### Stable Errors
 
 | Condition | Public result |
@@ -262,8 +325,11 @@ the policy-selected safe `404 WORKFLOW_NOT_FOUND` response for this slice.
 | Safe unexpected internal failure | `500 INTERNAL_PROCESSING_FAILURE`; caller reuses `request_id` |
 
 Errors contain only the accepted Problem Details fields and safe bounded
-details. The unresolved invalid `Correlation-Id` behavior is isolated in
-Section 24 and must not be implemented until the ADR conflict is resolved.
+details. If an invalid `Correlation-Id` accompanies an unrelated business
+error, the API returns the ordinary business Problem Details response and uses
+the generated effective value in the response header and `correlation_id`
+problem field where safely producible. The invalid raw value is never
+disclosed, and correlation replacement adds no public error code.
 
 ## 6. Accepted-Request Arbitration and Replay
 
@@ -277,15 +343,16 @@ all scopes and filters afterward.
 
 Before arbitration, the API security/application boundary:
 
-1. resolves `current_actor_id`;
-2. resolves environment and semantic operation;
-3. resolves or atomically creates the durable synthetic scope mapping;
-4. resolves owner intent;
-5. authorizes the actor to submit for that owner under the current policy;
-6. validates/defaults the semantic request;
-7. resolves the stored `fingerprint_policy_version` and its complete historical
+1. establishes the safe effective correlation identifier;
+2. resolves `current_actor_id`;
+3. resolves environment and semantic operation;
+4. resolves or atomically creates the durable synthetic scope mapping;
+5. resolves owner intent;
+6. authorizes the actor to submit for that owner under the current policy;
+7. validates/defaults the semantic request;
+8. resolves the stored `fingerprint_policy_version` and its complete historical
    profile for comparison; and
-8. computes the SHA-256 digest of RFC 8785 canonical UTF-8 bytes.
+9. computes the SHA-256 digest of RFC 8785 canonical UTF-8 bytes.
 
 The fingerprint includes exact decoded text, capability name/version, API
 contract major, and future execution-semantic fields. It excludes property
@@ -294,7 +361,7 @@ order, JSON whitespace, headers, correlation, trace, and other transport data.
 | Situation | Required behavior |
 | --- | --- |
 | First acceptance | Check a current eligible Agent, freeze selection intent, then atomically create one accepted request and workflow |
-| Equivalent authorized replay | `200`; return existing public identifiers and current authorized state; do not check Agent readiness or create records |
+| Equivalent authorized replay | `200`; return existing public identifiers and current authorized state; use the current invocation correlation in the response header and the original durable workflow correlation in the body; do not check Agent readiness or create records |
 | Equivalent unauthorized replay | Safe `404`; disclose nothing and create nothing |
 | Fingerprint conflict | Safe `409` only when classification disclosure is authorized; otherwise safe `404`; create nothing |
 | Owner-intent mismatch | Internal `OWNER_INTENT_MISMATCH`; safe `404`; return no workflow and create no duplicate |
@@ -308,6 +375,9 @@ order, JSON whitespace, headers, correlation, trace, and other transport data.
 Credential rotation must preserve principal, scope, and owner resolution.
 `current_actor_id` changes per call only when the authenticated actor actually
 changes. Replay never changes immutable acceptance actor or accepted owner.
+Changing, omitting, or replacing correlation metadata never changes replay
+classification. Concurrent requests and distinct workflows may share a
+correlation identifier; accepted-request arbitration remains authoritative.
 
 ## 7. Capability Registry, Selection, and Readiness
 
@@ -406,11 +476,13 @@ nonblocking and cannot turn stale evidence into eligibility.
 
 ### Accepted Execution
 
-1. the API validates the HTTP request and resolves trusted context;
+1. the API establishes the safe effective correlation identifier, validates
+   the HTTP request, and resolves trusted context;
 2. the Orchestrator performs scoped replay arbitration;
 3. only a new key performs Registry lookup and bounded Agent availability;
 4. the Orchestrator freezes identifiers, timestamps, fingerprint intent,
-   selection intent, and immutable command bytes;
+   selection intent, the effective correlation as the workflow's durable
+   `correlation_id`, and immutable command bytes;
 5. the submission transaction commits the full integrity unit in Section 11;
 6. the Orchestrator outbox publisher claims and publishes `ExecuteTask`;
 7. Redpanda delivers the command at least once on `task-commands`;
@@ -492,6 +564,15 @@ The root command has `causation_id = null`. A terminal event uses the command
 `message_id`; republication preserves identical bytes, IDs, timestamps, key,
 and payload.
 
+The first accepted workflow's durable `correlation_id` is propagated unchanged
+through the command and terminal event chain. Producers validate it before
+constructing immutable message bytes, and consumers validate it again at the
+Event Bus trust boundary. A message with malformed, unsafe, unsupported,
+noncanonical, or oversized required correlation metadata is contract-invalid
+and follows bounded transport-rejection or quarantine handling. Consumers
+never rewrite it into a different logical message or admit it to domain
+processing.
+
 `workflow_id` is the UTF-8 Kafka record key. Ordering exists only within
 `(logical_channel, workflow_id)`. There is no cross-channel or global order.
 
@@ -507,6 +588,9 @@ These identities remain distinct:
 - consumer-group membership.
 
 Payload producer fields and headers are claims, never proof of transport origin.
+The envelope `correlation_id` is operational grouping metadata and is likewise
+never producer evidence, authorization, message identity, or a deduplication
+key.
 The local broker deployment uses distinct credentials and ACLs so only the
 Orchestrator can produce commands and only the Agent can produce outcomes.
 When the broker does not expose a trustworthy producer principal to the
@@ -774,7 +858,7 @@ No correctness rule depends on volatile process memory.
 | Failure window | Durable state before failure | Recovery and duplicate behavior | Expected final state / operator action |
 | --- | --- | --- | --- |
 | API crash before submission commit | No accepted mapping/workflow | Retry same request; composite arbitration runs again | One acceptance or safe rejection |
-| API crash after commit before response | Complete accepted workflow at `DISPATCHED` plus outbox | Same-key replay returns stored workflow; no readiness reselection | Existing workflow |
+| API crash after commit before response | Complete accepted workflow at `DISPATCHED` plus outbox | Same-key replay returns the stored workflow; its current response-header correlation may differ while the durable body correlation remains unchanged; no readiness reselection | Existing workflow |
 | Concurrent first submission | At most one transaction can own composite key | Losers read winner and compare owner/fingerprint | One canonical workflow |
 | Publisher crash before publish | Durable unconfirmed outbox | Claim expires; publisher sends same bytes | One logical command |
 | Publisher crash after publish before marking | Outbox outcome unknown; broker may hold record | Republish same ID/bytes; Agent deduplicates | Duplicate delivery, one logical effect |
@@ -793,6 +877,8 @@ No correctness rule depends on volatile process memory.
 | Invalid/impossible transition | Existing aggregate unchanged | Record safe inbox/rejection disposition; quarantine where required | No state mutation; operator diagnosis if systemic |
 | Fingerprint profile unavailable | Existing accepted mapping | Fail closed; never create another workflow | Safe error; restore profile/operator reconcile |
 | Authorization or required replay-audit failure | Existing mapping/workflow unchanged | Deny disclosure; no duplicate | Safe response; restore policy/audit |
+| Correlation validation or generation cannot establish a safe effective value | No new business state | Fail closed before business mutation with a generic safe failure; never use the raw client value | Restore the local validation/generation capability |
+| Downstream message has malformed required correlation metadata | Existing workflow/Agent state unchanged | Reject before domain processing and follow bounded transport-rejection or quarantine recovery; never rewrite the message | Operator diagnosis or safe redrive of a valid immutable message |
 | Partial graceful shutdown | Only committed state survives | Stop intake/claims, bounded drain, abandon uncommitted work | Restart scans outboxes/inboxes/deadlines |
 | Forced restart with deadline elapsed | `DISPATCHED` workflow | Reconciler locks aggregate; deadline or result transaction wins | Deterministic terminal state |
 
@@ -803,6 +889,7 @@ No correctness rule depends on volatile process memory.
 Business audit commits transactionally with:
 
 - first acceptance and complete accepted-request identity;
+- the first accepted workflow's validated durable `correlation_id`;
 - selection evidence;
 - every workflow-state mutation;
 - Agent accepted outcome;
@@ -814,6 +901,11 @@ Required audit failure rolls back the associated business mutation. Ordinary
 authorized equivalent replay need not create another business-coupled audit
 record unless policy requires access/security audit. Optional telemetry failure
 never changes workflow correctness.
+
+Replay audit and operational signals may associate the current invocation's
+effective correlation identifier with the existing workflow after
+authorization, but they never rewrite its durable correlation or use
+correlation equality as disclosure authority.
 
 Administrative/security audit is separate and durable for privileged
 configuration activation, migration, credential lifecycle, redrive, or repair.
@@ -834,6 +926,11 @@ Logs and traces correlate, when applicable:
 - contract and capability identity;
 - safe component/deployment/process identity; and
 - safe operation, outcome, retry, and error classification.
+
+Only validated effective or durable correlation identifiers enter these
+signals. Invalid raw correlation input is never logged, traced, audited,
+persisted, measured, or published. Correlation and trace identity remain
+separate, and neither becomes a correctness or authorization dependency.
 
 W3C trace context is sanitized at API and Event Bus adapters. It is never a
 domain identity, authorization input, or correctness dependency. Redelivery and
@@ -943,7 +1040,8 @@ process, ACL, and crash guarantees require isolated real-service tests.
 ### Test Categories
 
 - **Contract:** canonical JSON Schema, OpenAPI, AsyncAPI, examples, exact
-  versions, UUIDv7, timestamps, Problem Details, producer/consumer parity.
+  versions, UUIDv7, correlation normalization and response semantics,
+  timestamps, Problem Details, producer/consumer parity.
 - **Persistence and transaction:** composite uniqueness, atomic integrity
   units, history/snapshot parity, coupled audit, unknown commit recovery.
 - **Idempotency:** historical fingerprints, equivalent/conflicting replay,
@@ -953,7 +1051,8 @@ process, ACL, and crash guarantees require isolated real-service tests.
 - **Concurrency:** concurrent first acceptance, duplicate Agent computation,
   result/deadline race, competing publishers and consumers.
 - **Event Bus delivery:** keyed ordering, manual acknowledgment, at-least-once
-  redelivery, broker restart, producer uncertainty, bounded retry/quarantine.
+  redelivery, broker restart, producer uncertainty, malformed correlation
+  rejection, bounded retry/quarantine.
 - **Inbox/outbox:** claim fencing, unknown publication, duplicate and changed
   payload identities, retention/replay boundaries.
 - **State machine:** every legal edge, illegal/late/conflicting events,
@@ -961,11 +1060,12 @@ process, ACL, and crash guarantees require isolated real-service tests.
 - **Agent selection/readiness:** revision/digest, bounded verification, TTL,
   stale/unknown/draining, exactly-one policy, no readiness on replay/query.
 - **Security boundary:** loopback effective exposure, separate credentials and
-  grants, ACLs, secret/redaction, synthetic shared identity limitation.
+  grants, ACLs, secret/redaction, correlation injection/nonreflection,
+  synthetic shared identity limitation.
 - **Recovery/crash window:** every row in Section 15 with deterministic fault
   injection and process/container restart.
 - **Audit/observability:** coupled audit rollback, signal correlation, bounded
-  labels, trace links, telemetry failure isolation.
+  labels, trace links, raw correlation exclusion, telemetry failure isolation.
 - **Startup/shutdown:** independent startup, recovery workers, drain, forced
   termination, no volatile correctness.
 
@@ -989,7 +1089,22 @@ process, ACL, and crash guarantees require isolated real-service tests.
 | Audit failure | Fail required acceptance or transition audit write | Safe failure/no disclosed mutation | Transaction rollback | Business mutation without required audit |
 | Telemetry failure | Disable metric/trace/log exporter during valid work | Workflow completes normally | Durable business/audit evidence remains authoritative; drop/failure signal where possible | Workflow failure caused solely by optional telemetry |
 
-The invalid `Correlation-Id` contract test remains blocked by Section 24.
+### Correlation Normalization Scenarios
+
+| Scenario | Effective correlation behavior | Public API result | Durable business result | Propagation | Prohibited disclosure or outcome |
+| --- | --- | --- | --- | --- | --- |
+| Missing header | Generate a conforming platform value | Ordinary business response with generated response header | First acceptance stores the generated durable workflow correlation | Generated value only | Rejection for omission or an empty correlation |
+| Valid header | Preserve the validated value | Ordinary business response with preserved response header | First acceptance stores the preserved durable workflow correlation | Preserved value through supported logs, traces, audit, command, and events | Treating the value as authority, identity, or producer evidence |
+| Malformed header | Discard and generate | Ordinary business response with generated response header | Business result follows ordinary rules; first acceptance stores only the generated value | Generated value only | Echoing, logging, tracing, persisting, auditing, or publishing the raw value |
+| Oversized header within the infrastructure request limit | Classify as invalid through bounded length validation, discard, and generate | Ordinary business response with generated response header | Business result follows ordinary rules | Generated value only | Unbounded parsing, raw-value retention, or a correlation-only `4xx` |
+| Control-character or multiline injection reaching the application adapter | Discard and generate | Ordinary business response with generated response header | Business result follows ordinary rules | Generated value only | Header, log, trace, audit, or message injection |
+| Replay with a different correlation value | Establish the new invocation's effective value | `200`; header uses the invocation value and body returns the original durable workflow correlation | Existing mapping, workflow, and durable correlation remain unchanged | Current API signals may use the invocation value; existing message chain is unchanged | Fingerprint/replay change, workflow rewrite, or new asynchronous chain |
+| Concurrent requests share a valid correlation value | Preserve it independently for each invocation | Results follow accepted-request arbitration | Correctness follows complete accepted-request keys | Duplicate value may group otherwise independent activity | Correlation-based serialization, deduplication, authorization, or uniqueness |
+| Two workflows share a valid correlation value | Preserve it for both | Each authorized response returns its own workflow identity | Two workflows remain independently authoritative | Both message chains may carry the same grouping value | Inferring that one correlation identifies one workflow |
+| Telemetry backend unavailable | Preserve or generate locally without telemetry | Ordinary business response | Workflow and required audit behavior remain authoritative | Business messages retain safe correlation; optional export may be lost | API or committed-workflow failure solely because telemetry is unavailable |
+| Downstream message has malformed required correlation metadata | Do not replace within the immutable message | No direct API mutation from the invalid message | No domain processing; existing state remains unchanged | Bounded transport rejection or quarantine | Rewriting and processing the message or propagating unsafe raw metadata |
+| Invalid header with an otherwise valid workflow request | Discard and generate | Ordinary `202` or authorized replay result with generated response header | Acceptance or replay follows ordinary identity rules | Only the generated invocation value; first acceptance makes it durable | Correlation error, fingerprint change, or raw-value disclosure |
+| Invalid header with an unrelated invalid business request | Discard and generate | Ordinary safe business error with generated response header and safe problem correlation where producible | No workflow is created for the invalid business request | Generated value only | Replacing the business error with a correlation error or exposing the raw value |
 
 ## 20. Implementation Phases
 
@@ -999,8 +1114,8 @@ The existing eight-phase sequence is preserved.
 
 Create the ADR-0003 root tooling metadata and canonical JSON Schema,
 OpenAPI, AsyncAPI, examples, configuration, and declaration contracts.
-Implement no domain behavior before the Section 24 correlation conflict is
-resolved for the API contract.
+Include the Accepted ADR-0012 correlation contract. Implement no domain
+behavior in this phase.
 
 ### Phase 2: Workflow Domain and Persistence Ports
 
@@ -1024,7 +1139,7 @@ development readiness boundary.
 
 Implement submit/read/health operations, trusted synthetic context, composite
 replay/disclosure behavior, stable Problem Details, effective-exposure
-validation, and correlation behavior after the blocker is resolved.
+validation, and ADR-0012 correlation normalization and response behavior.
 
 ### Phase 6: Concrete Adapters and Local Deployment
 
@@ -1074,14 +1189,15 @@ commands. Do not claim production readiness.
 | ADR-0001 Core Design Principles | Modular ports, explicit contracts, Git-owned schemas/config, Docker artifacts, vendor boundaries | Production Unraid topology and IaC details | Boundary tests, package/import tests, local deployment validation |
 | ADR-0002 Communication and State | Event Bus for commands/events, Orchestrator-owned durable state, at-least-once, keyed ordering, bounded retry, Registry | AI Router and dynamic discovery | Workflow, duplicate, ordering, replay, deadline tests |
 | ADR-0003 Runtime and Tooling | CPython 3.14, uv, Hatchling, `pyproject.toml`, `uv.lock`, Ruff, BasedPyright strict, pytest, `src/ai_platform/` | Additional languages/distributions | Locked install/build/format/lint/type/test validation |
-| ADR-0004 API and Contracts | HTTP/JSON, JSON Schema Draft 2020-12, OpenAPI 3.1.1, AsyncAPI 3.0.0, UUIDv7, envelope, Problem Details | New contract categories/versions | Canonical schema and artifact parity tests; correlation conflict noted in Section 24 |
+| ADR-0004 API and Contracts | HTTP/JSON, JSON Schema Draft 2020-12, OpenAPI 3.1.1, AsyncAPI 3.0.0, UUIDv7, envelope, Problem Details, valid/missing correlation behavior as amended by ADR-0012 | New contract categories/versions | Canonical schema, artifact parity, and correlation contract tests |
 | ADR-0005 Event Bus | Allowed Kafka subset, Redpanda, `confluent-kafka`, two channels, workflow key, manual commits, immediate retry, quarantine | Delayed retry, extra channels, managed brokers | Real-broker acknowledgment, redelivery, order, quarantine, restart tests |
 | ADR-0006 Persistence | PostgreSQL, owned schemas, composite integrity unit as amended, current state plus history, inbox/outbox, claims, recovery | HA, DR, alternative database, long-term values | Atomicity, uniqueness, crash, isolation, history/snapshot tests |
 | ADR-0007 Agent Execution | Plain Python/asyncio, bounded lanes, deterministic built-in capability, no lease, truthful outcome, lifecycle cancellation | Side effects, long-running/interactive work, frameworks | Capability, concurrency, cancellation, duplicate, recovery tests |
 | ADR-0008 Registry | Trusted static revision, deployment digest, bounded readiness route/TTL, exactly-one selection, atomic evidence | Dynamic registration, load policy, database Registry | Revision/digest/readiness/selection transaction tests |
-| ADR-0009 Observability | Structured logs, durable audit, W3C trace context, OTel-compatible metrics/traces, redaction | Backend, Collector, dashboards, alerts/SLO targets | Coupled-audit, correlation, signal, cardinality, failure-isolation tests |
+| ADR-0009 Observability | Structured logs, durable audit, W3C trace context, OTel-compatible metrics/traces, redaction, correlation replacement and nonauthority as clarified by ADR-0012 | Backend, Collector, dashboards, alerts/SLO targets | Coupled-audit, correlation, signal, cardinality, redaction, failure-isolation tests |
 | ADR-0010 Security | Synthetic loopback-only policy, separate credentials/roles/ACLs, one-way readiness credential, bounded endpoint verification | Production identity, mutual auth, break-glass, delegation | Exposure, authentication boundary, grants/ACL, disclosure, secret tests |
 | ADR-0011 Scoped Idempotency and Ownership | Composite key, five distinct identities, historical fingerprint, owner equivalence, current disclosure, no global lookup | Transfer and scope-migration APIs | Two-scope, shared-scope owner, rotation, concurrency, lost-response tests |
+| ADR-0012 Correlation Normalization | Correlation validation and normalization, API response behavior, propagation boundaries, security constraints, replay/failure behavior | Exact validation-profile placement, maximum header length, generator implementation, safe replacement categories | Valid/missing/invalid API tests, injection/nonreflection, duplicate/replay, malformed-message, and telemetry-isolation tests |
 
 ## 23. Unresolved Implementation Choices
 
@@ -1108,9 +1224,10 @@ Each choice must be documented with a safe default, validated at startup where
 applicable, pinned or versioned where applicable, and tested against the
 guarantees in this plan.
 
-## 24. Unresolved Architectural Blocker
+## 24. Resolved Architectural Blocker
 
-Two Accepted ADRs conflict on invalid client correlation context:
+ADR-0004 and ADR-0009 previously conflicted on invalid client correlation
+context:
 
 - ADR-0004 Section 8 states that an invalid supplied `Correlation-Id` is
   rejected.
@@ -1118,16 +1235,17 @@ Two Accepted ADRs conflict on invalid client correlation context:
   correlation context is discarded or replaced and never makes an otherwise
   valid business request fail.
 
-Neither ADR declares that it supersedes the other on this behavior. This
-document therefore does not choose a response. The invalid-header branch of
-the Workflow API contract, its OpenAPI examples, and its acceptance test remain
-blocked until an Accepted ADR explicitly resolves the conflict. Valid and
-absent `Correlation-Id` behavior remains unambiguous: a valid UUIDv7 may
-initialize correlation; when absent, the Orchestrator creates a UUIDv7 and the
-API returns it.
+Accepted ADR-0012 resolves that conflict. It supersedes ADR-0004 only for
+invalid client-supplied `Correlation-Id` behavior and confirms and clarifies
+ADR-0009 correlation replacement. A valid value is preserved, a missing value
+causes generation, and an invalid value is discarded and replaced without
+failing an otherwise valid business request. Only the safe effective value may
+be returned or propagated.
 
-No other conflict among ADR-0001 through ADR-0011 was found. ADR-0011's explicit
-amendments resolve the earlier global `request_id` clauses.
+The invalid-header API branch, contract examples, and acceptance tests are no
+longer architecturally blocked. No other conflict among ADR-0001 through
+ADR-0012 was found. ADR-0011's explicit amendments resolve the earlier global
+`request_id` clauses.
 
 ## 25. Alignment Change Summary
 
@@ -1161,8 +1279,10 @@ This review:
   executable acceptance-test descriptions;
 - retained the deterministic word-count path and the original eight
   implementation phases; and
-- identified the unresolved ADR-0004/ADR-0009 correlation-header conflict
-  without inventing a resolution.
+- applied Accepted ADR-0012 to valid, missing, and invalid correlation
+  normalization, replay, propagation, security, failure, and test behavior;
+  and
+- recorded the ADR-0004/ADR-0009 correlation-header conflict as resolved.
 
 ## 26. Implementation-Readiness Checklist
 
@@ -1179,16 +1299,17 @@ This review:
 - [x] Registry revision, declaration digest, readiness, eligibility, routing,
       and selection evidence are explicit.
 - [x] Minimum configuration and secret boundaries are known.
-- [x] Public API and asynchronous contracts are known except for the one
-      blocked invalid-correlation branch.
+- [x] Public API and asynchronous contracts, including correlation
+      normalization and replay response behavior, are known.
+- [x] Correlation is independent from business, security, message, trace,
+      replay, and deduplication identities.
 - [x] Executable acceptance-test categories and critical scenarios are
       specified.
 - [x] Remaining nonblocked choices are implementation details.
-- [ ] No unresolved Accepted-ADR conflict remains.
+- [x] No unresolved Accepted-ADR conflict remains.
 
-Vertical Slice 01 is internally coherent for every unblocked behavior and is
-aligned with every unambiguous Accepted-ADR requirement. It is **not yet ready
-for implementation** because the invalid `Correlation-Id` API behavior has two
-conflicting Accepted definitions. Once that conflict is resolved by an
-Accepted ADR and this document is updated accordingly, no other architectural
-blocker remains.
+The previous invalid `Correlation-Id` blocker is resolved, and no other
+architectural blocker is known. Vertical Slice 01 is aligned with the Accepted
+ADR-0012 behavior and is ready for the separate final
+implementation-readiness review. This alignment update does not itself declare
+final implementation readiness.
