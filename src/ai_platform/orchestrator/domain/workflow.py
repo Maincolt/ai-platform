@@ -10,9 +10,9 @@ from datetime import datetime
 
 from ai_platform.orchestrator.domain.errors import IllegalTransitionError, TerminalWorkflowError
 from ai_platform.orchestrator.domain.history import TransitionRecord
-from ai_platform.orchestrator.domain.identifiers import CorrelationId, RequestId, WorkflowId
 from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
 from ai_platform.orchestrator.domain.states import WorkflowState, is_legal_transition
+from ai_platform.shared.identifiers import CorrelationId, RequestId, WorkflowId
 
 
 @dataclass(slots=True)

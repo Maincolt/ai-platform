@@ -24,7 +24,15 @@ from ai_platform.orchestrator.domain.accepted_request import (
     compare_fingerprint,
 )
 from ai_platform.orchestrator.domain.audit import AuditRecord
-from ai_platform.orchestrator.domain.identifiers import (
+from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
+from ai_platform.orchestrator.domain.task import Task, TaskAttempt
+from ai_platform.orchestrator.domain.workflow import Workflow
+from ai_platform.ports.persistence.accepted_request import AcceptedRequestRepositoryPort
+from ai_platform.ports.persistence.audit import AuditRepositoryPort
+from ai_platform.ports.persistence.outbox import OrchestratorOutboxRepositoryPort
+from ai_platform.ports.persistence.task import TaskAttemptRepositoryPort, TaskRepositoryPort
+from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.shared.identifiers import (
     ActorId,
     CorrelationId,
     IdempotencyScopeId,
@@ -35,14 +43,6 @@ from ai_platform.orchestrator.domain.identifiers import (
     TaskId,
     WorkflowId,
 )
-from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
-from ai_platform.orchestrator.domain.task import Task, TaskAttempt
-from ai_platform.orchestrator.domain.workflow import Workflow
-from ai_platform.ports.persistence.accepted_request import AcceptedRequestRepositoryPort
-from ai_platform.ports.persistence.audit import AuditRepositoryPort
-from ai_platform.ports.persistence.outbox import OrchestratorOutboxRepositoryPort
-from ai_platform.ports.persistence.task import TaskAttemptRepositoryPort, TaskRepositoryPort
-from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
 
 
 @dataclass(frozen=True, slots=True)

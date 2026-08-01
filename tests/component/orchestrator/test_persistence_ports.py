@@ -13,29 +13,14 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ai_platform.agents.domain.outcomes import AgentCompletedReceipt, AgentEventOutboxRecord
 from ai_platform.orchestrator.domain.accepted_request import (
     AcceptanceEvidence,
     AcceptedRequestKey,
 )
-from ai_platform.orchestrator.domain.identifiers import (
-    ActorId,
-    AgentId,
-    CorrelationId,
-    IdempotencyScopeId,
-    MessageId,
-    OwnerSubjectId,
-    RequestId,
-    TaskAttemptId,
-    TaskId,
-    WorkflowId,
-)
 from ai_platform.orchestrator.domain.recovery import (
-    AgentCompletedReceipt,
-    AgentEventOutboxRecord,
-    AgentOutcome,
     OrchestratorInboxRecord,
     OrchestratorOutboxRecord,
-    PublicationState,
 )
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
 from ai_platform.orchestrator.domain.workflow import Workflow
@@ -51,6 +36,20 @@ from ai_platform.ports.persistence.outbox import (
 )
 from ai_platform.ports.persistence.task import TaskAttemptRepositoryPort, TaskRepositoryPort
 from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.shared.identifiers import (
+    ActorId,
+    AgentId,
+    CorrelationId,
+    IdempotencyScopeId,
+    MessageId,
+    OwnerSubjectId,
+    RequestId,
+    TaskAttemptId,
+    TaskId,
+    WorkflowId,
+)
+from ai_platform.shared.outcomes import AgentOutcome
+from ai_platform.shared.recovery import PublicationState
 
 NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -156,12 +155,14 @@ class InMemoryAgentReceiptRepository(AgentReceiptRepositoryPort):
     def get_by_attempt(self, task_attempt_id: TaskAttemptId) -> AgentCompletedReceipt | None:
         return self._receipts.get(task_attempt_id)
 
-    def create_or_resolve(self, receipt: AgentCompletedReceipt) -> AgentCompletedReceipt:
+    def create_or_resolve(
+        self, receipt: AgentCompletedReceipt
+    ) -> tuple[AgentCompletedReceipt, bool]:
         existing = self._receipts.get(receipt.task_attempt_id)
         if existing is not None:
-            return existing
+            return existing, False
         self._receipts[receipt.task_attempt_id] = receipt
-        return receipt
+        return receipt, True
 
 
 @dataclass
@@ -191,10 +192,12 @@ def test_agent_receipt_repository_same_attempt_message_and_bytes_returns_stored(
         command_digest="digest-1",
     )
 
-    first = repo.create_or_resolve(receipt)
-    second = repo.create_or_resolve(receipt)
+    first, first_is_new = repo.create_or_resolve(receipt)
+    second, second_is_new = repo.create_or_resolve(receipt)
 
     assert first == second == receipt
+    assert first_is_new is True
+    assert second_is_new is False
 
 
 def test_agent_outcome_repository_enforces_exactly_one_outcome_per_attempt() -> None:

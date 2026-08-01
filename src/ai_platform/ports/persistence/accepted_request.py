@@ -6,7 +6,7 @@ from ai_platform.orchestrator.domain.accepted_request import (
     AcceptanceEvidence,
     AcceptedRequestKey,
 )
-from ai_platform.orchestrator.domain.identifiers import WorkflowId
+from ai_platform.shared.identifiers import WorkflowId
 
 
 class AcceptedRequestRepositoryPort(Protocol):

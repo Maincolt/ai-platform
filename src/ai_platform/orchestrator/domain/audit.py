@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from ai_platform.orchestrator.domain.identifiers import ActorId, WorkflowId
+from ai_platform.shared.identifiers import ActorId, WorkflowId
 
 
 @dataclass(frozen=True, slots=True)

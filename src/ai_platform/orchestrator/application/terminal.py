@@ -14,13 +14,14 @@ from enum import Enum
 
 from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.errors import TerminalWorkflowError
-from ai_platform.orchestrator.domain.identifiers import ActorId, MessageId, WorkflowId
-from ai_platform.orchestrator.domain.recovery import AgentOutcome, OrchestratorInboxRecord
+from ai_platform.orchestrator.domain.recovery import OrchestratorInboxRecord
 from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
 from ai_platform.orchestrator.domain.workflow import Workflow
 from ai_platform.ports.persistence.audit import AuditRepositoryPort
 from ai_platform.ports.persistence.orchestrator_inbox import OrchestratorInboxRepositoryPort
 from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.shared.identifiers import ActorId, MessageId, WorkflowId
+from ai_platform.shared.outcomes import AgentOutcome
 
 _SYSTEM_ACTOR_ID = ActorId("system:agent-outcome-consumer")
 

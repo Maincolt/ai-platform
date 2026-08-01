@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import (
     RegistrySnapshot,
     RegistryValidationError,
     load_registry_snapshot,
 )
+from ai_platform.shared.identifiers import AgentId
 
 AGENT_A = AgentId("019fbdd6-ab3d-77aa-8e61-4c3bc6d53f69")
 AGENT_B = AgentId("019fbdd6-ab3d-77aa-8e61-4c3903e582ad")

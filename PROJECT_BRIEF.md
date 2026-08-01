@@ -96,7 +96,8 @@ domain, persistence, or transport implementation.
 Target package tree for `src/ai_platform/` (established across all vertical
 slice phases; Sprint 2 populated `orchestrator/domain/` and
 `ports/persistence/`; Sprint 3 added `orchestrator/registry/` and
-`orchestrator/application/`; the rest remain skeletons):
+`orchestrator/application/`; Sprint 4 added `agents/test_agent/`,
+`agents/domain/`, and expanded `shared/`; the rest remain skeletons):
 
 ```text
 src/
@@ -107,7 +108,8 @@ src/
     │   ├── registry/          # Sprint 3: Capability Registry (declarations, snapshot, availability, selection)
     │   └── application/       # Sprint 3: submission/terminal/deadline application services
     ├── agents/
-    │   └── test_agent/
+    │   ├── domain/            # Sprint 4: Agent-owned outcome/receipt/event-outbox records
+    │   └── test_agent/        # Sprint 4: the built-in text.word-count capability and lifecycle
     ├── contracts/
     ├── ports/
     │   ├── event_bus/
@@ -115,7 +117,7 @@ src/
     ├── adapters/
     │   ├── event_bus/
     │   └── persistence/
-    └── shared/
+    └── shared/                # identifiers.py, outcomes.py, recovery.py (Sprint 4): types crossing the Agent/Orchestrator boundary
         ├── configuration/
         └── logging/
 ```
@@ -138,19 +140,17 @@ src/
 | Sprint docs | `docs/sprint-N/` | Plans, progress, done, and consilium notes per sprint |
 | Source (created in Sprint 1) | `src/ai_platform/` | Root package; only tooling/contract skeleton in Sprint 1 |
 
-## 6. Team Roles (Sprint 3)
+## 6. Team Roles (Sprint 4)
 
 | Agent | Name | Role | Focus this sprint |
 |-------|------|------|--------------------|
-| Producer | **Remy** | Sprint planning, coordination, parallel-work split, PR review/merge | Scope control against Phase 3 only; ran the Registry as a background sub-agent in parallel with main-thread application-service work |
-| Domain/Application Engineer | **Sage** | Orchestrator application services | `SubmissionOrchestrator`, `TerminalEventProcessor`, `DeadlineReconciler`, the Registry integration seam and adapter |
-| Tooling/Registry Engineer | **Dash** | Capability Registry (background sub-agent) | Declaration/snapshot/availability/selection modules, built independently against a fixed interface spec |
-| QA Engineer | **Ivy** | Application-service and integration tests | Component tests with fakes for the application services; end-to-end tests once the Registry integrated |
+| Producer | **Remy** | Sprint planning, coordination, PR review/merge | Scope control against Phase 4 only; enforced Agent/Orchestrator module-boundary independence |
+| Domain/Application Engineer | **Sage** | Test Agent lifecycle | `TestAgent`, capability, execution context, message builders, readiness boundary; led the `shared`/`agents.domain` architectural correction |
+| QA Engineer | **Ivy** | Capability and lifecycle tests | Unicode whitespace edge cases; full lifecycle component tests including a genuine concurrent-duplicate race that surfaced a real port design gap |
 
-Frontend/visual roles (Nova, Milo, Kira) remain unneeded. A dedicated Test
-Agent engineer and DevOps/deployment engineer should be introduced starting
-with the sprints that implement Phase 4 (Test Agent) and Phase 6
-(adapters/deployment) respectively.
+Frontend/visual roles remain unneeded. A DevOps/deployment engineer should
+be introduced starting with the sprint that implements Phase 6
+(adapters/deployment).
 
 ## 7. Sprint Status
 
@@ -160,6 +160,7 @@ with the sprints that implement Phase 4 (Test Agent) and Phase 6
 | 1 | Tooling and Canonical Contracts | ✅ Done | Vertical Slice 01 **Phase 1** only: root tooling metadata + canonical JSON Schema/OpenAPI/AsyncAPI contracts. No domain behavior. See [docs/sprint-1/done.md](docs/sprint-1/done.md). |
 | 2 | Workflow Domain and Persistence Ports | ✅ Done | Vertical Slice 01 **Phase 2** only: five-state `Workflow` aggregate, accepted-request arbitration, task/attempt, transition history, audit, inbox/outbox/receipt records, 7 persistence `Protocol` ports. Pure domain code, no adapters. See [docs/sprint-2/done.md](docs/sprint-2/done.md). |
 | 3 | Orchestrator and Capability Registry | ✅ Done | Vertical Slice 01 **Phase 3** only: configuration-backed Capability Registry, submission-transaction orchestration, terminal event processing, deadline reconciliation, one recovery query port. Registry built via a parallel background sub-agent. See [docs/sprint-3/done.md](docs/sprint-3/done.md). |
+| 4 | Test Agent | ✅ Done | Vertical Slice 01 **Phase 4** only: the built-in `text.word-count` capability, receipt-first idempotency lifecycle, capability/input validation, readiness boundary. Includes an architectural correction moving shared/Agent-owned types out of `orchestrator/domain/`. See [docs/sprint-4/done.md](docs/sprint-4/done.md). |
 
 ## 8. Current State
 
@@ -173,17 +174,20 @@ with the sprints that implement Phase 4 (Test Agent) and Phase 6
 - 8 capability-oriented persistence `Protocol` ports under `src/ai_platform/ports/persistence/`, each proven implementable via an in-memory test fake.
 - The Capability Registry (`src/ai_platform/orchestrator/registry/`): configuration-backed loading, exact ADR-0008 compatibility matching, bounded readiness, and exactly-one candidate selection.
 - The Orchestrator application services (`src/ai_platform/orchestrator/application/`): `SubmissionOrchestrator`, `TerminalEventProcessor`, `DeadlineReconciler`, wired to the Registry via `RegistryCandidateSelector`.
-- 143 tests, all passing: 52 contract + 24 domain unit + 41 registry unit + 26 component (persistence ports, application services, and end-to-end registry integration).
+- The Test Agent (`src/ai_platform/agents/test_agent/`): the full `text.word-count` capability and Section 14 lifecycle, composed over the Phase 2 Agent-side ports.
+- A corrected module boundary: envelope identifiers and cross-boundary/Agent-owned types live under `shared/` and `agents/domain/`, not `orchestrator/domain/`.
+- 165 tests, all passing: 52 contract + 24 domain unit + 41 registry unit + 14 Test Agent unit + 33 component (persistence ports, application services, registry integration, Test Agent lifecycle).
 
 **What doesn't work yet:**
-- No Test Agent, Workflow API, or Event Bus implementation exists — the Orchestrator side of the vertical slice is now complete as application/domain code.
+- No Workflow API or Event Bus implementation exists — domain/application code for both the Orchestrator and Agent sides is now complete.
 - No concrete persistence/Event Bus adapters (Phase 6) — ports have no real database/Kafka behind them yet.
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
 - No Docker/local deployment artifacts (Phase 6).
-- Broader outbox/inbox recovery-query capabilities (not-attempted, unknown, claimed-expired) remain deferred to Phase 6 (adapter-dependent); only the narrow deadline-reconciliation query exists.
+- Broader outbox/inbox recovery-query capabilities remain deferred to Phase 6 (adapter-dependent).
+- Lifecycle interruption (shutdown/restart/rebalance cancellation) is deferred to Phase 6, where a real asyncio-based consumer exists to interrupt.
 
-**What's next (Sprint 4 candidate — Phase 4):**
-- Test Agent implementation per [vertical-slice-01.md Section 20, Phase 4](docs/implementation/vertical-slice-01.md#20-implementation-phases): the built-in `text.word-count` capability, bounded lifecycle, validation, completed-receipt deduplication, outcome transaction, Agent event outbox, and development readiness boundary — composed against the Phase 2 Agent-side ports, still without real adapters.
+**What's next (Sprint 5 candidate — Phase 5):**
+- Workflow API implementation per [vertical-slice-01.md Section 20, Phase 5](docs/implementation/vertical-slice-01.md#20-implementation-phases): submit/read/health operations, trusted synthetic context, composite replay/disclosure behavior, stable Problem Details, effective-exposure validation, and ADR-0012 correlation normalization and response behavior — mapping `SubmissionOrchestrator`/`TerminalEventProcessor` domain outcomes to HTTP.
 
 ## 9. Security Rules
 

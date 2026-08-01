@@ -10,7 +10,7 @@ and validated exactly; syntax alone never proves it (ADR-0008 Section 5).
 
 from dataclasses import dataclass
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
+from ai_platform.shared.identifiers import AgentId
 
 
 @dataclass(frozen=True, slots=True)

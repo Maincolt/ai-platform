@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
+from ai_platform.shared.identifiers import AgentId
 
 
 def _binding() -> CapabilityBinding:

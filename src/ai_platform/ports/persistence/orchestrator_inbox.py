@@ -7,8 +7,8 @@ consumer-group member, partition assignment, or host.
 
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import MessageId
 from ai_platform.orchestrator.domain.recovery import OrchestratorInboxRecord
+from ai_platform.shared.identifiers import MessageId
 
 
 class OrchestratorInboxRepositoryPort(Protocol):

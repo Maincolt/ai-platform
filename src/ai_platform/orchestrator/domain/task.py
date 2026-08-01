@@ -8,8 +8,8 @@ Orchestrator application retry.
 from dataclasses import dataclass
 from datetime import datetime
 
-from ai_platform.orchestrator.domain.identifiers import TaskAttemptId, TaskId, WorkflowId
 from ai_platform.orchestrator.domain.selection import SelectionIntent
+from ai_platform.shared.identifiers import TaskAttemptId, TaskId, WorkflowId
 
 
 @dataclass(frozen=True, slots=True)

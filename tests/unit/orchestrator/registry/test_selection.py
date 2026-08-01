@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
 from ai_platform.orchestrator.domain.selection import SelectionIntent
 from ai_platform.orchestrator.registry.availability import (
     AvailabilityClassification,
@@ -20,6 +19,7 @@ from ai_platform.orchestrator.registry.selection import (
     select_candidate,
 )
 from ai_platform.orchestrator.registry.snapshot import load_registry_snapshot
+from ai_platform.shared.identifiers import AgentId
 
 NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 OBSERVED_AT = NOW - timedelta(seconds=5)

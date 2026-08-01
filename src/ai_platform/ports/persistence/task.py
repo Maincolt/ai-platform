@@ -2,8 +2,8 @@
 
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import TaskAttemptId, TaskId
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
+from ai_platform.shared.identifiers import TaskAttemptId, TaskId
 
 
 class TaskRepositoryPort(Protocol):

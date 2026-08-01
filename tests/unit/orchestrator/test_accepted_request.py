@@ -13,7 +13,7 @@ from ai_platform.orchestrator.domain.accepted_request import (
     FingerprintComparison,
     compare_fingerprint,
 )
-from ai_platform.orchestrator.domain.identifiers import (
+from ai_platform.shared.identifiers import (
     ActorId,
     IdempotencyScopeId,
     OwnerSubjectId,

@@ -7,16 +7,16 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ai_platform.orchestrator.domain.identifiers import (
+from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
+from ai_platform.orchestrator.domain.selection import SelectionIntent
+from ai_platform.orchestrator.domain.task import Task, TaskAttempt
+from ai_platform.shared.identifiers import (
     AgentId,
     TaskAttemptId,
     TaskId,
     WorkflowId,
 )
-from ai_platform.orchestrator.domain.recovery import AgentOutcome
-from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
-from ai_platform.orchestrator.domain.selection import SelectionIntent
-from ai_platform.orchestrator.domain.task import Task, TaskAttempt
+from ai_platform.shared.outcomes import AgentOutcome
 
 NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 
