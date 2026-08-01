@@ -17,7 +17,11 @@ docs/sprint-3/consilium.md, disagreement 2).
 from datetime import datetime
 
 from ai_platform.orchestrator.domain.selection import SelectionIntent
-from ai_platform.orchestrator.registry.availability import AvailabilityPort, is_fresh
+from ai_platform.orchestrator.registry.availability import (
+    AvailabilityObservation,
+    AvailabilityPort,
+    is_fresh,
+)
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import RegistrySnapshot
 
@@ -49,7 +53,7 @@ def select_candidate(
     Raises `NoEligibleAgentError` when none match and
     `AmbiguousCandidateError` when more than one matches.
     """
-    eligible: list[tuple[CapabilityBinding, str]] = []
+    eligible: list[tuple[CapabilityBinding, AvailabilityObservation]] = []
     for binding in snapshot.bindings:
         if not _matches_declaration(
             binding,
@@ -67,7 +71,7 @@ def select_candidate(
         )
         if not is_fresh(observation, now=now):
             continue
-        eligible.append((binding, observation.classification.value))
+        eligible.append((binding, observation))
 
     if not eligible:
         raise NoEligibleAgentError(
@@ -82,8 +86,7 @@ def select_candidate(
             f"{conflicting}"
         )
 
-    binding, classification = eligible[0]
-    observation = availability_port.observe(binding.agent_id, capability_name, capability_version)
+    binding, observation = eligible[0]
     return SelectionIntent(
         agent_id=binding.agent_id,
         capability_name=binding.capability_name,
@@ -95,7 +98,7 @@ def select_candidate(
         registry_revision=snapshot.revision,
         deployment_declaration_digest=binding.deployment_declaration_digest,
         selection_policy_version=selection_policy_version,
-        availability_classification=classification,
+        availability_classification=observation.classification.value,
         observed_at=observation.observed_at,
         selected_at=now,
     )

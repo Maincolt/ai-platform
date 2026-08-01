@@ -129,6 +129,49 @@ def test_no_binding_for_capability_raises_no_eligible() -> None:
         _select([binding])
 
 
+def test_selection_observes_availability_exactly_once_per_eligible_binding() -> None:
+    """Regression test: select_candidate must not call observe() a second
+    time for the winning candidate after the eligibility pass, since a
+    changing/non-idempotent port could otherwise return a different
+    observation than the one that actually passed the freshness check."""
+
+    @dataclass
+    class CountingAvailabilityPort:
+        call_count: int = 0
+
+        def observe(
+            self, agent_id: AgentId, capability_name: str, capability_version: str
+        ) -> AvailabilityObservation:
+            self.call_count += 1
+            # A different observed_at on every call simulates a live,
+            # changing signal -- if select_candidate observed twice, the
+            # second (later) observed_at would leak into the result.
+            return AvailabilityObservation(
+                classification=AvailabilityClassification.READY,
+                observed_at=OBSERVED_AT - timedelta(seconds=self.call_count),
+                ttl_seconds=30.0,
+            )
+
+    port = CountingAvailabilityPort()
+    snapshot = load_registry_snapshot([_binding()], revision="rev-1")
+    intent = select_candidate(
+        snapshot,
+        capability_name="text.word-count",
+        capability_version="1.0",
+        command_contract_name="ExecuteTask",
+        command_contract_version="1.0",
+        event_contract_names=("TaskCompleted",),
+        event_contract_versions=("1.0",),
+        environment="production",
+        availability_port=port,
+        now=NOW,
+        selection_policy_version="policy-1",
+    )
+
+    assert port.call_count == 1
+    assert intent.observed_at == OBSERVED_AT - timedelta(seconds=1)
+
+
 def test_disabled_binding_raises_no_eligible() -> None:
     with pytest.raises(NoEligibleAgentError):
         _select([_binding(enabled=False)])

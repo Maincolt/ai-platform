@@ -262,6 +262,7 @@ def _submission_request(request_id: str = "req-1", fingerprint: str = "fp-a") ->
         capability_version="1.0",
         command_contract_name="ExecuteTask",
         command_contract_version="1.0",
+        # Parallel to event_contract_names: TaskCompleted->1.0, TaskFailed->1.0.
         event_contract_names=("TaskCompleted", "TaskFailed"),
         event_contract_versions=("1.0", "1.0"),
         task_result_deadline=NOW + timedelta(seconds=30),
