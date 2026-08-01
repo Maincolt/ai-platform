@@ -94,20 +94,22 @@ domain, persistence, or transport implementation.
 ```
 
 Target package tree for `src/ai_platform/` (established across all vertical
-slice phases; Sprint 1 only creates the skeleton and contracts):
+slice phases; Sprint 2 has populated `orchestrator/domain/` and
+`ports/persistence/`; the rest remain skeletons):
 
 ```text
 src/
 └── ai_platform/
     ├── api/
     ├── orchestrator/
+    │   ├── domain/            # Sprint 2: Workflow aggregate, value objects
     │   └── capability_registry/
     ├── agents/
     │   └── test_agent/
     ├── contracts/
     ├── ports/
     │   ├── event_bus/
-    │   └── persistence/
+    │   └── persistence/       # Sprint 2: 7 capability-oriented Protocol ports
     ├── adapters/
     │   ├── event_bus/
     │   └── persistence/
@@ -134,20 +136,20 @@ src/
 | Sprint docs | `docs/sprint-N/` | Plans, progress, done, and consilium notes per sprint |
 | Source (created in Sprint 1) | `src/ai_platform/` | Root package; only tooling/contract skeleton in Sprint 1 |
 
-## 6. Team Roles (Sprint 1)
+## 6. Team Roles (Sprint 2)
 
 | Agent | Name | Role | Focus this sprint |
 |-------|------|------|--------------------|
-| Producer | **Remy** | Sprint planning, coordination, PR review/merge, issue triage | Scope control against Phase 1 only; keeps domain behavior out |
-| Tooling Engineer | **Dash** | Runtime/tooling setup | `pyproject.toml`, `uv.lock`, Hatchling, Ruff, BasedPyright, pytest scaffolding, CI-friendly commands |
-| Contracts Engineer | **Sage** | Canonical contracts | JSON Schema (Draft 2020-12), OpenAPI 3.1.1, AsyncAPI 3.0.0, examples, correlation contract (ADR-0012) |
-| QA Engineer | **Ivy** | Contract validation | Schema/OpenAPI/AsyncAPI validity, example↔schema parity, tooling command verification |
+| Producer | **Remy** | Sprint planning, coordination, PR review/merge, issue triage | Scope control against Phase 2 only; ports stay `Protocol`s, no adapters |
+| Domain/Contracts Engineer | **Sage** | Workflow domain model and persistence ports | `Workflow` aggregate, value objects, 7 capability-oriented persistence `Protocol`s |
+| Tooling Engineer | **Dash** | Import-cleanliness and typing | Ensures domain code never imports `adapters/*`; BasedPyright strict passes with zero leaked `Any` |
+| QA Engineer | **Ivy** | Domain and port behavior tests | Unit tests for the state machine and value objects; component tests with in-memory fakes for every port |
 
-Frontend/visual roles (Nova, Milo, Kira) are not needed for Sprint 1 — this
-platform has no UI in the first vertical slice. Additional roles (e.g. an
-Orchestrator engineer, an Agent engineer, a DevOps/deployment engineer) should
-be introduced starting with the sprint that implements Phase 3 (Orchestrator)
-and Phase 6 (adapters/deployment).
+Frontend/visual roles (Nova, Milo, Kira) remain unneeded — this platform has
+no UI in the first vertical slice. A dedicated Orchestrator-process engineer
+and DevOps/deployment engineer should be introduced starting with the sprint
+that implements Phase 3 (Orchestrator) and Phase 6 (adapters/deployment)
+respectively.
 
 ## 7. Sprint Status
 
@@ -155,6 +157,7 @@ and Phase 6 (adapters/deployment).
 |--------|------|--------|-------|
 | 0 | Architecture | ✅ Done | ADR-0001–0012 (Accepted), platform architecture doc, Vertical Slice 01 plan |
 | 1 | Tooling and Canonical Contracts | ✅ Done | Vertical Slice 01 **Phase 1** only: root tooling metadata + canonical JSON Schema/OpenAPI/AsyncAPI contracts. No domain behavior. See [docs/sprint-1/done.md](docs/sprint-1/done.md). |
+| 2 | Workflow Domain and Persistence Ports | ✅ Done | Vertical Slice 01 **Phase 2** only: five-state `Workflow` aggregate, accepted-request arbitration, task/attempt, transition history, audit, inbox/outbox/receipt records, 7 persistence `Protocol` ports. Pure domain code, no adapters. See [docs/sprint-2/done.md](docs/sprint-2/done.md). |
 
 ## 8. Current State
 
@@ -164,15 +167,18 @@ and Phase 6 (adapters/deployment).
 - A fully specified, ADR-aligned implementation plan for the first vertical slice.
 - Root tooling metadata (`pyproject.toml`, `uv.lock`) and the `src/ai_platform/` package skeleton (ADR-0003), validated locally with `uv sync`, Ruff, BasedPyright (strict), and pytest.
 - Canonical contracts under `contracts/`: JSON Schema (Draft 2020-12), OpenAPI 3.1.1, and AsyncAPI 3.0.0 for the Workflow API and task-commands/task-outcomes messages, including the ADR-0012 correlation contract and 12 examples.
-- 52 contract-validation tests under `tests/contract/`, all passing.
+- The `Workflow` aggregate (`src/ai_platform/orchestrator/domain/workflow.py`) enforcing the full Section 9 state machine, plus accepted-request arbitration, task/attempt, transition history, audit, and inbox/outbox/receipt value objects.
+- 7 capability-oriented persistence `Protocol` ports under `src/ai_platform/ports/persistence/`, each proven implementable via an in-memory test fake.
+- 87 tests, all passing: 52 contract (Sprint 1) + 24 unit + 11 component (Sprint 2).
 
 **What doesn't work yet:**
-- No Orchestrator, Capability Registry, Test Agent, Workflow API, persistence, or Event Bus implementation exists — only their contracts.
-- No contract code-generation tooling (explicitly deferred to Phase 2).
+- No Orchestrator process, Capability Registry, Test Agent, Workflow API, or Event Bus implementation exists — domain code and ports only.
+- No concrete persistence/Event Bus adapters (Phase 6) — ports have no real database/Kafka behind them yet.
+- No contract code-generation tooling (explicitly deferred to Phase 2, still open going into Phase 3+).
 - No Docker/local deployment artifacts (Phase 6).
 
-**What's next (Sprint 2 candidate — Phase 2):**
-- Workflow domain model and persistence ports per [vertical-slice-01.md Section 20, Phase 2](docs/implementation/vertical-slice-01.md#20-implementation-phases).
+**What's next (Sprint 3 candidate — Phase 3):**
+- Orchestrator process and Capability Registry per [vertical-slice-01.md Section 20, Phase 3](docs/implementation/vertical-slice-01.md#20-implementation-phases): configuration-backed Registry loading, bounded readiness, immutable selection intent, submission-transaction orchestration, terminal processing, deadline reconciliation, and recovery — composed against the Phase 2 ports (still with in-memory/test-owned implementations until Phase 6 introduces real adapters).
 
 ## 9. Security Rules
 
