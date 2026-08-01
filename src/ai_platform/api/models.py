@@ -37,9 +37,9 @@ class WorkflowFailureModel(BaseModel):
 class WorkflowSubmitResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    request_id: str
-    correlation_id: str
-    workflow_id: str
+    request_id: str = Field(pattern=_UUIDV7_PATTERN)
+    correlation_id: str = Field(pattern=_UUIDV7_PATTERN)
+    workflow_id: str = Field(pattern=_UUIDV7_PATTERN)
     state: Literal["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"]
     result: WorkflowResultModel | None = None
     failure: WorkflowFailureModel | None = None
@@ -48,9 +48,9 @@ class WorkflowSubmitResponse(BaseModel):
 class WorkflowReadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    request_id: str
-    correlation_id: str
-    workflow_id: str
+    request_id: str = Field(pattern=_UUIDV7_PATTERN)
+    correlation_id: str = Field(pattern=_UUIDV7_PATTERN)
+    workflow_id: str = Field(pattern=_UUIDV7_PATTERN)
     state: Literal["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"]
     revision: int = Field(ge=1)
     created_at: str

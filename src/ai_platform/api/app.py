@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_platform.api import problem_details
 from ai_platform.api.correlation import normalize_correlation_id
@@ -80,6 +81,30 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     )
     return JSONResponse(
         status_code=400,
+        content=body,
+        headers={CORRELATION_HEADER: str(correlation_id)},
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Preserves FastAPI/Starlette's own HTTPException status codes (e.g.
+    404 for an unmatched route, 405 for an unsupported method) as safe
+    Problem Details, rather than letting the catch-all Exception handler
+    below turn every one of them into an opaque 500 (HTTPException is a
+    subclass of Exception, so it must be handled explicitly and first)."""
+    correlation_id = _effective_correlation_id(request)
+    body = problem_details.build_problem_details(
+        problem_type="urn:ai-platform:problem:http-error",
+        title="HTTP Error",
+        status=exc.status_code,
+        detail=str(exc.detail) if exc.detail else "An HTTP error occurred.",
+        error_code=f"HTTP_{exc.status_code}",
+        correlation_id=correlation_id,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
         content=body,
         headers={CORRELATION_HEADER: str(correlation_id)},
         media_type="application/problem+json",

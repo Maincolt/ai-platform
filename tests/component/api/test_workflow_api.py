@@ -43,6 +43,21 @@ def test_health_ready_reports_registry_loaded(client: TestClient) -> None:
     assert response.json()["status"] == "ready"
 
 
+def test_unmatched_route_returns_404_not_500(client: TestClient) -> None:
+    """Regression test: Starlette's own HTTPException (raised for an
+    unmatched route) must not be swallowed by the catch-all Exception
+    handler and turned into an opaque 500."""
+    response = client.get("/this-route-does-not-exist")
+    assert response.status_code == 404
+    assert response.status_code != 500
+
+
+def test_unsupported_method_returns_405_not_500(client: TestClient) -> None:
+    response = client.delete("/api/v1/workflows")
+    assert response.status_code == 405
+    assert response.status_code != 500
+
+
 def test_submit_new_workflow_returns_202_dispatched(client: TestClient) -> None:
     response = client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
 
