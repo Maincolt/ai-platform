@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:api:workflow-submit-request:1.0",
+  "title": "Workflow Submit Request",
+  "description": "Request body for POST /api/v1/workflows (workflow.submit), per vertical-slice-01.md Section 5.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Optional client-created lowercase UUIDv7. The API creates and returns one when omitted."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000,
+      "description": "Input text for the text.word-count capability."
+    },
+    "capability": {
+      "const": "text.word-count",
+      "description": "Requested capability name. Only text.word-count exists in this slice."
+    },
+    "capability_version": {
+      "const": "1.0",
+      "description": "Requested capability version."
+    }
+  },
+  "required": ["text", "capability", "capability_version"]
+}

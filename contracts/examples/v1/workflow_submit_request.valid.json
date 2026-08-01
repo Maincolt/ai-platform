@@ -1,0 +1,6 @@
+{
+  "request_id": "019fbdd6-ab3d-77aa-8e61-4c3903e582ad",
+  "text": "the quick brown fox jumps over the lazy dog",
+  "capability": "text.word-count",
+  "capability_version": "1.0"
+}

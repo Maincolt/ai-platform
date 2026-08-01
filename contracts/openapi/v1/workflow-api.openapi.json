@@ -1,0 +1,167 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "AI Platform Workflow API",
+    "version": "1.0.0",
+    "description": "Vertical Slice 01 Workflow API: submit/read a deterministic single-agent workflow, plus health endpoints. See docs/implementation/vertical-slice-01.md Section 5. Contract only in Sprint 1 \u2014 not yet implemented."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:8080", "description": "Local-development loopback only (ADR-0010). Never exposed beyond loopback in this slice." }
+  ],
+  "paths": {
+    "/api/v1/workflows": {
+      "post": {
+        "operationId": "workflow.submit",
+        "summary": "Submit a workflow (workflow.submit)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "../../json-schema/v1/workflow_submit_request.schema.json" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "First acceptance.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../../json-schema/v1/workflow_submit_response.schema.json" }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized equivalent replay of a previously accepted request.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../../json-schema/v1/workflow_submit_response.schema.json" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or schema/domain input, or unsupported contract version.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          },
+          "409": {
+            "description": "Authorized fingerprint conflict (REQUEST_ID_CONFLICT).",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          },
+          "503": {
+            "description": "No eligible Agent for a new request (AGENT_TEMPORARILY_UNAVAILABLE). No records created.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe unexpected internal failure (INTERNAL_PROCESSING_FAILURE). Caller may reuse request_id.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workflows/{workflow_id}": {
+      "get": {
+        "operationId": "workflow.read",
+        "summary": "Read the currently authorized durable state/result of a workflow (workflow.read)",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Currently authorized durable state/result.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../../json-schema/v1/workflow_read_response.schema.json" }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or unauthorized workflow (WORKFLOW_NOT_FOUND). Unauthorized and nonexistent workflows are indistinguishable.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "health.live",
+        "summary": "Process liveness only.",
+        "responses": {
+          "200": { "description": "Process is alive." }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "health.ready",
+        "summary": "Core/API readiness. Agent availability is not treated as global readiness.",
+        "responses": {
+          "200": { "description": "Core/API is ready." },
+          "503": { "description": "Core/API is not ready." }
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "CorrelationId": {
+        "description": "The current invocation's effective correlation identifier: a valid client value is preserved; a missing or invalid value is replaced by a generated platform-controlled value (ADR-0012). Always present on every response that can safely be produced.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    }
+  }
+}

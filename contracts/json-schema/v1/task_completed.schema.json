@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:message:task-completed:1.0",
+  "title": "TaskCompleted",
+  "description": "Event message on the task-outcomes channel: Test Agent -> Orchestrator. Per ADR-0004 Section 5 (envelope) and vertical-slice-01.md Section 10 (payload).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "message_kind": {
+      "const": "event"
+    },
+    "contract_name": {
+      "const": "TaskCompleted"
+    },
+    "contract_version": {
+      "const": "1.0"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Propagated unchanged from the workflow's durable correlation_id."
+    },
+    "causation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "The causing ExecuteTask command's message_id."
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "instance_id"],
+      "properties": {
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "word_count", "completed_at", "capability", "capability_version"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000,
+          "description": "The unchanged input text (Section 10)."
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the first accepted completion."
+        },
+        "capability": {
+          "const": "text.word-count"
+        },
+        "capability_version": {
+          "const": "1.0"
+        },
+        "agent": {
+          "type": "object",
+          "description": "Agent implementation evidence retained by the terminal event (Section 10).",
+          "additionalProperties": false,
+          "properties": {
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "message_id",
+    "message_kind",
+    "contract_name",
+    "contract_version",
+    "created_at",
+    "correlation_id",
+    "causation_id",
+    "workflow_id",
+    "task_id",
+    "task_attempt_id",
+    "producer",
+    "payload"
+  ]
+}

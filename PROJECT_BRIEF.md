@@ -1,0 +1,250 @@
+# PROJECT_BRIEF.md — AI Platform
+
+> Last updated: 2026-08-01 | Sprint 1 | Status: In Progress
+
+> **Note on terminology:** the roles in Section 6 are a *virtual contributor
+> team* used to plan and execute sprints in this repository. They are not the
+> platform's own architectural "Agents" (Orchestrator, Event Bus, AI Router,
+> Agents, Skills — see [docs/architecture/README.md](docs/architecture/README.md)),
+> and they are not defined under [agents/](agents/). This file is a
+> sprint-coordination artifact, not an Architecture Decision Record.
+
+## 1. Project Overview
+
+AI Platform is a foundation for coordinating specialized AI agents through
+modular boundaries and event-driven communication (see
+[README.md](README.md)). The repository is currently at its architecture and
+documentation stage: 12 Accepted ADRs and one fully specified implementation
+plan exist, but no runtime code has been written yet. Sprint 1 begins the
+first implementation phase.
+
+## 2. Platform Concept
+
+The platform's logical architecture ([docs/architecture/README.md](docs/architecture/README.md))
+separates:
+
+- **Orchestrator** — owns workflow lifecycle and state transitions.
+- **Event Bus** — asynchronous, contract-based communication boundary.
+- **Agents** — focused participants that own specialized execution.
+- **AI Router** — the boundary to external AI providers/capabilities.
+- **Skills** — reusable, focused capabilities Agents invoke.
+
+The first proof of this architecture is
+[Vertical Slice 01: Deterministic Single-Agent Workflow](docs/implementation/vertical-slice-01.md) —
+a complete, deterministic (no AI model, no external side effect) workflow
+path: submit → persist → dispatch → execute (`text.word-count`) → recover →
+disclose. It is specified in 8 implementation phases; Sprint 1 covers only
+**Phase 1**.
+
+## 3. Tech Stack
+
+- **Language/runtime:** Python, CPython 3.14 (`requires-python = ">=3.14,<3.15"`) — [ADR-0003](docs/architecture/decisions/ADR-0003-runtime-and-development-tooling.md)
+- **Dependency/environment management:** uv (one root `pyproject.toml`, committed `uv.lock`)
+- **Build backend:** Hatchling
+- **Source layout:** `src/ai_platform/` (single regular package; see package tree below)
+- **Formatting/linting:** Ruff
+- **Static typing:** BasedPyright (Pyright-family strict mode), pinned via `uv.lock`
+- **Testing:** pytest (unit, contract, component, integration, end-to-end layout — [docs/testing/README.md](docs/testing/README.md))
+- **Contracts:** JSON Schema Draft 2020-12, OpenAPI 3.1.1, AsyncAPI 3.0.0 — [ADR-0004](docs/architecture/decisions/ADR-0004-api-and-contract-standards.md)
+- **Persistence (later phases):** PostgreSQL, owned schemas — [ADR-0006](docs/architecture/decisions/ADR-0006-persistence-state-and-recovery.md)
+- **Event Bus (later phases):** Kafka-protocol adapter (`confluent-kafka`), local Redpanda broker — [ADR-0005](docs/architecture/decisions/ADR-0005-event-bus-and-messaging-infrastructure.md)
+- **Deployment (later phases):** Docker, cloud-agnostic, Unraid as a first-class target — [infrastructure/README.md](infrastructure/README.md)
+
+Sprint 1 (Phase 1) introduces only tooling metadata and contracts — no
+domain, persistence, or transport implementation.
+
+## 4. Architecture
+
+```text
+                         External requests
+                                 |
+                                 v
+                    +-------------------------+
+                    |      Orchestrator       |
+                    +------------+------------+
+                                 |
+                    commands, facts, results
+                                 |
+                                 v
+                    +-------------------------+
+                    |        Event Bus        |
+                    +------------+------------+
+                                 |
+                +----------------+----------------+
+                |                |                |
+                v                v                v
+           +---------+      +---------+      +---------+
+           |  Agent  |      |  Agent  |      |  Agent  |
+           +----+----+      +----+----+      +----+----+
+                |                |                |
+                v                v                v
+           +---------+      +---------+      +---------+
+           | Skills  |      | Skills  |      | Skills  |
+           +---------+      +---------+      +---------+
+
+             Orchestrator and Agents request AI capabilities
+                                 |
+                                 v
+                    +-------------------------+
+                    |        AI Router        |
+                    +-------------------------+
+                                 |
+                                 v
+                    External AI capabilities
+```
+
+Target package tree for `src/ai_platform/` (established across all vertical
+slice phases; Sprint 1 only creates the skeleton and contracts):
+
+```text
+src/
+└── ai_platform/
+    ├── api/
+    ├── orchestrator/
+    │   └── capability_registry/
+    ├── agents/
+    │   └── test_agent/
+    ├── contracts/
+    ├── ports/
+    │   ├── event_bus/
+    │   └── persistence/
+    ├── adapters/
+    │   ├── event_bus/
+    │   └── persistence/
+    └── shared/
+        ├── configuration/
+        └── logging/
+```
+
+## 5. Key Files Map
+
+| Area | Path | Contents |
+|------|------|----------|
+| Contributor guidance | [AGENTS.md](AGENTS.md) | Repository-wide philosophy, standards, ADR process |
+| Contribution workflow | [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR workflow, ADR process, testing/review expectations |
+| Platform architecture | [docs/architecture/README.md](docs/architecture/README.md) | Logical components, contracts, boundaries |
+| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 12 Accepted ADRs (0001–0012), governing all implementation |
+| First implementation plan | [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md) | 8-phase plan for the first deterministic workflow |
+| Test strategy | [docs/testing/README.md](docs/testing/README.md) | Local vs. external-service test levels |
+| Platform agents (architecture) | [agents/](agents/) | Placeholder — populated after Phase 3+ (Orchestrator/Registry/Test Agent) |
+| Skills (platform capabilities) | [skills/](skills/) | Placeholder — reusable Agent capabilities |
+| Infrastructure | [infrastructure/](infrastructure/) | Placeholder — Docker/Unraid deployment definitions |
+| Scripts | [scripts/](scripts/) | Placeholder — dev/validation/deploy utilities |
+| Tests | [tests/](tests/) | Placeholder — mirrors module boundaries once established |
+| Sprint docs | `docs/sprint-N/` | Plans, progress, done, and consilium notes per sprint |
+| Source (created in Sprint 1) | `src/ai_platform/` | Root package; only tooling/contract skeleton in Sprint 1 |
+
+## 6. Team Roles (Sprint 1)
+
+| Agent | Name | Role | Focus this sprint |
+|-------|------|------|--------------------|
+| Producer | **Remy** | Sprint planning, coordination, PR review/merge, issue triage | Scope control against Phase 1 only; keeps domain behavior out |
+| Tooling Engineer | **Dash** | Runtime/tooling setup | `pyproject.toml`, `uv.lock`, Hatchling, Ruff, BasedPyright, pytest scaffolding, CI-friendly commands |
+| Contracts Engineer | **Sage** | Canonical contracts | JSON Schema (Draft 2020-12), OpenAPI 3.1.1, AsyncAPI 3.0.0, examples, correlation contract (ADR-0012) |
+| QA Engineer | **Ivy** | Contract validation | Schema/OpenAPI/AsyncAPI validity, example↔schema parity, tooling command verification |
+
+Frontend/visual roles (Nova, Milo, Kira) are not needed for Sprint 1 — this
+platform has no UI in the first vertical slice. Additional roles (e.g. an
+Orchestrator engineer, an Agent engineer, a DevOps/deployment engineer) should
+be introduced starting with the sprint that implements Phase 3 (Orchestrator)
+and Phase 6 (adapters/deployment).
+
+## 7. Sprint Status
+
+| Sprint | Name | Status | Scope |
+|--------|------|--------|-------|
+| 0 | Architecture | ✅ Done | ADR-0001–0012 (Accepted), platform architecture doc, Vertical Slice 01 plan |
+| 1 | Tooling and Canonical Contracts | ✅ Done | Vertical Slice 01 **Phase 1** only: root tooling metadata + canonical JSON Schema/OpenAPI/AsyncAPI contracts. No domain behavior. See [docs/sprint-1/done.md](docs/sprint-1/done.md). |
+
+## 8. Current State
+
+**What works:**
+- Repository-wide contributor guidance ([AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md)).
+- Complete platform architecture description and 12 Accepted ADRs.
+- A fully specified, ADR-aligned implementation plan for the first vertical slice.
+- Root tooling metadata (`pyproject.toml`, `uv.lock`) and the `src/ai_platform/` package skeleton (ADR-0003), validated locally with `uv sync`, Ruff, BasedPyright (strict), and pytest.
+- Canonical contracts under `contracts/`: JSON Schema (Draft 2020-12), OpenAPI 3.1.1, and AsyncAPI 3.0.0 for the Workflow API and task-commands/task-outcomes messages, including the ADR-0012 correlation contract and 12 examples.
+- 52 contract-validation tests under `tests/contract/`, all passing.
+
+**What doesn't work yet:**
+- No Orchestrator, Capability Registry, Test Agent, Workflow API, persistence, or Event Bus implementation exists — only their contracts.
+- No contract code-generation tooling (explicitly deferred to Phase 2).
+- No Docker/local deployment artifacts (Phase 6).
+
+**What's next (Sprint 2 candidate — Phase 2):**
+- Workflow domain model and persistence ports per [vertical-slice-01.md Section 20, Phase 2](docs/implementation/vertical-slice-01.md#20-implementation-phases).
+
+## 9. Security Rules
+
+1. Secrets never live in code, fixtures, logs, or documentation — see [SECURITY.md](SECURITY.md).
+2. Sprint 1 introduces no runtime services, so there are no credentials or trust boundaries to configure yet.
+3. When later phases introduce the local-development authorization boundary (ADR-0010), it is explicitly loopback-only and must not be treated as production-ready.
+4. Any contract or configuration example must use nonfunctional placeholder values only.
+
+## 10. How to Run Locally
+
+```bash
+uv sync
+uv run pytest
+```
+
+This validates the Sprint 1 tooling and contracts (creates a project-local
+`.venv/` only). There is no running service yet — the Workflow API,
+Orchestrator, and Agent are implemented starting in later phases. Later
+phases will add Docker Compose for PostgreSQL/Redpanda and the Workflow API.
+
+## 11. How to Deploy
+
+Not applicable yet. [infrastructure/](infrastructure/) remains a placeholder
+until Phase 6 (Concrete Adapters and Local Deployment) of the vertical slice
+plan.
+
+## 12. Cross-Chat Handoff Protocol
+
+Every sprint chat/session must do these before finishing:
+
+1. Write `docs/sprint-N/done.md` — what was built, what's not done, what needs manual setup, files changed/created.
+2. Update this file: Section 7 (mark sprint status) + Section 8 (rewrite current state).
+3. Commit with a descriptive message following [CONTRIBUTING.md](CONTRIBUTING.md) commit-message guidance (short imperative subject, body when needed).
+4. Open a pull request per [CONTRIBUTING.md](CONTRIBUTING.md): one clear outcome, documentation updated in the same PR, validation performed listed explicitly.
+
+The repository is the shared memory — keep `docs/sprint-N/` and this file
+accurate so the next session does not duplicate or contradict prior work.
+
+## 13. Bug & Fix Tracking
+
+Bugs and follow-up work are tracked as GitHub Issues on this repository —
+the single source of truth across sessions.
+
+**For QA (Ivy):** file issues with labels (`bug`, `severity:blocker/major/minor`).
+Include: affected file/contract, steps to reproduce, expected vs. actual. When
+no blockers are found, write `docs/qa/sprint-N-signoff.md` with an explicit
+"no blockers" statement and the validation performed.
+
+**For contributors:** check existing issues before starting work. Fix
+blockers and majors before polish. Use GitHub closing keywords in commits:
+`fix: description (Fixes #NN)`. Use `Refs #NN` for reference-only.
+
+**For tooling/infrastructure issues:** label `infra`.
+
+**For future-sprint ideas:** add to `docs/ideas-backlog.md` rather than
+expanding the current sprint's scope.
+
+## 14. Multi-Repo / Branch Setup
+
+This repository does not require separate clones per role for a single
+contributor session, but the branch and PR discipline from
+[CONTRIBUTING.md](CONTRIBUTING.md) applies to every sprint:
+
+- Create one short-lived branch per sprint from the latest `main`, e.g.
+  `feature/sprint-1-tooling-and-contracts`.
+- Keep the branch limited to the sprint's declared scope (Phase 1 only for
+  Sprint 1). Do not mix unrelated refactors or future-phase work into it.
+- Never push directly to `main`. Open a pull request, address review
+  feedback, and merge (do not rebase a shared feature branch — merge to
+  preserve history, per [CONTRIBUTING.md](CONTRIBUTING.md)).
+- If parallel work streams are later run in separate sessions/clones (e.g.
+  a QA session validating contracts while a dev session continues Phase 2),
+  follow the same isolated-clone pattern documented in the
+  `ai-team-orchestration` skill: one clone and branch per active role,
+  coordinated through this file and `docs/sprint-N/progress.md`.
