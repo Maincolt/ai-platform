@@ -8,8 +8,8 @@ duplicate history (enforced by the Workflow aggregate, not this type).
 from dataclasses import dataclass
 from datetime import datetime
 
-from ai_platform.orchestrator.domain.identifiers import WorkflowId
 from ai_platform.orchestrator.domain.states import WorkflowState
+from ai_platform.shared.identifiers import WorkflowId
 
 
 @dataclass(frozen=True, slots=True)

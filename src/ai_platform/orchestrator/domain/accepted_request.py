@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from ai_platform.orchestrator.domain.identifiers import (
+from ai_platform.shared.identifiers import (
     ActorId,
     IdempotencyScopeId,
     OwnerSubjectId,

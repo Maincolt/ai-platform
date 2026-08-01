@@ -8,14 +8,14 @@ independently of transaction orchestration.
 
 from datetime import datetime
 
-from ai_platform.orchestrator.domain.identifiers import (
+from ai_platform.orchestrator.domain.selection import SelectionIntent
+from ai_platform.shared.identifiers import (
     CorrelationId,
     RequestId,
     TaskAttemptId,
     TaskId,
     WorkflowId,
 )
-from ai_platform.orchestrator.domain.selection import SelectionIntent
 
 
 def _iso8601_utc(value: datetime) -> str:

@@ -8,12 +8,10 @@ publish, and mark disposition as separate short transactions (Section 11,
 
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import MessageId, WorkflowId
-from ai_platform.orchestrator.domain.recovery import (
-    AgentEventOutboxRecord,
-    OrchestratorOutboxRecord,
-    PublicationState,
-)
+from ai_platform.agents.domain.outcomes import AgentEventOutboxRecord
+from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
+from ai_platform.shared.identifiers import MessageId, WorkflowId
+from ai_platform.shared.recovery import PublicationState
 
 
 class OrchestratorOutboxRepositoryPort(Protocol):

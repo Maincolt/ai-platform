@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
+from ai_platform.shared.identifiers import AgentId
 
 
 class AvailabilityClassification(Enum):

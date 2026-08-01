@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 import pytest
 
 from ai_platform.orchestrator.domain.errors import IllegalTransitionError, TerminalWorkflowError
-from ai_platform.orchestrator.domain.identifiers import CorrelationId, RequestId, WorkflowId
 from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
 from ai_platform.orchestrator.domain.states import WorkflowState
 from ai_platform.orchestrator.domain.workflow import Workflow
+from ai_platform.shared.identifiers import CorrelationId, RequestId, WorkflowId
 
 NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 

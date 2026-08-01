@@ -8,7 +8,7 @@ existing workflow.
 from dataclasses import dataclass
 from datetime import datetime
 
-from ai_platform.orchestrator.domain.identifiers import AgentId
+from ai_platform.shared.identifiers import AgentId
 
 
 @dataclass(frozen=True, slots=True)

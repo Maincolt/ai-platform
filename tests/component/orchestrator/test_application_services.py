@@ -34,20 +34,7 @@ from ai_platform.orchestrator.domain.accepted_request import (
     AcceptedRequestKey,
 )
 from ai_platform.orchestrator.domain.audit import AuditRecord
-from ai_platform.orchestrator.domain.identifiers import (
-    ActorId,
-    AgentId,
-    CorrelationId,
-    IdempotencyScopeId,
-    MessageId,
-    OwnerSubjectId,
-    RequestId,
-    TaskAttemptId,
-    TaskId,
-    WorkflowId,
-)
 from ai_platform.orchestrator.domain.recovery import (
-    AgentOutcome,
     OrchestratorInboxRecord,
     OrchestratorOutboxRecord,
 )
@@ -62,6 +49,19 @@ from ai_platform.ports.persistence.outbox import OrchestratorOutboxRepositoryPor
 from ai_platform.ports.persistence.recovery import NonterminalWorkflowQueryPort
 from ai_platform.ports.persistence.task import TaskAttemptRepositoryPort, TaskRepositoryPort
 from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.shared.identifiers import (
+    ActorId,
+    AgentId,
+    CorrelationId,
+    IdempotencyScopeId,
+    MessageId,
+    OwnerSubjectId,
+    RequestId,
+    TaskAttemptId,
+    TaskId,
+    WorkflowId,
+)
+from ai_platform.shared.outcomes import AgentOutcome
 
 NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 

@@ -12,11 +12,11 @@ from datetime import datetime
 
 from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.errors import TerminalWorkflowError
-from ai_platform.orchestrator.domain.identifiers import ActorId, WorkflowId
 from ai_platform.orchestrator.domain.results import WorkflowFailure
 from ai_platform.ports.persistence.audit import AuditRepositoryPort
 from ai_platform.ports.persistence.recovery import NonterminalWorkflowQueryPort
 from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.shared.identifiers import ActorId, WorkflowId
 
 _SYSTEM_ACTOR_ID = ActorId("system:deadline-reconciler")
 _DEADLINE_FAILURE_CODE = "TASK_RESULT_DEADLINE_EXCEEDED"

@@ -5,8 +5,8 @@ are not HTTP errors or Problem Details (that mapping is Phase 5, the
 Workflow API's responsibility).
 """
 
-from ai_platform.orchestrator.domain.identifiers import WorkflowId
 from ai_platform.orchestrator.domain.states import WorkflowState
+from ai_platform.shared.identifiers import WorkflowId
 
 
 class WorkflowDomainError(Exception):

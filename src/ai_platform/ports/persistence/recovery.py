@@ -11,7 +11,7 @@ disagreement 1).
 from datetime import datetime
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import TaskAttemptId, WorkflowId
+from ai_platform.shared.identifiers import TaskAttemptId, WorkflowId
 
 
 class NonterminalWorkflowQueryPort(Protocol):

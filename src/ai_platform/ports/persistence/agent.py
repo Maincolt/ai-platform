@@ -2,8 +2,9 @@
 
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import TaskAttemptId
-from ai_platform.orchestrator.domain.recovery import AgentCompletedReceipt, AgentOutcome
+from ai_platform.agents.domain.outcomes import AgentCompletedReceipt
+from ai_platform.shared.identifiers import TaskAttemptId
+from ai_platform.shared.outcomes import AgentOutcome
 
 
 class AgentReceiptRepositoryPort(Protocol):
@@ -11,9 +12,19 @@ class AgentReceiptRepositoryPort(Protocol):
 
     def get_by_attempt(self, task_attempt_id: TaskAttemptId) -> AgentCompletedReceipt | None: ...
 
-    def create_or_resolve(self, receipt: AgentCompletedReceipt) -> AgentCompletedReceipt:
-        """Enforce one accepted receipt per task_attempt_id; return the
-        resolved (possibly pre-existing) receipt."""
+    def create_or_resolve(
+        self, receipt: AgentCompletedReceipt
+    ) -> tuple[AgentCompletedReceipt, bool]:
+        """Enforce one accepted receipt per task_attempt_id.
+
+        Returns `(resolved_receipt, is_new)`. `is_new` is required rather
+        than inferring creation from value equality: two independently
+        constructed receipts for the same real command are equal by value
+        even when a concurrent writer won the race to commit first, so
+        callers cannot otherwise distinguish "I created it" from "someone
+        else already had created an identical one" (see
+        docs/sprint-4/consilium.md).
+        """
         ...
 
 

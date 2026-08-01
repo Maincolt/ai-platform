@@ -7,8 +7,8 @@ create/read/update shape for these capabilities.
 
 from typing import Protocol
 
-from ai_platform.orchestrator.domain.identifiers import WorkflowId
 from ai_platform.orchestrator.domain.workflow import Workflow
+from ai_platform.shared.identifiers import WorkflowId
 
 
 class WorkflowRepositoryPort(Protocol):
