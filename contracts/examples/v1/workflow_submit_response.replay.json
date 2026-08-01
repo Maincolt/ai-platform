@@ -1,0 +1,9 @@
+{
+  "request_id": "019fbdd6-ab3d-77aa-8e61-4c3903e582ad",
+  "correlation_id": "019fbdd6-ab3d-77aa-8e61-4c3a4e21ad64",
+  "workflow_id": "019fbdd6-ab3d-77aa-8e61-4c3bc6d53f69",
+  "state": "COMPLETED",
+  "result": {
+    "word_count": 9
+  }
+}

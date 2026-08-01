@@ -1,0 +1,28 @@
+{
+  "message_id": "019fbdd6-ab3d-77aa-8e61-4c40d234a3bf",
+  "message_kind": "command",
+  "contract_name": "ExecuteTask",
+  "contract_version": "1.0",
+  "created_at": "2026-08-01T12:00:00Z",
+  "correlation_id": "019fbdd6-ab3d-77aa-8e61-4c3a4e21ad64",
+  "causation_id": null,
+  "workflow_id": "019fbdd6-ab3d-77aa-8e61-4c3bc6d53f69",
+  "task_id": "019fbdd6-ab3d-77aa-8e61-4c41f9f4f1a1",
+  "task_attempt_id": "019fbdd6-ab3d-77aa-8e61-4c425fab5f4b",
+  "producer": {
+    "component": "orchestrator",
+    "instance_id": "019fbdd6-ab3d-77aa-8e61-4c437e23b83b"
+  },
+  "payload": {
+    "request_id": "019fbdd6-ab3d-77aa-8e61-4c3903e582ad",
+    "input": "the quick brown fox jumps over the lazy dog",
+    "capability": "text.word-count",
+    "capability_version": "1.0",
+    "selected_agent": {
+      "component": "test-agent",
+      "instance_id": "019fbdd6-ab3d-77aa-8e61-4c442e87c74c"
+    },
+    "attempt_number": 1,
+    "task_result_deadline": "2026-08-01T12:00:30Z"
+  }
+}

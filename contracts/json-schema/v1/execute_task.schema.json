@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:message:execute-task:1.0",
+  "title": "ExecuteTask",
+  "description": "Command message on the task-commands channel: Orchestrator -> selected Test Agent deployment. Per ADR-0004 Section 5 (envelope) and vertical-slice-01.md Section 10 (payload).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Producer-created lowercase UUIDv7 identifying one immutable logical publication."
+    },
+    "message_kind": {
+      "const": "command"
+    },
+    "contract_name": {
+      "const": "ExecuteTask"
+    },
+    "contract_version": {
+      "const": "1.0"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp the immutable logical message was created."
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "The workflow's durable correlation_id, propagated unchanged (see ADR-0012)."
+    },
+    "causation_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Null for this root command."
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Also the Agent idempotency key."
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "instance_id"],
+      "properties": {
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "input",
+        "capability",
+        "capability_version",
+        "selected_agent",
+        "attempt_number",
+        "task_result_deadline"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "input": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000,
+          "description": "The exact text submitted for text.word-count."
+        },
+        "capability": {
+          "const": "text.word-count"
+        },
+        "capability_version": {
+          "const": "1.0"
+        },
+        "selected_agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["component", "instance_id"],
+          "properties": {
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        "attempt_number": {
+          "const": 1,
+          "description": "This slice has exactly one attempt per workflow (Section 2)."
+        },
+        "task_result_deadline": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Maximum time for the Orchestrator to durably accept TaskCompleted or TaskFailed."
+        }
+      }
+    }
+  },
+  "required": [
+    "message_id",
+    "message_kind",
+    "contract_name",
+    "contract_version",
+    "created_at",
+    "correlation_id",
+    "causation_id",
+    "workflow_id",
+    "task_id",
+    "task_attempt_id",
+    "producer",
+    "payload"
+  ]
+}

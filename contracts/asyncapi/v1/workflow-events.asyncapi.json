@@ -1,0 +1,89 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "AI Platform Task Commands and Outcomes",
+    "version": "1.0.0",
+    "description": "Vertical Slice 01 Event Bus contracts: task-commands and task-outcomes channels. See docs/implementation/vertical-slice-01.md Section 10. Contract only in Sprint 1 \u2014 no Event Bus adapter exists yet."
+  },
+  "servers": {
+    "local-redpanda": {
+      "host": "127.0.0.1:19092",
+      "protocol": "kafka",
+      "description": "Local-development Redpanda broker (ADR-0005). Not a production topology."
+    }
+  },
+  "channels": {
+    "task-commands": {
+      "address": "task-commands",
+      "description": "Orchestrator -> selected Test Agent deployment. Keyed by workflow_id; ordering exists only within (channel, workflow_id).",
+      "messages": {
+        "ExecuteTask": { "$ref": "#/components/messages/ExecuteTask" }
+      }
+    },
+    "task-outcomes": {
+      "address": "task-outcomes",
+      "description": "Test Agent -> Orchestrator. Keyed by workflow_id; ordering exists only within (channel, workflow_id).",
+      "messages": {
+        "TaskCompleted": { "$ref": "#/components/messages/TaskCompleted" },
+        "TaskFailed": { "$ref": "#/components/messages/TaskFailed" }
+      }
+    }
+  },
+  "operations": {
+    "publishExecuteTask": {
+      "action": "send",
+      "channel": { "$ref": "#/channels/task-commands" },
+      "summary": "Orchestrator publishes ExecuteTask after the submission transaction commits.",
+      "messages": [{ "$ref": "#/channels/task-commands/messages/ExecuteTask" }]
+    },
+    "consumeExecuteTask": {
+      "action": "receive",
+      "channel": { "$ref": "#/channels/task-commands" },
+      "summary": "The selected Test Agent deployment receives and validates ExecuteTask.",
+      "messages": [{ "$ref": "#/channels/task-commands/messages/ExecuteTask" }]
+    },
+    "publishTaskOutcome": {
+      "action": "send",
+      "channel": { "$ref": "#/channels/task-outcomes" },
+      "summary": "The Test Agent publishes TaskCompleted or TaskFailed after its outcome transaction commits.",
+      "messages": [
+        { "$ref": "#/channels/task-outcomes/messages/TaskCompleted" },
+        { "$ref": "#/channels/task-outcomes/messages/TaskFailed" }
+      ]
+    },
+    "consumeTaskOutcome": {
+      "action": "receive",
+      "channel": { "$ref": "#/channels/task-outcomes" },
+      "summary": "The Orchestrator receives and validates the terminal event.",
+      "messages": [
+        { "$ref": "#/channels/task-outcomes/messages/TaskCompleted" },
+        { "$ref": "#/channels/task-outcomes/messages/TaskFailed" }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "ExecuteTask": {
+        "name": "ExecuteTask",
+        "title": "ExecuteTask",
+        "summary": "Command: execute the deterministic text.word-count capability for one task attempt.",
+        "contentType": "application/json",
+        "payload": { "$ref": "../../json-schema/v1/execute_task.schema.json" }
+      },
+      "TaskCompleted": {
+        "name": "TaskCompleted",
+        "title": "TaskCompleted",
+        "summary": "Event: the Test Agent completed the task attempt successfully.",
+        "contentType": "application/json",
+        "payload": { "$ref": "../../json-schema/v1/task_completed.schema.json" }
+      },
+      "TaskFailed": {
+        "name": "TaskFailed",
+        "title": "TaskFailed",
+        "summary": "Event: the Test Agent's task attempt failed with a safe, stable failure code.",
+        "contentType": "application/json",
+        "payload": { "$ref": "../../json-schema/v1/task_failed.schema.json" }
+      }
+    }
+  }
+}

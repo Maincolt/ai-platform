@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:api:workflow-submit-response:1.0",
+  "title": "Workflow Submit Response",
+  "description": "202 (first acceptance) or 200 (authorized equivalent replay) response body for POST /api/v1/workflows, per vertical-slice-01.md Section 5. Exposes only public identifiers, current state, and safe result/failure fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "The workflow's durable correlation_id, established on first acceptance (see ADR-0012)."
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"],
+      "description": "Current durable workflow state, per vertical-slice-01.md Section 9."
+    },
+    "result": {
+      "type": "object",
+      "description": "Present only when state is COMPLETED.",
+      "additionalProperties": false,
+      "required": ["word_count"],
+      "properties": {
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "description": "Present only when state is FAILED.",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    }
+  },
+  "required": ["request_id", "correlation_id", "workflow_id", "state"]
+}

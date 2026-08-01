@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:message:task-failed:1.0",
+  "title": "TaskFailed",
+  "description": "Event message on the task-outcomes channel: Test Agent -> Orchestrator. Per ADR-0004 Section 5 (envelope) and vertical-slice-01.md Section 10 (payload).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "message_kind": {
+      "const": "event"
+    },
+    "contract_name": {
+      "const": "TaskFailed"
+    },
+    "contract_version": {
+      "const": "1.0"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Propagated unchanged from the workflow's durable correlation_id."
+    },
+    "causation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "The causing ExecuteTask command's message_id."
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "instance_id"],
+      "properties": {
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_code", "summary", "failed_at", "capability", "capability_version"],
+      "properties": {
+        "failure_code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Stable safe failure code, within the accepted failure classes (Section 23)."
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Bounded sanitized summary. Must not echo secrets or internal exception detail."
+        },
+        "failed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "capability": {
+          "const": "text.word-count"
+        },
+        "capability_version": {
+          "const": "1.0"
+        },
+        "agent": {
+          "type": "object",
+          "description": "Agent implementation evidence retained by the terminal event (Section 10).",
+          "additionalProperties": false,
+          "properties": {
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "message_id",
+    "message_kind",
+    "contract_name",
+    "contract_version",
+    "created_at",
+    "correlation_id",
+    "causation_id",
+    "workflow_id",
+    "task_id",
+    "task_attempt_id",
+    "producer",
+    "payload"
+  ]
+}

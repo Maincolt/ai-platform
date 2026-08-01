@@ -1,0 +1,8 @@
+{
+  "type": "urn:ai-platform:problem:agent-temporarily-unavailable",
+  "title": "Agent Temporarily Unavailable",
+  "status": 503,
+  "detail": "No eligible Agent is currently ready for this capability. No records were created.",
+  "error_code": "AGENT_TEMPORARILY_UNAVAILABLE",
+  "correlation_id": "019fbdd6-ab3d-77aa-8e61-4c3ffee19faf"
+}

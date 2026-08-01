@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:api:workflow-read-response:1.0",
+  "title": "Workflow Read Response",
+  "description": "200 response body for GET /api/v1/workflows/{workflow_id}, per vertical-slice-01.md Section 5. Same public identifiers as the submit response, plus revision and permitted timestamps.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "The workflow's original durable correlation_id (unchanged by replay, see ADR-0012)."
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonically increasing workflow snapshot revision, per vertical-slice-01.md Section 9."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of workflow acceptance."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of the current revision."
+    },
+    "result": {
+      "type": "object",
+      "description": "Present only when state is COMPLETED.",
+      "additionalProperties": false,
+      "required": ["word_count"],
+      "properties": {
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "description": "Present only when state is FAILED.",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    }
+  },
+  "required": ["request_id", "correlation_id", "workflow_id", "state", "revision", "created_at", "updated_at"]
+}
