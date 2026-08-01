@@ -16,6 +16,7 @@ from ai_platform.agents.test_agent.errors import (
     CapabilityMismatchError,
     CommandIdentityConflictError,
     CommandIntegrityError,
+    MissingOutcomeInvariantError,
 )
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
 from ai_platform.ports.persistence.agent import (
@@ -56,6 +57,11 @@ class InMemoryAgentReceiptRepository(AgentReceiptRepositoryPort):
             return existing, False
         self._receipts[receipt.task_attempt_id] = receipt
         return receipt, True
+
+    def seed(self, receipt: AgentCompletedReceipt) -> None:
+        """Test-only helper to pre-populate a receipt as if another
+        process instance had already committed it."""
+        self._receipts[receipt.task_attempt_id] = receipt
 
 
 @dataclass
@@ -229,6 +235,40 @@ def test_capability_mismatch_is_rejected_before_execution() -> None:
 
     assert outcome_repo.save_call_count == 0
     assert event_outbox_repo.records == []
+
+
+def test_duplicate_receipt_without_outcome_fails_closed() -> None:
+    """A completed receipt should never exist without its outcome (they
+    commit together atomically). If persistence is somehow inconsistent,
+    the Agent must fail closed rather than silently returning a result
+    with no outcome."""
+    receipt_repo, outcome_repo, event_outbox_repo = (
+        InMemoryAgentReceiptRepository(),
+        InMemoryAgentOutcomeRepository(),
+        InMemoryAgentEventOutboxRepository(),
+    )
+    orphaned_receipt = AgentCompletedReceipt(
+        environment="local-development",
+        agent_deployment_id=AgentId("test-agent"),
+        task_attempt_id=TaskAttemptId("attempt-1"),
+        command_message_id=MessageId("msg-1"),
+        command_digest="digest-a",
+    )
+    receipt_repo.seed(orphaned_receipt)
+    # Deliberately no matching outcome seeded.
+
+    agent = TestAgent(
+        environment="local-development",
+        agent_deployment_id=AgentId("test-agent"),
+        agent_component="test-agent",
+        receipt_repo=receipt_repo,
+        outcome_repo=outcome_repo,
+        event_outbox_repo=event_outbox_repo,
+        id_factory=FakeIdentifierFactory(),
+    )
+
+    with pytest.raises(MissingOutcomeInvariantError):
+        agent.handle(_context(), now=NOW)
 
 
 def test_concurrent_duplicate_at_commit_time_resolves_to_one_outcome() -> None:

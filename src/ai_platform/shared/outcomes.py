@@ -18,8 +18,9 @@ from ai_platform.shared.identifiers import TaskAttemptId
 class AgentOutcome:
     """The one accepted result for a task_attempt_id.
 
-    Exactly one of `word_count` (success) or `failure_code`/`summary`
-    (failure) must be set.
+    Exactly one of `word_count` (success) or `failure_code` (failure) must
+    be set; `summary` is an optional, additional detail on failure only
+    (it is not itself part of the enforced exclusivity invariant).
     """
 
     task_attempt_id: TaskAttemptId

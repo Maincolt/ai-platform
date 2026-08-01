@@ -45,3 +45,21 @@ class CommandIntegrityError(TestAgentError):
         super().__init__(
             f"command {message_id} was previously received with different immutable bytes"
         )
+
+
+class MissingOutcomeInvariantError(TestAgentError):
+    """A completed receipt exists but its outcome does not.
+
+    The receipt, outcome, terminal event, and event outbox row commit
+    together in one transaction (ADR-0006 Section 5, Section 11 "Agent
+    Outcome Transaction"); a receipt without an outcome means that
+    invariant was violated by the persistence layer. Fail closed rather
+    than silently returning an incomplete result.
+    """
+
+    def __init__(self, task_attempt_id: TaskAttemptId) -> None:
+        self.task_attempt_id = task_attempt_id
+        super().__init__(
+            f"task_attempt_id {task_attempt_id} has a completed receipt but no outcome; "
+            "this violates the receipt/outcome atomicity invariant"
+        )

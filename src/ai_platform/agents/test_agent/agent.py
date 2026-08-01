@@ -24,6 +24,7 @@ from ai_platform.agents.test_agent.errors import (
     CapabilityMismatchError,
     CommandIdentityConflictError,
     CommandIntegrityError,
+    MissingOutcomeInvariantError,
 )
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
 from ai_platform.agents.test_agent.ids import IdentifierFactory
@@ -56,7 +57,9 @@ class TestAgentResult:
     __test__ = False  # not a pytest test class despite the name prefix
 
     disposition: TestAgentDisposition
-    outcome: AgentOutcome | None
+    outcome: AgentOutcome
+    """Always present: every code path either computes a fresh outcome or
+    raises MissingOutcomeInvariantError rather than returning without one."""
 
 
 class TestAgent:
@@ -134,6 +137,8 @@ class TestAgent:
             raise CommandIntegrityError(context.command_message_id)
 
         existing_outcome = self._outcome_repo.get_by_attempt(context.task_attempt_id)
+        if existing_outcome is None:
+            raise MissingOutcomeInvariantError(context.task_attempt_id)
         return TestAgentResult(
             disposition=TestAgentDisposition.DUPLICATE_RESOLVED, outcome=existing_outcome
         )
