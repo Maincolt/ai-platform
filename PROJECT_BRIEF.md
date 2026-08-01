@@ -46,12 +46,16 @@ disclose. It is specified in 8 implementation phases; Sprint 1 covers only
 - **Static typing:** BasedPyright (Pyright-family strict mode), pinned via `uv.lock`
 - **Testing:** pytest (unit, contract, component, integration, end-to-end layout — [docs/testing/README.md](docs/testing/README.md))
 - **Contracts:** JSON Schema Draft 2020-12, OpenAPI 3.1.1, AsyncAPI 3.0.0 — [ADR-0004](docs/architecture/decisions/ADR-0004-api-and-contract-standards.md)
+- **API framework:** FastAPI + Pydantic v2, Uvicorn (ASGI server) — verified CPython 3.14 compatible per [ADR-0003](docs/architecture/decisions/ADR-0003-runtime-and-development-tooling.md)
+- **Request fingerprinting:** `rfc8785` (RFC 8785 JSON Canonicalization Scheme) + SHA-256
 - **Persistence (later phases):** PostgreSQL, owned schemas — [ADR-0006](docs/architecture/decisions/ADR-0006-persistence-state-and-recovery.md)
 - **Event Bus (later phases):** Kafka-protocol adapter (`confluent-kafka`), local Redpanda broker — [ADR-0005](docs/architecture/decisions/ADR-0005-event-bus-and-messaging-infrastructure.md)
 - **Deployment (later phases):** Docker, cloud-agnostic, Unraid as a first-class target — [infrastructure/README.md](infrastructure/README.md)
 
 Sprint 1 (Phase 1) introduces only tooling metadata and contracts — no
-domain, persistence, or transport implementation.
+domain, persistence, or transport implementation. Sprint 5 (Phase 5) adds
+a real, runnable HTTP API (FastAPI/Uvicorn) composed over in-memory
+reference ports; PostgreSQL/Kafka adapters remain Phase 6.
 
 ## 4. Architecture
 
@@ -97,12 +101,13 @@ Target package tree for `src/ai_platform/` (established across all vertical
 slice phases; Sprint 2 populated `orchestrator/domain/` and
 `ports/persistence/`; Sprint 3 added `orchestrator/registry/` and
 `orchestrator/application/`; Sprint 4 added `agents/test_agent/`,
-`agents/domain/`, and expanded `shared/`; the rest remain skeletons):
+`agents/domain/`, and expanded `shared/`; Sprint 5 populated `api/`; the
+rest remain skeletons):
 
 ```text
 src/
 └── ai_platform/
-    ├── api/
+    ├── api/                   # Sprint 5: Workflow API (context, correlation, fingerprint, routes, in-memory port assembly)
     ├── orchestrator/
     │   ├── domain/            # Sprint 2: Workflow aggregate, value objects
     │   ├── registry/          # Sprint 3: Capability Registry (declarations, snapshot, availability, selection)
@@ -140,13 +145,13 @@ src/
 | Sprint docs | `docs/sprint-N/` | Plans, progress, done, and consilium notes per sprint |
 | Source (created in Sprint 1) | `src/ai_platform/` | Root package; only tooling/contract skeleton in Sprint 1 |
 
-## 6. Team Roles (Sprint 4)
+## 6. Team Roles (Sprint 5)
 
 | Agent | Name | Role | Focus this sprint |
 |-------|------|------|--------------------|
-| Producer | **Remy** | Sprint planning, coordination, PR review/merge | Scope control against Phase 4 only; enforced Agent/Orchestrator module-boundary independence |
-| Domain/Application Engineer | **Sage** | Test Agent lifecycle | `TestAgent`, capability, execution context, message builders, readiness boundary; led the `shared`/`agents.domain` architectural correction |
-| QA Engineer | **Ivy** | Capability and lifecycle tests | Unicode whitespace edge cases; full lifecycle component tests including a genuine concurrent-duplicate race that surfaced a real port design gap |
+| Producer | **Remy** | Sprint planning, coordination, PR review/merge | Scope control against Phase 5 only; kept the in-memory port assembly explicitly labeled non-production |
+| API Engineer | **Sage** | Workflow API | Trusted context, ADR-0012 correlation, RFC 8785 fingerprinting, Problem Details, FastAPI routes |
+| QA Engineer | **Ivy** | Correlation, fingerprint, and API contract tests | All 5 ADR-0012 scenarios; the full Section 5 HTTP error table via `TestClient` |
 
 Frontend/visual roles remain unneeded. A DevOps/deployment engineer should
 be introduced starting with the sprint that implements Phase 6
@@ -161,6 +166,7 @@ be introduced starting with the sprint that implements Phase 6
 | 2 | Workflow Domain and Persistence Ports | ✅ Done | Vertical Slice 01 **Phase 2** only: five-state `Workflow` aggregate, accepted-request arbitration, task/attempt, transition history, audit, inbox/outbox/receipt records, 7 persistence `Protocol` ports. Pure domain code, no adapters. See [docs/sprint-2/done.md](docs/sprint-2/done.md). |
 | 3 | Orchestrator and Capability Registry | ✅ Done | Vertical Slice 01 **Phase 3** only: configuration-backed Capability Registry, submission-transaction orchestration, terminal event processing, deadline reconciliation, one recovery query port. Registry built via a parallel background sub-agent. See [docs/sprint-3/done.md](docs/sprint-3/done.md). |
 | 4 | Test Agent | ✅ Done | Vertical Slice 01 **Phase 4** only: the built-in `text.word-count` capability, receipt-first idempotency lifecycle, capability/input validation, readiness boundary. Includes an architectural correction moving shared/Agent-owned types out of `orchestrator/domain/`. See [docs/sprint-4/done.md](docs/sprint-4/done.md). |
+| 5 | Workflow API | ✅ Done | Vertical Slice 01 **Phase 5** only: submit/read/health HTTP operations, trusted synthetic context, ADR-0012 correlation normalization, RFC 8785 fingerprinting, Problem Details. Composed over in-memory reference ports (explicitly non-production). See [docs/sprint-5/done.md](docs/sprint-5/done.md). |
 
 ## 8. Current State
 
@@ -176,37 +182,41 @@ be introduced starting with the sprint that implements Phase 6
 - The Orchestrator application services (`src/ai_platform/orchestrator/application/`): `SubmissionOrchestrator`, `TerminalEventProcessor`, `DeadlineReconciler`, wired to the Registry via `RegistryCandidateSelector`.
 - The Test Agent (`src/ai_platform/agents/test_agent/`): the full `text.word-count` capability and Section 14 lifecycle, composed over the Phase 2 Agent-side ports.
 - A corrected module boundary: envelope identifiers and cross-boundary/Agent-owned types live under `shared/` and `agents/domain/`, not `orchestrator/domain/`.
-- 165 tests, all passing: 52 contract + 24 domain unit + 41 registry unit + 14 Test Agent unit + 33 component (persistence ports, application services, registry integration, Test Agent lifecycle).
+- **A real, runnable Workflow API** (`src/ai_platform/api/`): `POST /api/v1/workflows`, `GET /api/v1/workflows/{workflow_id}`, `GET /health/live`, `GET /health/ready` — verified both via `TestClient` and as an actual local `uvicorn` process handling real HTTP requests. Composed over in-memory reference ports (explicitly non-production, documented as a Sprint 5 stand-in for Phase 6 adapters).
+- 190 tests, all passing: 52 contract + 24 domain unit + 42 registry unit + 14 Test Agent unit + 11 API unit + 47 component (persistence ports, application services, registry integration, Test Agent lifecycle, Workflow API).
 
 **What doesn't work yet:**
-- No Workflow API or Event Bus implementation exists — domain/application code for both the Orchestrator and Agent sides is now complete.
-- No concrete persistence/Event Bus adapters (Phase 6) — ports have no real database/Kafka behind them yet.
+- No concrete persistence/Event Bus adapters (Phase 6) — the API's in-memory ports do not survive process restart and have no real transactional guarantee.
+- No Event Bus consumer: after HTTP submission, a workflow remains `DISPATCHED` until a future Phase 6 consumer (or a test directly driving `TerminalEventProcessor`) applies the terminal outcome.
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
 - No Docker/local deployment artifacts (Phase 6).
 - Broader outbox/inbox recovery-query capabilities remain deferred to Phase 6 (adapter-dependent).
-- Lifecycle interruption (shutdown/restart/rebalance cancellation) is deferred to Phase 6, where a real asyncio-based consumer exists to interrupt.
+- Lifecycle interruption (shutdown/restart/rebalance cancellation) is deferred to Phase 6.
+- Multi-principal authorization / owner-mismatch disclosure paths are structurally unreachable under the current single-principal `LocalDevelopmentAuthorizationPolicy` and are not implemented.
 
-**What's next (Sprint 5 candidate — Phase 5):**
-- Workflow API implementation per [vertical-slice-01.md Section 20, Phase 5](docs/implementation/vertical-slice-01.md#20-implementation-phases): submit/read/health operations, trusted synthetic context, composite replay/disclosure behavior, stable Problem Details, effective-exposure validation, and ADR-0012 correlation normalization and response behavior — mapping `SubmissionOrchestrator`/`TerminalEventProcessor` domain outcomes to HTTP.
+**What's next (Sprint 6 candidate — Phase 6):**
+- Concrete adapters and local deployment per [vertical-slice-01.md Section 20, Phase 6](docs/implementation/vertical-slice-01.md#20-implementation-phases): Psycopg 3 persistence adapters, the `confluent-kafka` Event Bus adapter, Redpanda/PostgreSQL local resources, isolated credentials/ACLs, Docker artifacts, publishers/consumers, health, and shutdown. **Note:** this environment currently has no Docker installation; real PostgreSQL/Redpanda validation may require either installing Docker Desktop (heavyweight on a shared machine) or a native local install, and will be flagged for explicit user confirmation before proceeding.
 
 ## 9. Security Rules
 
 1. Secrets never live in code, fixtures, logs, or documentation — see [SECURITY.md](SECURITY.md).
-2. Sprint 1 introduces no runtime services, so there are no credentials or trust boundaries to configure yet.
-3. When later phases introduce the local-development authorization boundary (ADR-0010), it is explicitly loopback-only and must not be treated as production-ready.
-4. Any contract or configuration example must use nonfunctional placeholder values only.
+2. `LocalDevelopmentAuthorizationPolicy` (Sprint 5) is explicitly loopback/local-development-only and must never be treated as production-ready: it has no client credential, resolves every caller to one synthetic principal, and provides no per-developer attribution or isolation.
+3. Any contract or configuration example must use nonfunctional placeholder values only.
+4. The in-memory reference ports introduced in Sprint 5 hold no secrets and are explicitly non-durable/non-production.
 
 ## 10. How to Run Locally
 
 ```bash
 uv sync
 uv run pytest
+uv run uvicorn ai_platform.api.app:app --reload
 ```
 
-This validates the Sprint 1 tooling and contracts (creates a project-local
-`.venv/` only). There is no running service yet — the Workflow API,
-Orchestrator, and Agent are implemented starting in later phases. Later
-phases will add Docker Compose for PostgreSQL/Redpanda and the Workflow API.
+The Workflow API is now real and runnable: `POST /api/v1/workflows`,
+`GET /api/v1/workflows/{workflow_id}`, `GET /health/live`, and
+`GET /health/ready` all work against in-memory reference ports (data does
+not survive a restart). No environment variables or secrets are required.
+Concrete PostgreSQL/Redpanda-backed persistence remains Phase 6.
 
 ## 11. How to Deploy
 
