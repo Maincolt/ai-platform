@@ -1,25 +1,68 @@
-"""Nonterminal-workflow recovery query port (Section 15/Phase 3 scope).
+"""Durable pre-identity transport-rejection recovery port."""
 
-Deliberately narrow: only the query the deadline reconciler needs (find
-DISPATCHED task attempts whose task_result_deadline has elapsed). Broader
-outbox/inbox recovery-query capabilities (not-attempted, unknown,
-claimed-expired publication rows) depend on concrete adapter claim
-mechanics and are deferred to Phase 6 (see docs/sprint-3/consilium.md,
-disagreement 1).
-"""
-
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Protocol
 
-from ai_platform.shared.identifiers import TaskAttemptId, WorkflowId
+
+@dataclass(frozen=True, slots=True)
+class TransportDeliveryLocator:
+    logical_subscription: str
+    physical_source: str
+    partition: int
+    offset: int
 
 
-class NonterminalWorkflowQueryPort(Protocol):
-    def find_expired_dispatched_attempts(
-        self, *, now: datetime
-    ) -> list[tuple[WorkflowId, TaskAttemptId]]:
-        """Return (workflow_id, task_attempt_id) pairs for every workflow
-        currently DISPATCHED whose task_result_deadline is at or before
-        `now`. Implementations must not return a workflow that has already
-        reached a terminal state."""
+class QuarantinePublicationState(Enum):
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+    ATTEMPTED_UNKNOWN = "ATTEMPTED_UNKNOWN"
+    CONFIRMED = "CONFIRMED"
+
+
+@dataclass(frozen=True, slots=True)
+class TransportRejectionRecord:
+    locator: TransportDeliveryLocator
+    rejection_id: str
+    safe_failure_code: str
+    original_bytes_sha256: str
+    quarantine_state: QuarantinePublicationState
+    source_offset_completed: bool
+    recorded_at: datetime
+
+
+class TransportRejectionTransactionPort(Protocol):
+    async def create_or_resolve(
+        self,
+        *,
+        locator: TransportDeliveryLocator,
+        rejection_id: str,
+        safe_failure_code: str,
+        original_bytes_sha256: str,
+        recorded_at: datetime,
+    ) -> TransportRejectionRecord:
+        """Create one stable rejection identity for a broker delivery."""
+        ...
+
+    async def record_quarantine_state(
+        self,
+        locator: TransportDeliveryLocator,
+        *,
+        state: QuarantinePublicationState,
+        recorded_at: datetime,
+    ) -> TransportRejectionRecord: ...
+
+    async def mark_source_offset_completed(
+        self, locator: TransportDeliveryLocator, *, completed_at: datetime
+    ) -> None:
+        """Allowed only after quarantine publication is durably confirmed."""
+        ...
+
+    async def list_confirmed_incomplete(
+        self,
+        *,
+        logical_subscription: str,
+        limit: int,
+    ) -> tuple[TransportRejectionRecord, ...]:
+        """Return a bounded recovery batch awaiting source-commit evidence."""
         ...

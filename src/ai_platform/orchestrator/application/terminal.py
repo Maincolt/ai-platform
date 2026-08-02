@@ -1,26 +1,23 @@
-"""Terminal event processing (vertical-slice-01.md Section 11,
-"Result-Consumption Transaction").
-
-Inbox disposition is checked first for idempotency; only a not-yet-seen
-message applies a transition through the Workflow aggregate. A late event
-that arrives after the workflow is already terminal (e.g. the deadline
-reconciler won the race) is recorded but never mutates the aggregate,
-relying on `TerminalWorkflowError` as the race-safety net.
-"""
+"""Atomic terminal-event processing (Vertical Slice 01, Section 11)."""
 
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
 from ai_platform.orchestrator.domain.audit import AuditRecord
-from ai_platform.orchestrator.domain.errors import TerminalWorkflowError
-from ai_platform.orchestrator.domain.recovery import OrchestratorInboxRecord
-from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
 from ai_platform.orchestrator.domain.workflow import Workflow
-from ai_platform.ports.persistence.audit import AuditRepositoryPort
-from ai_platform.ports.persistence.orchestrator_inbox import OrchestratorInboxRepositoryPort
-from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
-from ai_platform.shared.identifiers import ActorId, MessageId, WorkflowId
+from ai_platform.ports.persistence.transactions import (
+    TerminalOutcomeIntent,
+    TerminalOutcomeTransactionPort,
+)
+from ai_platform.shared.identifiers import (
+    ActorId,
+    CorrelationId,
+    MessageId,
+    TaskAttemptId,
+    TaskId,
+    WorkflowId,
+)
 from ai_platform.shared.outcomes import AgentOutcome
 
 _SYSTEM_ACTOR_ID = ActorId("system:agent-outcome-consumer")
@@ -30,6 +27,7 @@ class TerminalDisposition(Enum):
     APPLIED = "APPLIED"
     DUPLICATE = "DUPLICATE"
     LATE_AFTER_TERMINAL = "LATE_AFTER_TERMINAL"
+    PERMANENT_CONFLICT = "PERMANENT_CONFLICT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,86 +37,66 @@ class TerminalEventResult:
 
 
 class TerminalEventProcessor:
-    def __init__(
-        self,
-        *,
-        workflow_repo: WorkflowRepositoryPort,
-        inbox_repo: OrchestratorInboxRepositoryPort,
-        audit_repo: AuditRepositoryPort,
-    ) -> None:
-        self._workflow_repo = workflow_repo
-        self._inbox_repo = inbox_repo
-        self._audit_repo = audit_repo
+    """Pass one validated immutable event to the atomic persistence boundary."""
 
-    def process(
+    def __init__(self, *, transaction: TerminalOutcomeTransactionPort) -> None:
+        self._transaction = transaction
+
+    async def process(
         self,
         *,
         environment: str,
         logical_consumer_id: str,
         validated_message_id: MessageId,
+        immutable_message_digest: str,
         workflow_id: WorkflowId,
+        task_id: TaskId,
+        task_attempt_id: TaskAttemptId,
+        correlation_id: CorrelationId,
+        causation_message_id: MessageId,
+        producer_component: str,
+        producer_instance_id: str,
+        capability_name: str,
+        capability_version: str,
+        result_text: str | None,
+        agent_evidence_component: str | None,
+        agent_evidence_instance_id: str | None,
         outcome: AgentOutcome,
         occurred_at: datetime,
     ) -> TerminalEventResult:
-        existing_disposition = self._inbox_repo.get_disposition(
-            environment, logical_consumer_id, validated_message_id
-        )
-        if existing_disposition is not None:
-            return TerminalEventResult(
-                disposition=TerminalDisposition.DUPLICATE,
-                workflow=self._workflow_repo.get_by_id(workflow_id),
-            )
-
-        workflow = self._workflow_repo.get_by_id(workflow_id)
-        if workflow is None:
-            raise ValueError(f"No workflow found for {workflow_id}")
-
-        expected_revision = workflow.revision
-        try:
-            if outcome.word_count is not None:
-                workflow.complete(
-                    WorkflowResult(word_count=outcome.word_count), occurred_at=occurred_at
-                )
-                disposition_label = "completed"
-            else:
-                workflow.fail(
-                    WorkflowFailure(
-                        code=outcome.failure_code or "TASK_EXECUTION_FAILED",
-                        detail=outcome.summary or "",
-                    ),
-                    occurred_at=occurred_at,
-                )
-                disposition_label = "failed"
-        except TerminalWorkflowError:
-            self._inbox_repo.record_disposition(
-                OrchestratorInboxRecord(
-                    environment=environment,
-                    logical_consumer_id=logical_consumer_id,
-                    validated_message_id=validated_message_id,
-                    disposition="late_after_terminal",
-                    recorded_at=occurred_at,
-                )
-            )
-            return TerminalEventResult(
-                disposition=TerminalDisposition.LATE_AFTER_TERMINAL, workflow=workflow
-            )
-
-        self._workflow_repo.save_transition(workflow, expected_revision=expected_revision)
-        self._inbox_repo.record_disposition(
-            OrchestratorInboxRecord(
+        result = await self._transaction.apply_terminal_outcome(
+            TerminalOutcomeIntent(
                 environment=environment,
                 logical_consumer_id=logical_consumer_id,
                 validated_message_id=validated_message_id,
-                disposition=disposition_label,
-                recorded_at=occurred_at,
-            )
-        )
-        self._audit_repo.append(
-            AuditRecord(
-                kind=f"workflow_{disposition_label}",
+                immutable_message_digest=immutable_message_digest,
                 workflow_id=workflow_id,
+                task_id=task_id,
+                task_attempt_id=task_attempt_id,
+                correlation_id=correlation_id,
+                causation_message_id=causation_message_id,
+                producer_component=producer_component,
+                producer_instance_id=producer_instance_id,
+                capability_name=capability_name,
+                capability_version=capability_version,
+                result_text=result_text,
+                agent_evidence_component=agent_evidence_component,
+                agent_evidence_instance_id=agent_evidence_instance_id,
+                outcome=outcome,
                 occurred_at=occurred_at,
-                actor_id=_SYSTEM_ACTOR_ID,
+                audit=AuditRecord(
+                    kind="workflow_terminal_outcome",
+                    workflow_id=workflow_id,
+                    occurred_at=occurred_at,
+                    actor_id=_SYSTEM_ACTOR_ID,
+                    details={
+                        "message_id": str(validated_message_id),
+                        "task_attempt_id": str(task_attempt_id),
+                    },
+                ),
             )
         )
-        return TerminalEventResult(disposition=TerminalDisposition.APPLIED, workflow=workflow)
+        return TerminalEventResult(
+            disposition=TerminalDisposition(result.disposition.value),
+            workflow=result.workflow,
+        )

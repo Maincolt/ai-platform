@@ -1,1 +1,1 @@
-"""Event Bus adapter (Phase 6 of Vertical Slice 01). Not implemented in Sprint 1."""
+"""Kafka-protocol Event Bus adapter for the ADR-0005 capability subset."""

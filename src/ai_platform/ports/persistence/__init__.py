@@ -2,5 +2,6 @@
 
 Capability-oriented `Protocol` interfaces per ADR-0006 Section 4. Domain
 modules depend on these, never on SQL, connections, ORM sessions, or
-database-specific exceptions. No concrete adapter exists until Phase 6.
+database-specific exceptions. Transaction-shaped ports expose complete
+integrity units while concrete adapters own the actual unit of work.
 """

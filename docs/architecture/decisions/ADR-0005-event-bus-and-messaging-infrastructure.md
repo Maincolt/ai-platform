@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-26
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [ADR-0013](ADR-0013-initial-broker-selection-apache-kafka.md) (broker selection only — Section 3 and the Redpanda clause of Section 22; all other content in this ADR remains in force)
 
 ## Context
 

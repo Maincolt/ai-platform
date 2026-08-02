@@ -35,15 +35,22 @@ class AcceptedRequestKey:
 class AcceptanceEvidence:
     """Immutable actor/owner/fingerprint evidence recorded at first acceptance.
 
-    `accepted_owner_subject_id` is the owner intent authorized at original
-    acceptance. This slice has no ownership-transfer API (Section 21
-    deferral), so the current owner is always the accepted owner.
+    `accepted_owner_subject_id` is the immutable owner intent authorized at
+    original acceptance. `current_owner_subject_id` is stored separately even
+    though this slice has no ownership-transfer API, so replay authorization
+    never has to reinterpret historical evidence (ADR-0011).
     """
 
     acceptance_actor_id: ActorId
     accepted_owner_subject_id: OwnerSubjectId
+    current_owner_subject_id: OwnerSubjectId
     fingerprint: str
     fingerprint_policy_version: str
+    policy_identity: str
+    policy_revision: str
+    policy_decision: str
+    scope_mapping_revision: str
+    authorization_evidence: str
     accepted_at: datetime
 
 

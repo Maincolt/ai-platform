@@ -1,0 +1,19 @@
+{
+  "revision": "local-compose-1",
+  "bindings": [
+    {
+      "capability_name": "text.word-count",
+      "capability_version": "1.0",
+      "command_contract_name": "ExecuteTask",
+      "command_contract_versions": ["1.0"],
+      "event_contract_names": ["TaskCompleted", "TaskFailed"],
+      "event_contract_versions": ["1.0", "1.0"],
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-123456789abc",
+      "implementation_identity": "local-compose-test-agent",
+      "implementation_version": "1.0",
+      "deployment_declaration_digest": "sha256:local-compose-declaration",
+      "environment": "development",
+      "enabled": true
+    }
+  ]
+}
