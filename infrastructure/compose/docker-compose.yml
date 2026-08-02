@@ -253,7 +253,7 @@ services:
       AI_PLATFORM_AGENT_COMPONENT: local-compose-test-agent
       AI_PLATFORM_AGENT_DECLARATION_DIGEST: "sha256:local-compose-declaration"
       AI_PLATFORM_AGENT_DECLARATION_PATH: /app/runtime-config/registry.json
-      AI_PLATFORM_AGENT_PUBLISHER_INSTANCE_ID: "5dfd3e0a-5e5e-72c0-95cc-c4cbb40fcfc9"
+      AI_PLATFORM_AGENT_PUBLISHER_INSTANCE_ID: "cc3f7cae-d72a-7bfd-8963-8f6b63260cd9"
       AI_PLATFORM_AGENT_COMMAND_CONSUMER_GROUP_ID: ai-platform-agent-commands
       AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID: agent-commands
     secrets:
