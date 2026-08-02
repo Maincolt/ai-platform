@@ -14,12 +14,14 @@ from dataclasses import dataclass
 
 from ai_platform.shared.identifiers import ActorId, IdempotencyScopeId, OwnerSubjectId
 
-_SYNTHETIC_ENVIRONMENT = "local-development"
+_SYNTHETIC_ENVIRONMENT = "development"
 _SYNTHETIC_SCOPE_ID = IdempotencyScopeId("local-development-synthetic-scope")
 _SYNTHETIC_ACTOR_ID = ActorId("local-development-synthetic-actor")
 _SYNTHETIC_OWNER_ID = OwnerSubjectId("local-development-synthetic-owner")
 _POLICY_IDENTITY = "LocalDevelopmentAuthorizationPolicy"
 _POLICY_REVISION = "1"
+_SCOPE_MAPPING_REVISION = "local-development-static-v1"
+_AUTHORIZATION_EVIDENCE = "local-development-policy-allow"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +31,12 @@ class TrustedRequestContext:
     environment: str
     idempotency_scope_id: IdempotencyScopeId
     current_actor_id: ActorId
-    owner_subject_id: OwnerSubjectId
+    current_owner_subject_id: OwnerSubjectId
     policy_identity: str
     policy_revision: str
+    policy_decision: str
+    scope_mapping_revision: str
+    authorization_evidence: str
     semantic_operation: str
 
 
@@ -48,8 +53,11 @@ class LocalDevelopmentAuthorizationPolicy:
             environment=_SYNTHETIC_ENVIRONMENT,
             idempotency_scope_id=_SYNTHETIC_SCOPE_ID,
             current_actor_id=_SYNTHETIC_ACTOR_ID,
-            owner_subject_id=_SYNTHETIC_OWNER_ID,
+            current_owner_subject_id=_SYNTHETIC_OWNER_ID,
             policy_identity=_POLICY_IDENTITY,
             policy_revision=_POLICY_REVISION,
+            policy_decision="ALLOW",
+            scope_mapping_revision=_SCOPE_MAPPING_REVISION,
+            authorization_evidence=_AUTHORIZATION_EVIDENCE,
             semantic_operation=semantic_operation,
         )

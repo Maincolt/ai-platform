@@ -1,9 +1,9 @@
 """Submission-transaction orchestration (vertical-slice-01.md Sections 6, 11).
 
 Resolves any existing accepted-request mapping first; an equivalent replay
-never touches Registry/Agent readiness. Only a genuinely new request
-selects a candidate and atomically constructs workflow/task/attempt/
-history/outbox/audit through the Phase 2 ports.
+never touches Registry/Agent readiness. Only a genuinely new request selects a
+candidate and passes one complete immutable intent to the submission
+transaction port.
 """
 
 from dataclasses import dataclass
@@ -27,11 +27,16 @@ from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
 from ai_platform.orchestrator.domain.workflow import Workflow
-from ai_platform.ports.persistence.accepted_request import AcceptedRequestRepositoryPort
-from ai_platform.ports.persistence.audit import AuditRepositoryPort
-from ai_platform.ports.persistence.outbox import OrchestratorOutboxRepositoryPort
-from ai_platform.ports.persistence.task import TaskAttemptRepositoryPort, TaskRepositoryPort
-from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
+from ai_platform.ports.persistence.transactions import (
+    AcceptedRequestAccessAuditPort,
+    AcceptedRequestAccessAuditRecord,
+    AcceptedRequestAccessDisposition,
+    AcceptedRequestQueryPort,
+    AcceptedRequestResolution,
+    SubmissionCommitIntent,
+    SubmissionTransactionPort,
+    WorkflowQueryPort,
+)
 from ai_platform.shared.identifiers import (
     ActorId,
     CorrelationId,
@@ -43,6 +48,7 @@ from ai_platform.shared.identifiers import (
     TaskId,
     WorkflowId,
 )
+from ai_platform.shared.messages import canonical_message_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,8 +63,14 @@ class SubmissionRequest:
     correlation_id: CorrelationId
     acceptance_actor_id: ActorId
     accepted_owner_subject_id: OwnerSubjectId
+    current_owner_subject_id: OwnerSubjectId
     fingerprint: str
     fingerprint_policy_version: str
+    policy_identity: str
+    policy_revision: str
+    policy_decision: str
+    scope_mapping_revision: str
+    authorization_evidence: str
     text: str
     capability_name: str
     capability_version: str
@@ -78,6 +90,8 @@ class SubmissionDisposition(Enum):
     FINGERPRINT_CONFLICT = "FINGERPRINT_CONFLICT"
     NO_ELIGIBLE_AGENT = "NO_ELIGIBLE_AGENT"
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
+    OWNER_INTENT_MISMATCH = "OWNER_INTENT_MISMATCH"
+    FINGERPRINT_POLICY_UNAVAILABLE = "FINGERPRINT_POLICY_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,29 +105,25 @@ class SubmissionOrchestrator:
     def __init__(
         self,
         *,
-        accepted_request_repo: AcceptedRequestRepositoryPort,
-        workflow_repo: WorkflowRepositoryPort,
-        task_repo: TaskRepositoryPort,
-        task_attempt_repo: TaskAttemptRepositoryPort,
-        outbox_repo: OrchestratorOutboxRepositoryPort,
-        audit_repo: AuditRepositoryPort,
+        accepted_request_query: AcceptedRequestQueryPort,
+        request_access_audit: AcceptedRequestAccessAuditPort,
+        workflow_query: WorkflowQueryPort,
+        submission_transaction: SubmissionTransactionPort,
         candidate_selector: CandidateSelectorPort,
         id_factory: IdentifierFactory,
         orchestrator_component: str = "orchestrator",
         orchestrator_instance_id: str = "orchestrator-instance",
     ) -> None:
-        self._accepted_request_repo = accepted_request_repo
-        self._workflow_repo = workflow_repo
-        self._task_repo = task_repo
-        self._task_attempt_repo = task_attempt_repo
-        self._outbox_repo = outbox_repo
-        self._audit_repo = audit_repo
+        self._accepted_request_query = accepted_request_query
+        self._request_access_audit = request_access_audit
+        self._workflow_query = workflow_query
+        self._submission_transaction = submission_transaction
         self._candidate_selector = candidate_selector
         self._id_factory = id_factory
         self._orchestrator_component = orchestrator_component
         self._orchestrator_instance_id = orchestrator_instance_id
 
-    def submit(self, request: SubmissionRequest, *, now: datetime) -> SubmissionResult:
+    async def submit(self, request: SubmissionRequest, *, now: datetime) -> SubmissionResult:
         key = AcceptedRequestKey(
             environment=request.environment,
             operation=request.operation,
@@ -123,34 +133,20 @@ class SubmissionOrchestrator:
         evidence = AcceptanceEvidence(
             acceptance_actor_id=request.acceptance_actor_id,
             accepted_owner_subject_id=request.accepted_owner_subject_id,
+            current_owner_subject_id=request.current_owner_subject_id,
             fingerprint=request.fingerprint,
             fingerprint_policy_version=request.fingerprint_policy_version,
+            policy_identity=request.policy_identity,
+            policy_revision=request.policy_revision,
+            policy_decision=request.policy_decision,
+            scope_mapping_revision=request.scope_mapping_revision,
+            authorization_evidence=request.authorization_evidence,
             accepted_at=now,
         )
-        # A candidate workflow_id is always generated up front; it is
-        # discarded if the mapping already existed (ADR-0006 Section 5:
-        # database uniqueness, not a precheck, arbitrates acceptance).
-        candidate_workflow_id = WorkflowId(self._id_factory.new_id())
 
-        resolved_workflow_id, resolved_evidence, is_new = (
-            self._accepted_request_repo.create_or_resolve(key, evidence, candidate_workflow_id)
-        )
-
-        if not is_new:
-            comparison = compare_fingerprint(resolved_evidence.fingerprint, request.fingerprint)
-            if comparison == FingerprintComparison.FINGERPRINT_CONFLICT:
-                return SubmissionResult(
-                    disposition=SubmissionDisposition.FINGERPRINT_CONFLICT,
-                    workflow_id=resolved_workflow_id,
-                    workflow=None,
-                )
-            # Equivalent replay: never evaluate Registry/Agent readiness.
-            existing_workflow = self._workflow_repo.get_by_id(resolved_workflow_id)
-            return SubmissionResult(
-                disposition=SubmissionDisposition.EQUIVALENT_REPLAY,
-                workflow_id=resolved_workflow_id,
-                workflow=existing_workflow,
-            )
+        existing = await self._accepted_request_query.resolve(key)
+        if existing is not None:
+            return await self._classify_existing(request, existing, now=now)
 
         # Only a genuinely new request checks readiness and selects a candidate.
         try:
@@ -165,20 +161,27 @@ class SubmissionOrchestrator:
                 now=now,
             )
         except NoEligibleCandidateError:
+            concurrent = await self._accepted_request_query.resolve(key)
+            if concurrent is not None:
+                return await self._classify_existing(request, concurrent, now=now)
             return SubmissionResult(
                 disposition=SubmissionDisposition.NO_ELIGIBLE_AGENT,
                 workflow_id=None,
                 workflow=None,
             )
         except CandidateSelectionConfigurationError:
+            concurrent = await self._accepted_request_query.resolve(key)
+            if concurrent is not None:
+                return await self._classify_existing(request, concurrent, now=now)
             return SubmissionResult(
                 disposition=SubmissionDisposition.CONFIGURATION_ERROR,
                 workflow_id=None,
                 workflow=None,
             )
 
+        workflow_id = WorkflowId(self._id_factory.new_id())
         workflow = Workflow(
-            workflow_id=resolved_workflow_id,
+            workflow_id=workflow_id,
             request_id=request.request_id,
             correlation_id=request.correlation_id,
         )
@@ -187,7 +190,7 @@ class SubmissionOrchestrator:
         workflow.dispatch(occurred_at=now)
 
         task_id = TaskId(self._id_factory.new_id())
-        task = Task(task_id=task_id, workflow_id=resolved_workflow_id, created_at=now)
+        task = Task(task_id=task_id, workflow_id=workflow_id, created_at=now)
 
         task_attempt_id = TaskAttemptId(self._id_factory.new_id())
         attempt = TaskAttempt(
@@ -202,7 +205,7 @@ class SubmissionOrchestrator:
         payload = build_execute_task_payload(
             message_id=message_id,
             correlation_id=request.correlation_id,
-            workflow_id=resolved_workflow_id,
+            workflow_id=workflow_id,
             task_id=task_id,
             task_attempt_id=task_attempt_id,
             orchestrator_component=self._orchestrator_component,
@@ -215,28 +218,142 @@ class SubmissionOrchestrator:
         )
         outbox_record = OrchestratorOutboxRecord(
             message_id=message_id,
-            workflow_id=resolved_workflow_id,
-            payload=payload,
+            workflow_id=workflow_id,
+            logical_channel="task-commands",
+            ordering_key=str(workflow_id),
+            payload_bytes=canonical_message_bytes(payload),
+            headers=(),
+            creation_sequence=1,
             created_at=now,
         )
 
-        # Atomic submission transaction (Section 11): all commit or none do.
-        self._workflow_repo.save_new(workflow)
-        self._task_repo.save(task)
-        self._task_attempt_repo.save(attempt)
-        self._outbox_repo.enqueue(outbox_record)
-        self._audit_repo.append(
-            AuditRecord(
-                kind="workflow_accepted",
-                workflow_id=resolved_workflow_id,
-                occurred_at=now,
-                actor_id=request.acceptance_actor_id,
-                details={"capability": request.capability_name},
+        audit = AuditRecord(
+            kind="workflow_accepted",
+            workflow_id=workflow_id,
+            occurred_at=now,
+            actor_id=request.acceptance_actor_id,
+            details={
+                "capability": request.capability_name,
+                "fingerprint_policy_version": request.fingerprint_policy_version,
+                "policy_identity": request.policy_identity,
+                "policy_revision": request.policy_revision,
+                "policy_decision": request.policy_decision,
+                "scope_mapping_revision": request.scope_mapping_revision,
+                "registry_revision": selection.registry_revision,
+                "selection_policy_version": selection.selection_policy_version,
+                "selected_agent_id": str(selection.agent_id),
+            },
+        )
+        committed = await self._submission_transaction.commit_submission(
+            SubmissionCommitIntent(
+                key=key,
+                evidence=evidence,
+                workflow=workflow,
+                task=task,
+                task_attempt=attempt,
+                command_outbox=outbox_record,
+                audit=audit,
             )
         )
 
+        if not committed.created:
+            return await self._classify_existing(
+                request, committed.resolution, committed.workflow, now=now
+            )
+
         return SubmissionResult(
             disposition=SubmissionDisposition.NEW,
-            workflow_id=resolved_workflow_id,
+            workflow_id=committed.resolution.workflow_id,
+            workflow=committed.workflow,
+        )
+
+    async def _classify_existing(
+        self,
+        request: SubmissionRequest,
+        resolution: AcceptedRequestResolution,
+        workflow: Workflow | None = None,
+        *,
+        now: datetime,
+    ) -> SubmissionResult:
+        evidence = resolution.evidence
+        if evidence.accepted_owner_subject_id != request.current_owner_subject_id:
+            await self._record_request_access(
+                request,
+                resolution,
+                AcceptedRequestAccessDisposition.OWNER_INTENT_MISMATCH,
+                now=now,
+            )
+            return SubmissionResult(
+                disposition=SubmissionDisposition.OWNER_INTENT_MISMATCH,
+                workflow_id=None,
+                workflow=None,
+            )
+        if evidence.current_owner_subject_id != request.current_owner_subject_id:
+            await self._record_request_access(
+                request,
+                resolution,
+                AcceptedRequestAccessDisposition.OWNER_INTENT_MISMATCH,
+                now=now,
+            )
+            return SubmissionResult(
+                disposition=SubmissionDisposition.OWNER_INTENT_MISMATCH,
+                workflow_id=None,
+                workflow=None,
+            )
+        if evidence.fingerprint_policy_version != request.fingerprint_policy_version:
+            return SubmissionResult(
+                disposition=SubmissionDisposition.FINGERPRINT_POLICY_UNAVAILABLE,
+                workflow_id=None,
+                workflow=None,
+            )
+        comparison = compare_fingerprint(evidence.fingerprint, request.fingerprint)
+        if comparison == FingerprintComparison.FINGERPRINT_CONFLICT:
+            await self._record_request_access(
+                request,
+                resolution,
+                AcceptedRequestAccessDisposition.FINGERPRINT_CONFLICT_AUTHORIZED,
+                now=now,
+            )
+            return SubmissionResult(
+                disposition=SubmissionDisposition.FINGERPRINT_CONFLICT,
+                workflow_id=resolution.workflow_id,
+                workflow=None,
+            )
+        await self._record_request_access(
+            request,
+            resolution,
+            AcceptedRequestAccessDisposition.EQUIVALENT_REPLAY_AUTHORIZED,
+            now=now,
+        )
+        if workflow is None:
+            workflow = await self._workflow_query.get(resolution.workflow_id)
+        return SubmissionResult(
+            disposition=SubmissionDisposition.EQUIVALENT_REPLAY,
+            workflow_id=resolution.workflow_id,
             workflow=workflow,
+        )
+
+    async def _record_request_access(
+        self,
+        request: SubmissionRequest,
+        resolution: AcceptedRequestResolution,
+        disposition: AcceptedRequestAccessDisposition,
+        *,
+        now: datetime,
+    ) -> None:
+        await self._request_access_audit.record_request_access(
+            AcceptedRequestAccessAuditRecord(
+                key=resolution.key,
+                workflow_id=resolution.workflow_id,
+                current_actor_id=request.acceptance_actor_id,
+                resolved_owner_subject_id=request.current_owner_subject_id,
+                effective_correlation_id=request.correlation_id,
+                policy_identity=request.policy_identity,
+                policy_revision=request.policy_revision,
+                policy_decision=request.policy_decision,
+                scope_mapping_revision=request.scope_mapping_revision,
+                authorization_evidence=request.authorization_evidence,
+                disposition=disposition,
+                occurred_at=now,
+            )
         )

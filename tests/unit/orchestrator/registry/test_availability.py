@@ -37,6 +37,16 @@ def test_ready_within_ttl_is_fresh() -> None:
     assert is_fresh(observation, now=NOW) is True
 
 
+def test_ready_observation_from_the_wall_clock_future_is_not_fresh() -> None:
+    observation = AvailabilityObservation(
+        classification=AvailabilityClassification.READY,
+        observed_at=NOW + timedelta(seconds=1),
+        ttl_seconds=5,
+    )
+
+    assert is_fresh(observation, now=NOW) is False
+
+
 def test_ready_at_exact_ttl_boundary_is_fresh() -> None:
     observation = _observation(
         AvailabilityClassification.READY,

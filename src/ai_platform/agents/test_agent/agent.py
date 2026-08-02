@@ -5,9 +5,8 @@ Ordering matches Section 14 exactly: resolve any completed receipt first
 (so a redelivered duplicate never gets a different outcome), only then
 check whether the deadline has already elapsed, and only if still live
 execute the deterministic capability. Concurrent duplicates at commit time
-resolve to one durable outcome via the receipt repository's
-create_or_resolve (ADR-0006: "one logical effect, not exactly-once
-computation").
+resolve to one durable outcome through the Agent outcome transaction
+(ADR-0006: "one logical effect, not exactly-once computation").
 """
 
 from dataclasses import dataclass
@@ -32,12 +31,14 @@ from ai_platform.agents.test_agent.messages import (
     build_task_completed_payload,
     build_task_failed_payload,
 )
-from ai_platform.ports.persistence.agent import (
-    AgentOutcomeRepositoryPort,
-    AgentReceiptRepositoryPort,
+from ai_platform.orchestrator.domain.audit import AuditRecord
+from ai_platform.ports.persistence.transactions import (
+    AgentOutcomeCommitIntent,
+    AgentOutcomeTransactionPort,
+    CompletedAgentWork,
 )
-from ai_platform.ports.persistence.outbox import AgentEventOutboxRepositoryPort
-from ai_platform.shared.identifiers import AgentId, MessageId
+from ai_platform.shared.identifiers import ActorId, AgentId, MessageId
+from ai_platform.shared.messages import canonical_message_bytes
 from ai_platform.shared.outcomes import AgentOutcome
 
 _DEADLINE_FAILURE_CODE = "TASK_RESULT_DEADLINE_EXCEEDED"
@@ -71,29 +72,25 @@ class TestAgent:
         environment: str,
         agent_deployment_id: AgentId,
         agent_component: str,
-        receipt_repo: AgentReceiptRepositoryPort,
-        outcome_repo: AgentOutcomeRepositoryPort,
-        event_outbox_repo: AgentEventOutboxRepositoryPort,
+        outcome_transaction: AgentOutcomeTransactionPort,
         id_factory: IdentifierFactory,
     ) -> None:
         self._environment = environment
         self._agent_deployment_id = agent_deployment_id
         self._agent_component = agent_component
-        self._receipt_repo = receipt_repo
-        self._outcome_repo = outcome_repo
-        self._event_outbox_repo = event_outbox_repo
+        self._outcome_transaction = outcome_transaction
         self._id_factory = id_factory
 
-    def handle(self, context: ExecuteTaskContext, *, now: datetime) -> TestAgentResult:
+    async def handle(self, context: ExecuteTaskContext, *, now: datetime) -> TestAgentResult:
         if (
             context.capability_name != CAPABILITY_NAME
             or context.capability_version != CAPABILITY_VERSION
         ):
             raise CapabilityMismatchError(context.capability_name, context.capability_version)
 
-        existing_receipt = self._receipt_repo.get_by_attempt(context.task_attempt_id)
-        if existing_receipt is not None:
-            return self._resolve_duplicate(context, existing_receipt)
+        existing = await self._outcome_transaction.get_completed(context.task_attempt_id)
+        if existing is not None:
+            return self._resolve_duplicate(context, existing)
 
         if context.task_result_deadline <= now:
             outcome = AgentOutcome(
@@ -110,25 +107,46 @@ class TestAgent:
             )
             disposition = TestAgentDisposition.COMPLETED
 
+        completed_work = self._build_completed_work(context, outcome, now=now)
+        committed = await self._outcome_transaction.commit_outcome(
+            AgentOutcomeCommitIntent(
+                completed_work=completed_work,
+                audit=AuditRecord(
+                    kind="agent_outcome_committed",
+                    workflow_id=context.workflow_id,
+                    occurred_at=now,
+                    actor_id=ActorId(f"agent:{self._agent_deployment_id}"),
+                    details={
+                        "task_attempt_id": str(context.task_attempt_id),
+                        "terminal_event_message_id": str(completed_work.event_outbox.message_id),
+                    },
+                ),
+            )
+        )
+        if not committed.created:
+            return self._resolve_duplicate(context, committed.completed_work)
+        return TestAgentResult(disposition=disposition, outcome=committed.completed_work.outcome)
+
+    def _build_completed_work(
+        self, context: ExecuteTaskContext, outcome: AgentOutcome, *, now: datetime
+    ) -> CompletedAgentWork:
+        message_id = MessageId(self._id_factory.new_id())
+        event_outbox = self._build_terminal_event(context, outcome, message_id=message_id, now=now)
         receipt = AgentCompletedReceipt(
             environment=self._environment,
             agent_deployment_id=self._agent_deployment_id,
             task_attempt_id=context.task_attempt_id,
             command_message_id=context.command_message_id,
             command_digest=context.command_digest,
+            terminal_event_message_id=message_id,
+            completed_at=outcome.completed_at,
         )
-        resolved_receipt, is_new = self._receipt_repo.create_or_resolve(receipt)
-        if not is_new:
-            # Lost a concurrent race to commit first; reuse the winner's outcome.
-            return self._resolve_duplicate(context, resolved_receipt)
-
-        self._outcome_repo.save(outcome)
-        self._enqueue_terminal_event(context, outcome, now=now)
-        return TestAgentResult(disposition=disposition, outcome=outcome)
+        return CompletedAgentWork(receipt=receipt, outcome=outcome, event_outbox=event_outbox)
 
     def _resolve_duplicate(
-        self, context: ExecuteTaskContext, existing_receipt: AgentCompletedReceipt
+        self, context: ExecuteTaskContext, completed_work: CompletedAgentWork
     ) -> TestAgentResult:
+        existing_receipt = completed_work.receipt
         if existing_receipt.command_message_id != context.command_message_id:
             raise CommandIdentityConflictError(
                 context.task_attempt_id, existing_receipt.command_message_id
@@ -136,17 +154,21 @@ class TestAgent:
         if existing_receipt.command_digest != context.command_digest:
             raise CommandIntegrityError(context.command_message_id)
 
-        existing_outcome = self._outcome_repo.get_by_attempt(context.task_attempt_id)
-        if existing_outcome is None:
+        if completed_work.outcome.task_attempt_id != context.task_attempt_id:
             raise MissingOutcomeInvariantError(context.task_attempt_id)
         return TestAgentResult(
-            disposition=TestAgentDisposition.DUPLICATE_RESOLVED, outcome=existing_outcome
+            disposition=TestAgentDisposition.DUPLICATE_RESOLVED,
+            outcome=completed_work.outcome,
         )
 
-    def _enqueue_terminal_event(
-        self, context: ExecuteTaskContext, outcome: AgentOutcome, *, now: datetime
-    ) -> None:
-        message_id = MessageId(self._id_factory.new_id())
+    def _build_terminal_event(
+        self,
+        context: ExecuteTaskContext,
+        outcome: AgentOutcome,
+        *,
+        message_id: MessageId,
+        now: datetime,
+    ) -> AgentEventOutboxRecord:
         if outcome.word_count is not None:
             payload = build_task_completed_payload(
                 message_id=message_id,
@@ -183,11 +205,13 @@ class TestAgent:
                 created_at=now,
             )
 
-        self._event_outbox_repo.enqueue(
-            AgentEventOutboxRecord(
-                message_id=message_id,
-                workflow_id=context.workflow_id,
-                payload=payload,
-                created_at=now,
-            )
+        return AgentEventOutboxRecord(
+            message_id=message_id,
+            workflow_id=context.workflow_id,
+            logical_channel="task-outcomes",
+            ordering_key=str(context.workflow_id),
+            payload_bytes=canonical_message_bytes(payload),
+            headers=(),
+            creation_sequence=1,
+            created_at=now,
         )

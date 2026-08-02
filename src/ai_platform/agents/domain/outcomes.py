@@ -8,7 +8,6 @@ ai_platform.shared.outcomes.AgentOutcome for the outcome value shared
 across the Agent/Orchestrator boundary.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,8 +20,22 @@ class AgentEventOutboxRecord:
 
     message_id: MessageId
     workflow_id: WorkflowId
-    payload: Mapping[str, object]
+    logical_channel: str
+    ordering_key: str
+    payload_bytes: bytes
+    headers: tuple[tuple[str, bytes], ...]
+    creation_sequence: int
     created_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.logical_channel:
+            raise ValueError("logical_channel must not be empty")
+        if not self.ordering_key:
+            raise ValueError("ordering_key must not be empty")
+        if not self.payload_bytes:
+            raise ValueError("payload_bytes must not be empty")
+        if self.creation_sequence < 1:
+            raise ValueError("creation_sequence must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,3 +52,5 @@ class AgentCompletedReceipt:
     task_attempt_id: TaskAttemptId
     command_message_id: MessageId
     command_digest: str
+    terminal_event_message_id: MessageId
+    completed_at: datetime

@@ -15,11 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_platform.api import problem_details
 from ai_platform.api.correlation import normalize_correlation_id
-from ai_platform.api.dependencies import (
-    TASK_RESULT_TIMEOUT,
-    AppState,
-    build_app_state,
-)
+from ai_platform.api.dependencies import AppState, build_app_state
 from ai_platform.api.fingerprint import compute_fingerprint
 from ai_platform.api.ids import Uuid7IdentifierFactory
 from ai_platform.api.models import (
@@ -42,9 +38,8 @@ app = FastAPI(
     title="AI Platform Workflow API",
     version="1.0.0",
     description=(
-        "Vertical Slice 01 Workflow API. Composed over in-memory reference "
-        "ports (Sprint 5) -- see contracts/openapi/v1/workflow-api.openapi.json "
-        "for the canonical contract."
+        "Vertical Slice 01 Workflow API. See "
+        "contracts/openapi/v1/workflow-api.openapi.json for the canonical contract."
     ),
 )
 
@@ -53,6 +48,12 @@ _app_state = build_app_state()
 
 def get_app_state() -> AppState:
     return _app_state
+
+
+def configure_app_state(state: AppState) -> None:
+    """Install the process-lifetime state before the concrete API server starts."""
+    global _app_state
+    _app_state = state
 
 
 def _effective_correlation_id(request: Request) -> CorrelationId:
@@ -151,9 +152,15 @@ async def submit_workflow(
         request_id=request_id,
         correlation_id=correlation_id,
         acceptance_actor_id=trusted_context.current_actor_id,
-        accepted_owner_subject_id=trusted_context.owner_subject_id,
+        accepted_owner_subject_id=trusted_context.current_owner_subject_id,
+        current_owner_subject_id=trusted_context.current_owner_subject_id,
         fingerprint=fingerprint,
         fingerprint_policy_version="1.0",
+        policy_identity=trusted_context.policy_identity,
+        policy_revision=trusted_context.policy_revision,
+        policy_decision=trusted_context.policy_decision,
+        scope_mapping_revision=trusted_context.scope_mapping_revision,
+        authorization_evidence=trusted_context.authorization_evidence,
         text=body.text,
         capability_name=body.capability,
         capability_version=body.capability_version,
@@ -161,10 +168,10 @@ async def submit_workflow(
         command_contract_version="1.0",
         event_contract_names=("TaskCompleted", "TaskFailed"),
         event_contract_versions=("1.0", "1.0"),
-        task_result_deadline=now + TASK_RESULT_TIMEOUT,
+        task_result_deadline=now + state.task_result_timeout,
     )
 
-    result = state.submission_orchestrator.submit(submission_request, now=now)
+    result = await state.submission_orchestrator.submit(submission_request, now=now)
 
     if result.disposition == SubmissionDisposition.NO_ELIGIBLE_AGENT:
         return JSONResponse(
@@ -184,6 +191,20 @@ async def submit_workflow(
         return JSONResponse(
             status_code=409,
             content=problem_details.request_id_conflict(correlation_id=correlation_id),
+            headers={CORRELATION_HEADER: str(correlation_id)},
+            media_type="application/problem+json",
+        )
+    if result.disposition == SubmissionDisposition.OWNER_INTENT_MISMATCH:
+        return JSONResponse(
+            status_code=404,
+            content=problem_details.workflow_not_found(correlation_id=correlation_id),
+            headers={CORRELATION_HEADER: str(correlation_id)},
+            media_type="application/problem+json",
+        )
+    if result.disposition == SubmissionDisposition.FINGERPRINT_POLICY_UNAVAILABLE:
+        return JSONResponse(
+            status_code=500,
+            content=problem_details.internal_processing_failure(correlation_id=correlation_id),
             headers={CORRELATION_HEADER: str(correlation_id)},
             media_type="application/problem+json",
         )
@@ -213,7 +234,12 @@ async def read_workflow(
     state: Annotated[AppState, Depends(get_app_state)],
 ) -> JSONResponse:
     correlation_id = _effective_correlation_id(request)
-    workflow = state.workflow_repo.get_by_id(WorkflowId(workflow_id))
+    trusted_context = state.security_policy.resolve(semantic_operation="workflow.read")
+    workflow = await state.workflow_access_query.get_authorized(
+        WorkflowId(workflow_id),
+        environment=trusted_context.environment,
+        current_owner_subject_id=trusted_context.current_owner_subject_id,
+    )
     if workflow is None:
         return JSONResponse(
             status_code=404,
@@ -250,7 +276,8 @@ async def health_live() -> dict[str, str]:
 
 @app.get("/health/ready")
 async def health_ready(state: Annotated[AppState, Depends(get_app_state)]) -> dict[str, str]:
-    """Reports readiness of only what this sprint actually constructs (the
-    Registry snapshot). It does not claim database/broker readiness, since
-    no real adapter exists yet (see docs/sprint-5/consilium.md)."""
-    return {"status": "ready" if state.registry_loaded else "not_ready"}
+    """Report core readiness without coupling it to Agent availability."""
+    snapshot = await state.readiness.snapshot()
+    if snapshot.ready and state.registry_loaded:
+        return {"status": "ready"}
+    raise StarletteHTTPException(status_code=503, detail="Core dependencies are not ready.")

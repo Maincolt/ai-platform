@@ -1,0 +1,368 @@
+"""Validated environment configuration for the two local runtime processes."""
+
+import ipaddress
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlsplit
+
+
+class RuntimeConfigurationError(ValueError):
+    """Configuration is absent, unsafe, or inconsistent."""
+
+
+@dataclass(frozen=True, slots=True)
+class SecretFileReference:
+    """Reference a secret without putting its value in configuration or logs."""
+
+    path: Path
+
+    def read(self) -> str:
+        try:
+            value = self.path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeConfigurationError("REQUIRED_SECRET_FILE_UNAVAILABLE") from exc
+        if not value:
+            raise RuntimeConfigurationError("REQUIRED_SECRET_FILE_EMPTY")
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class CommonRuntimeConfig:
+    environment: str
+    database_dsn: SecretFileReference
+    database_pool_min_size: int
+    database_pool_max_size: int
+    database_timeout_seconds: float
+    kafka_bootstrap_servers: str
+    kafka_security_protocol: str
+    kafka_ca_file: Path | None
+    task_commands_topic: str
+    task_commands_quarantine_topic: str
+    task_outcomes_topic: str
+    task_outcomes_quarantine_topic: str
+    contract_schema_directory: Path
+    publish_timeout_seconds: float
+    consumer_poll_timeout_seconds: float
+    consumer_retry_delay_seconds: float
+    consumer_maximum_processing_attempts: int
+    worker_idle_delay_seconds: float
+    outbox_claim_ttl_seconds: float
+    outbox_maximum_publication_attempts: int
+    quarantine_reconciliation_limit: int
+    quarantine_query_timeout_seconds: float
+    startup_timeout_seconds: float
+    shutdown_grace_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformRuntimeConfig(CommonRuntimeConfig):
+    kafka_producer_username: str
+    kafka_producer_password: SecretFileReference
+    kafka_consumer_username: str
+    kafka_consumer_password: SecretFileReference
+    api_host: str
+    api_port: int
+    local_policy_enabled: bool
+    registry_path: Path
+    readiness_url: str
+    readiness_credential: SecretFileReference
+    orchestrator_instance_id: str
+    outcome_consumer_group_id: str
+    outcome_logical_subscription_id: str
+    deadline_interval_seconds: float
+    deadline_batch_size: int
+    readiness_timeout_seconds: float
+    readiness_ttl_seconds: float
+    readiness_refresh_interval_seconds: float
+    task_result_timeout_seconds: float
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> PlatformRuntimeConfig:
+        values = os.environ if environment is None else environment
+        common = _common(values, prefix="AI_PLATFORM_ORCHESTRATOR_")
+        api_host = _required(values, "AI_PLATFORM_API_HOST")
+        if not _is_loopback_literal(api_host):
+            raise RuntimeConfigurationError("API_HOST_MUST_BE_LOOPBACK")
+        local_policy_enabled = _required(values, "AI_PLATFORM_LOCAL_POLICY_ENABLED") == "true"
+        if not local_policy_enabled:
+            raise RuntimeConfigurationError("LOCAL_POLICY_REQUIRES_EXPLICIT_OPT_IN")
+        readiness_url = _required(values, "AI_PLATFORM_AGENT_READINESS_URL")
+        readiness_host = urlsplit(readiness_url).hostname
+        if readiness_host is None or not _is_loopback_literal(readiness_host):
+            raise RuntimeConfigurationError("READINESS_URL_MUST_BE_LOOPBACK")
+        return cls(
+            environment=common.environment,
+            database_dsn=common.database_dsn,
+            database_pool_min_size=common.database_pool_min_size,
+            database_pool_max_size=common.database_pool_max_size,
+            database_timeout_seconds=common.database_timeout_seconds,
+            kafka_bootstrap_servers=common.kafka_bootstrap_servers,
+            kafka_security_protocol=common.kafka_security_protocol,
+            kafka_ca_file=common.kafka_ca_file,
+            task_commands_topic=common.task_commands_topic,
+            task_commands_quarantine_topic=common.task_commands_quarantine_topic,
+            task_outcomes_topic=common.task_outcomes_topic,
+            task_outcomes_quarantine_topic=common.task_outcomes_quarantine_topic,
+            contract_schema_directory=common.contract_schema_directory,
+            publish_timeout_seconds=common.publish_timeout_seconds,
+            consumer_poll_timeout_seconds=common.consumer_poll_timeout_seconds,
+            consumer_retry_delay_seconds=common.consumer_retry_delay_seconds,
+            consumer_maximum_processing_attempts=common.consumer_maximum_processing_attempts,
+            worker_idle_delay_seconds=common.worker_idle_delay_seconds,
+            outbox_claim_ttl_seconds=common.outbox_claim_ttl_seconds,
+            outbox_maximum_publication_attempts=common.outbox_maximum_publication_attempts,
+            quarantine_reconciliation_limit=common.quarantine_reconciliation_limit,
+            quarantine_query_timeout_seconds=common.quarantine_query_timeout_seconds,
+            startup_timeout_seconds=common.startup_timeout_seconds,
+            shutdown_grace_seconds=common.shutdown_grace_seconds,
+            kafka_producer_username=_required(
+                values, "AI_PLATFORM_ORCHESTRATOR_KAFKA_PRODUCER_USERNAME"
+            ),
+            kafka_producer_password=SecretFileReference(
+                Path(
+                    _required(
+                        values,
+                        "AI_PLATFORM_ORCHESTRATOR_KAFKA_PRODUCER_PASSWORD_FILE",
+                    )
+                )
+            ),
+            kafka_consumer_username=_required(
+                values, "AI_PLATFORM_ORCHESTRATOR_KAFKA_CONSUMER_USERNAME"
+            ),
+            kafka_consumer_password=SecretFileReference(
+                Path(
+                    _required(
+                        values,
+                        "AI_PLATFORM_ORCHESTRATOR_KAFKA_CONSUMER_PASSWORD_FILE",
+                    )
+                )
+            ),
+            api_host=api_host,
+            api_port=_bounded_int(values, "AI_PLATFORM_API_PORT", 1, 65_535),
+            local_policy_enabled=local_policy_enabled,
+            registry_path=Path(_required(values, "AI_PLATFORM_REGISTRY_PATH")),
+            readiness_url=readiness_url,
+            readiness_credential=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
+            ),
+            orchestrator_instance_id=_required(values, "AI_PLATFORM_ORCHESTRATOR_INSTANCE_ID"),
+            outcome_consumer_group_id=_required(
+                values, "AI_PLATFORM_ORCHESTRATOR_OUTCOME_CONSUMER_GROUP_ID"
+            ),
+            outcome_logical_subscription_id=_required(
+                values, "AI_PLATFORM_ORCHESTRATOR_OUTCOME_LOGICAL_SUBSCRIPTION_ID"
+            ),
+            deadline_interval_seconds=_bounded_float(
+                values, "AI_PLATFORM_DEADLINE_INTERVAL_SECONDS", 0.1, 3600.0
+            ),
+            deadline_batch_size=_bounded_int(values, "AI_PLATFORM_DEADLINE_BATCH_SIZE", 1, 10_000),
+            readiness_timeout_seconds=_bounded_float(
+                values, "AI_PLATFORM_AGENT_READINESS_TIMEOUT_SECONDS", 0.05, 30.0
+            ),
+            readiness_ttl_seconds=_bounded_float(
+                values, "AI_PLATFORM_AGENT_READINESS_TTL_SECONDS", 0.1, 300.0
+            ),
+            readiness_refresh_interval_seconds=_bounded_float(
+                values,
+                "AI_PLATFORM_AGENT_READINESS_REFRESH_INTERVAL_SECONDS",
+                0.1,
+                300.0,
+            ),
+            task_result_timeout_seconds=_bounded_float(
+                values, "AI_PLATFORM_TASK_RESULT_TIMEOUT_SECONDS", 0.1, 86_400.0
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRuntimeConfig(CommonRuntimeConfig):
+    kafka_producer_username: str
+    kafka_producer_password: SecretFileReference
+    kafka_consumer_username: str
+    kafka_consumer_password: SecretFileReference
+    agent_id: str
+    readiness_host: str
+    readiness_port: int
+    readiness_credential: SecretFileReference
+    maximum_concurrency: int
+    agent_component: str
+    declaration_digest: str
+    declaration_path: Path
+    publisher_instance_id: str
+    command_consumer_group_id: str
+    command_logical_subscription_id: str
+
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str] | None = None) -> AgentRuntimeConfig:
+        values = os.environ if environment is None else environment
+        common = _common(values, prefix="AI_PLATFORM_AGENT_")
+        readiness_host = _required(values, "AI_PLATFORM_AGENT_READINESS_HOST")
+        if not _is_loopback_literal(readiness_host):
+            raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK")
+        return cls(
+            environment=common.environment,
+            database_dsn=common.database_dsn,
+            database_pool_min_size=common.database_pool_min_size,
+            database_pool_max_size=common.database_pool_max_size,
+            database_timeout_seconds=common.database_timeout_seconds,
+            kafka_bootstrap_servers=common.kafka_bootstrap_servers,
+            kafka_security_protocol=common.kafka_security_protocol,
+            kafka_ca_file=common.kafka_ca_file,
+            task_commands_topic=common.task_commands_topic,
+            task_commands_quarantine_topic=common.task_commands_quarantine_topic,
+            task_outcomes_topic=common.task_outcomes_topic,
+            task_outcomes_quarantine_topic=common.task_outcomes_quarantine_topic,
+            contract_schema_directory=common.contract_schema_directory,
+            publish_timeout_seconds=common.publish_timeout_seconds,
+            consumer_poll_timeout_seconds=common.consumer_poll_timeout_seconds,
+            consumer_retry_delay_seconds=common.consumer_retry_delay_seconds,
+            consumer_maximum_processing_attempts=common.consumer_maximum_processing_attempts,
+            worker_idle_delay_seconds=common.worker_idle_delay_seconds,
+            outbox_claim_ttl_seconds=common.outbox_claim_ttl_seconds,
+            outbox_maximum_publication_attempts=common.outbox_maximum_publication_attempts,
+            quarantine_reconciliation_limit=common.quarantine_reconciliation_limit,
+            quarantine_query_timeout_seconds=common.quarantine_query_timeout_seconds,
+            startup_timeout_seconds=common.startup_timeout_seconds,
+            shutdown_grace_seconds=common.shutdown_grace_seconds,
+            kafka_producer_username=_required(values, "AI_PLATFORM_AGENT_KAFKA_PRODUCER_USERNAME"),
+            kafka_producer_password=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_AGENT_KAFKA_PRODUCER_PASSWORD_FILE"))
+            ),
+            kafka_consumer_username=_required(values, "AI_PLATFORM_AGENT_KAFKA_CONSUMER_USERNAME"),
+            kafka_consumer_password=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_AGENT_KAFKA_CONSUMER_PASSWORD_FILE"))
+            ),
+            agent_id=_required(values, "AI_PLATFORM_AGENT_ID"),
+            readiness_host=readiness_host,
+            readiness_port=_bounded_int(values, "AI_PLATFORM_AGENT_READINESS_PORT", 1, 65_535),
+            readiness_credential=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
+            ),
+            maximum_concurrency=_bounded_int(
+                values, "AI_PLATFORM_AGENT_MAXIMUM_CONCURRENCY", 1, 256
+            ),
+            agent_component=_required(values, "AI_PLATFORM_AGENT_COMPONENT"),
+            declaration_digest=_required(values, "AI_PLATFORM_AGENT_DECLARATION_DIGEST"),
+            declaration_path=Path(_required(values, "AI_PLATFORM_AGENT_DECLARATION_PATH")),
+            publisher_instance_id=_required(values, "AI_PLATFORM_AGENT_PUBLISHER_INSTANCE_ID"),
+            command_consumer_group_id=_required(
+                values, "AI_PLATFORM_AGENT_COMMAND_CONSUMER_GROUP_ID"
+            ),
+            command_logical_subscription_id=_required(
+                values, "AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID"
+            ),
+        )
+
+
+def _common(values: Mapping[str, str], *, prefix: str) -> CommonRuntimeConfig:
+    environment = _required(values, "AI_PLATFORM_ENVIRONMENT")
+    if environment != "development":
+        raise RuntimeConfigurationError("SYNTHETIC_POLICY_REQUIRES_DEVELOPMENT")
+    protocol = _required(values, f"{prefix}KAFKA_SECURITY_PROTOCOL")
+    if protocol not in {"SASL_SSL", "LOCAL_DEVELOPMENT_SASL_PLAINTEXT"}:
+        raise RuntimeConfigurationError("UNSUPPORTED_KAFKA_SECURITY_PROTOCOL")
+    pool_min_size = _bounded_int(values, f"{prefix}DATABASE_POOL_MIN_SIZE", 1, 32)
+    pool_max_size = _bounded_int(values, f"{prefix}DATABASE_POOL_MAX_SIZE", 1, 64)
+    if pool_min_size > pool_max_size:
+        raise RuntimeConfigurationError("DATABASE_POOL_MIN_EXCEEDS_MAX")
+    return CommonRuntimeConfig(
+        environment=environment,
+        database_dsn=SecretFileReference(Path(_required(values, f"{prefix}DATABASE_DSN_FILE"))),
+        database_pool_min_size=pool_min_size,
+        database_pool_max_size=pool_max_size,
+        database_timeout_seconds=_bounded_float(
+            values, f"{prefix}DATABASE_TIMEOUT_SECONDS", 0.1, 120.0
+        ),
+        kafka_bootstrap_servers=_required(values, "AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS"),
+        kafka_security_protocol=protocol,
+        kafka_ca_file=_optional_path(values, "AI_PLATFORM_KAFKA_CA_FILE"),
+        task_commands_topic=_required(values, "AI_PLATFORM_TASK_COMMANDS_TOPIC"),
+        task_commands_quarantine_topic=_required(
+            values, "AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC"
+        ),
+        task_outcomes_topic=_required(values, "AI_PLATFORM_TASK_OUTCOMES_TOPIC"),
+        task_outcomes_quarantine_topic=_required(
+            values, "AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC"
+        ),
+        contract_schema_directory=Path(_required(values, "AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY")),
+        publish_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_PUBLISH_TIMEOUT_SECONDS", 0.05, 120.0
+        ),
+        consumer_poll_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_CONSUMER_POLL_TIMEOUT_SECONDS", 0.05, 30.0
+        ),
+        consumer_retry_delay_seconds=_bounded_float(
+            values, "AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS", 0.0, 30.0
+        ),
+        consumer_maximum_processing_attempts=_bounded_int(
+            values, "AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS", 1, 100
+        ),
+        worker_idle_delay_seconds=_bounded_float(
+            values, "AI_PLATFORM_WORKER_IDLE_DELAY_SECONDS", 0.01, 30.0
+        ),
+        outbox_claim_ttl_seconds=_bounded_float(
+            values, "AI_PLATFORM_OUTBOX_CLAIM_TTL_SECONDS", 0.1, 3600.0
+        ),
+        outbox_maximum_publication_attempts=_bounded_int(
+            values, "AI_PLATFORM_OUTBOX_MAXIMUM_PUBLICATION_ATTEMPTS", 1, 100
+        ),
+        quarantine_reconciliation_limit=_bounded_int(
+            values, "AI_PLATFORM_QUARANTINE_RECONCILIATION_LIMIT", 1, 1_000
+        ),
+        quarantine_query_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_QUARANTINE_QUERY_TIMEOUT_SECONDS", 0.05, 30.0
+        ),
+        startup_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_STARTUP_TIMEOUT_SECONDS", 0.1, 300.0
+        ),
+        shutdown_grace_seconds=_bounded_float(
+            values, "AI_PLATFORM_SHUTDOWN_GRACE_SECONDS", 0.1, 300.0
+        ),
+    )
+
+
+def _required(values: Mapping[str, str], name: str) -> str:
+    value = values.get(name)
+    if value is None or not value.strip():
+        raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{name}")
+    return value.strip()
+
+
+def _bounded_int(values: Mapping[str, str], name: str, minimum: int, maximum: int) -> int:
+    try:
+        value = int(_required(values, name))
+    except ValueError as exc:
+        raise RuntimeConfigurationError(f"INVALID_INTEGER:{name}") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeConfigurationError(f"OUT_OF_RANGE:{name}")
+    return value
+
+
+def _bounded_float(values: Mapping[str, str], name: str, minimum: float, maximum: float) -> float:
+    try:
+        value = float(_required(values, name))
+    except ValueError as exc:
+        raise RuntimeConfigurationError(f"INVALID_NUMBER:{name}") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeConfigurationError(f"OUT_OF_RANGE:{name}")
+    return value
+
+
+def _is_loopback_literal(value: str) -> bool:
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def _optional_path(values: Mapping[str, str], name: str) -> Path | None:
+    value = values.get(name)
+    if value is None:
+        return None
+    if not value.strip():
+        raise RuntimeConfigurationError(f"EMPTY_CONFIGURATION:{name}")
+    return Path(value.strip())

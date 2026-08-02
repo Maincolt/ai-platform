@@ -19,6 +19,7 @@ technical and structural choices.
 | [ADR-0010](ADR-0010-security-identity-authorization-and-trust-boundaries.md) | Security, Identity, Authorization, and Trust Boundaries | Accepted |
 | [ADR-0011](ADR-0011-principal-scoped-api-idempotency-and-accepted-request-ownership.md) | Principal-Scoped API Idempotency and Accepted-Request Ownership | Accepted |
 | [ADR-0012](ADR-0012-correlation-id-normalization.md) | Correlation ID Normalization | Accepted |
+| [ADR-0013](ADR-0013-initial-broker-selection-apache-kafka.md) | Initial Broker Selection — Apache Kafka Instead of Redpanda | Accepted |
 
 ## Naming
 

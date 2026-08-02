@@ -36,8 +36,14 @@ def _evidence(fingerprint: str = "aaa") -> AcceptanceEvidence:
     return AcceptanceEvidence(
         acceptance_actor_id=ActorId("actor-1"),
         accepted_owner_subject_id=OwnerSubjectId("owner-1"),
+        current_owner_subject_id=OwnerSubjectId("owner-1"),
         fingerprint=fingerprint,
         fingerprint_policy_version="1.0",
+        policy_identity="local-development-policy",
+        policy_revision="rev-1",
+        policy_decision="allow",
+        scope_mapping_revision="rev-1",
+        authorization_evidence="evidence-1",
         accepted_at=NOW,
     )
 

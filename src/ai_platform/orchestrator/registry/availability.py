@@ -56,4 +56,4 @@ def is_fresh(observation: AvailabilityObservation, *, now: datetime) -> bool:
     if observation.classification is not AvailabilityClassification.READY:
         return False
     age_seconds = (now - observation.observed_at).total_seconds()
-    return age_seconds <= observation.ttl_seconds
+    return 0 <= age_seconds <= observation.ttl_seconds

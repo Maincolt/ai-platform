@@ -8,11 +8,10 @@ ai_platform.agents.domain.outcomes; the shared PublicationState enum
 lives under ai_platform.shared.recovery.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from ai_platform.shared.identifiers import MessageId, WorkflowId
+from ai_platform.shared.identifiers import MessageId, TaskAttemptId, WorkflowId
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +20,22 @@ class OrchestratorOutboxRecord:
 
     message_id: MessageId
     workflow_id: WorkflowId
-    payload: Mapping[str, object]
+    logical_channel: str
+    ordering_key: str
+    payload_bytes: bytes
+    headers: tuple[tuple[str, bytes], ...]
+    creation_sequence: int
     created_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.logical_channel:
+            raise ValueError("logical_channel must not be empty")
+        if not self.ordering_key:
+            raise ValueError("ordering_key must not be empty")
+        if not self.payload_bytes:
+            raise ValueError("payload_bytes must not be empty")
+        if self.creation_sequence < 1:
+            raise ValueError("creation_sequence must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,5 +45,8 @@ class OrchestratorInboxRecord:
     environment: str
     logical_consumer_id: str
     validated_message_id: MessageId
+    immutable_message_digest: str
+    workflow_id: WorkflowId
+    task_attempt_id: TaskAttemptId
     disposition: str
     recorded_at: datetime
