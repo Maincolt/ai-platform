@@ -63,15 +63,17 @@ sprint, not silently dropped):
 
 ## Acceptance criteria
 
-- [ ] `uv run ruff format --check .` succeeds.
-- [ ] `uv run ruff check .` succeeds.
-- [ ] `uv run basedpyright` succeeds in strict mode.
-- [ ] `uv run pytest -q` succeeds and is unaffected (same pass count as
-      before this sprint, `external_service`-marked tests excluded by
-      default).
-- [ ] `uv run pytest -m external_service` succeeds against the real local
-      topology and covers the categories listed above.
-- [ ] Sprint completion and QA documents distinguish demonstrated behavior
+- [x] `uv run ruff format --check .` succeeds.
+- [x] `uv run ruff check .` succeeds.
+- [x] `uv run basedpyright` succeeds in strict mode.
+- [x] `uv run pytest -q` succeeds and is unaffected (339 passed, same as
+      before this sprint; the 49 new `external_service`-marked tests are
+      deselected by default).
+- [x] `uv run pytest -m external_service` succeeds against the real local
+      topology and covers the categories listed above — see
+      [progress.md](progress.md) for the exact two-command split this host's
+      networking requires and the full pass results.
+- [x] Sprint completion and QA documents distinguish demonstrated behavior
       from the explicitly deferred remainder and make no production-readiness
       claim.
 
