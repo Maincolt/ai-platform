@@ -284,3 +284,69 @@ def kafka_admin_client_config(
 def kafka_admin_client(kafka_admin_client_config: dict[str, Any]) -> AdminClient:
     """A confluent_kafka AdminClient authenticated as the `admin` principal."""
     return AdminClient(kafka_admin_client_config)
+
+
+def _postgres_role_dsn(login: str, password_secret_file: str) -> str:
+    password = _read_secret(password_secret_file)
+    return f"postgresql://{login}:{password}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+
+
+@pytest.fixture(scope="session")
+def postgres_orchestrator_app_dsn(external_services_status: ExternalServicesStatus) -> str:
+    """DSN for the least-privilege `ai_platform_orchestrator_app` runtime login."""
+    return _postgres_role_dsn(
+        "ai_platform_orchestrator_app", "postgres_orchestrator_app_password.txt"
+    )
+
+
+@pytest.fixture(scope="session")
+def postgres_agent_app_dsn(external_services_status: ExternalServicesStatus) -> str:
+    """DSN for the least-privilege `ai_platform_agent_app` runtime login."""
+    return _postgres_role_dsn("ai_platform_agent_app", "postgres_agent_app_password.txt")
+
+
+@pytest.fixture(scope="session")
+def postgres_orchestrator_migrator_dsn(external_services_status: ExternalServicesStatus) -> str:
+    """DSN for the `ai_platform_orchestrator_migrator` login (`SET ROLE`-only DDL)."""
+    return _postgres_role_dsn(
+        "ai_platform_orchestrator_migrator", "postgres_orchestrator_migrator_password.txt"
+    )
+
+
+@pytest.fixture(scope="session")
+def postgres_agent_migrator_dsn(external_services_status: ExternalServicesStatus) -> str:
+    """DSN for the `ai_platform_agent_migrator` login (`SET ROLE`-only DDL)."""
+    return _postgres_role_dsn("ai_platform_agent_migrator", "postgres_agent_migrator_password.txt")
+
+
+def _kafka_principal_client_config(principal: str, password_secret_file: str) -> dict[str, Any]:
+    password = _read_secret(password_secret_file)
+    return {
+        "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+        "security.protocol": "SASL_PLAINTEXT",
+        "sasl.mechanism": "SCRAM-SHA-256",
+        "sasl.username": principal,
+        "sasl.password": password,
+    }
+
+
+@pytest.fixture(scope="session")
+def kafka_principal_client_configs(
+    external_services_status: ExternalServicesStatus,
+) -> dict[str, dict[str, Any]]:
+    """confluent_kafka client configs for the four least-privilege application principals
+    provisioned by `infrastructure/compose/scripts/init-kafka.sh`."""
+    return {
+        "orchestrator-producer": _kafka_principal_client_config(
+            "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
+        ),
+        "orchestrator-consumer": _kafka_principal_client_config(
+            "orchestrator-consumer", "kafka_orchestrator_consumer_password.txt"
+        ),
+        "agent-producer": _kafka_principal_client_config(
+            "agent-producer", "kafka_agent_producer_password.txt"
+        ),
+        "agent-consumer": _kafka_principal_client_config(
+            "agent-consumer", "kafka_agent_consumer_password.txt"
+        ),
+    }
