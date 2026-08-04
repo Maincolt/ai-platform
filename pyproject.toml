@@ -60,4 +60,7 @@ reportUnknownArgumentType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m \"not external_service\""
+markers = [
+    "external_service: requires real PostgreSQL/Kafka via infrastructure/compose/ (opt-in: uv run pytest -m external_service)",
+]
