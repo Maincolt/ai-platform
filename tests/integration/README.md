@@ -52,6 +52,37 @@ The `AI_PLATFORM_TEST_POSTGRES_HOST`, `AI_PLATFORM_TEST_POSTGRES_PORT`,
 `AI_PLATFORM_TEST_SKIP_COMPOSE_UP` environment variables that make this
 possible are read directly by `conftest.py`.
 
+### `test_recovery.py` needs the opposite: run it directly on the host
+
+`test_recovery.py` is the one file that does **not** work through
+`run-in-network.sh`. It exercises the real `platform`/`test-agent`
+application containers (kill, restart, `podman exec` for HTTP calls and
+`psql` queries), so it needs the `podman` CLI itself — which the minimal
+container `run-in-network.sh` uses does not have. Run it directly:
+
+```bash
+uv run pytest -m external_service tests/integration/test_recovery.py -v
+```
+
+This works even on hosts where the *other* files' host-forwarded-port path
+is unreliable, because `test_recovery.py` never makes a direct TCP
+connection to a published port — everything goes through `podman exec`.
+It requires the `platform`/`test-agent` containers already running (see
+[infrastructure/README.md](../../infrastructure/README.md)'s "Running the
+application against the topology"); if they aren't, its tests skip with a
+clear reason rather than failing. It also skips cleanly (rather than
+erroring) if run where `podman` itself isn't on `PATH`, e.g. inside
+`run-in-network.sh`'s container.
+
+Because it kills and restarts the shared application containers, don't run
+it concurrently with anything else exercising that same topology.
+
+In short, on a host with the flaky Windows/WSL2 port-forwarding path: run
+everything **except** `test_recovery.py` via `run-in-network.sh`, and run
+`test_recovery.py` directly. There is currently no single command that
+runs the complete `external_service` suite correctly on such a host in one
+shot.
+
 ## What these tests need
 
 The `infrastructure/compose/` topology from Sprint 6 (see
