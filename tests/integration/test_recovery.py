@@ -207,11 +207,26 @@ def _psql_scalar(query: str) -> str:
     return result.stdout.strip()
 
 
+def _podman_available() -> bool:
+    try:
+        result = subprocess.run(["podman", "version"], capture_output=True, timeout=10, check=False)
+    except OSError, subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _ensure_app_containers_running() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
     """Confirm the platform/test-agent application containers are present
     and ready before this module's tests run; restore them to a healthy
     state afterward regardless of what individual tests did to them."""
+    if not _podman_available():
+        pytest.skip(
+            "podman is not available in this environment. This module drives real "
+            "containers directly (kill/restart/exec) and cannot run inside the "
+            "container-network sandbox used by tests/integration/run-in-network.sh -- "
+            "run it directly on a host with the podman CLI instead."
+        )
     inspect = _run(
         ["podman", "inspect", _PLATFORM_CONTAINER, "--format", "{{.State.Status}}"],
         check=False,
