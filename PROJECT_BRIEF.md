@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — AI Platform
 
-> Last updated: 2026-08-02 | Sprint 6 | Status: Done
+> Last updated: 2026-08-04 | Sprint 7 | Status: Done (partial, scoped)
 
 > **Note on terminology:** the roles in Section 6 are a *virtual contributor
 > team* used to plan and execute sprints in this repository. They are not the
@@ -13,10 +13,12 @@
 
 AI Platform is a foundation for coordinating specialized AI agents through
 modular boundaries and event-driven communication (see
-[README.md](README.md)). Twelve Accepted ADRs govern the first deterministic
-vertical slice. Phases 1–6 are merged: concrete persistence, Event Bus,
-runtime, and local-deployment boundaries are implemented and validated
-against real PostgreSQL and Apache Kafka.
+[README.md](README.md)). Thirteen Accepted ADRs govern the first
+deterministic vertical slice. Phases 1–6 are merged: concrete persistence,
+Event Bus, runtime, and local-deployment boundaries are implemented and
+validated against real PostgreSQL and Apache Kafka. Phase 7 is partially
+complete: a deliberately scoped subset of its real-service test matrix is
+automated (see [docs/sprint-7/done.md](docs/sprint-7/done.md)).
 
 ## 2. Platform Concept
 
@@ -36,8 +38,10 @@ path: submit → persist → dispatch → execute (`text.word-count`) → recove
 disclose. It is specified in eight implementation phases. Phases 1–6 are
 merged: concrete adapters and the local deployment are implemented and
 validated against real services. Phase 7 (isolated integration/recovery/
-security/end-to-end suites) and Phase 8 (operational documentation) have
-not started.
+security/end-to-end suites) is partially complete — a scoped automated
+subset (Event Bus delivery, Concurrency, Security boundary, Recovery/crash
+window) is done; the remainder of its Section 19 matrix has not started.
+Phase 8 (operational documentation) has not started.
 
 ## 3. Tech Stack
 
@@ -58,6 +62,9 @@ not started.
 Sprint 6 replaced the in-memory runtime boundary with concrete asynchronous
 PostgreSQL and Kafka-protocol adapters, and validated the deployment and
 real-service behavior end to end. See [docs/sprint-6/done.md](docs/sprint-6/done.md).
+Sprint 7 automated a scoped subset of that real-service validation as an
+opt-in `external_service` pytest suite (`tests/integration/`). See
+[docs/sprint-7/done.md](docs/sprint-7/done.md).
 
 ## 4. Architecture
 
@@ -132,7 +139,7 @@ src/
 | Contributor guidance | [AGENTS.md](AGENTS.md) | Repository-wide philosophy, standards, ADR process |
 | Contribution workflow | [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR workflow, ADR process, testing/review expectations |
 | Platform architecture | [docs/architecture/README.md](docs/architecture/README.md) | Logical components, contracts, boundaries |
-| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 12 Accepted ADRs (0001–0012), governing all implementation |
+| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 13 Accepted ADRs (0001–0013), governing all implementation |
 | First implementation plan | [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md) | 8-phase plan for the first deterministic workflow |
 | Test strategy | [docs/testing/README.md](docs/testing/README.md) | Local vs. external-service test levels |
 | Platform agents (architecture) | [agents/](agents/) | Placeholder — populated after Phase 3+ (Orchestrator/Registry/Test Agent) |
@@ -167,12 +174,13 @@ be introduced starting with the sprint that implements Phase 6
 | 4 | Test Agent | ✅ Done | Vertical Slice 01 **Phase 4** only: the built-in `text.word-count` capability, receipt-first idempotency lifecycle, capability/input validation, readiness boundary. Includes an architectural correction moving shared/Agent-owned types out of `orchestrator/domain/`. See [docs/sprint-4/done.md](docs/sprint-4/done.md). |
 | 5 | Workflow API | ✅ Done | Vertical Slice 01 **Phase 5** only: submit/read/health HTTP operations, trusted synthetic context, ADR-0012 correlation normalization, RFC 8785 fingerprinting, Problem Details. Composed over in-memory reference ports (explicitly non-production). See [docs/sprint-5/done.md](docs/sprint-5/done.md). |
 | 6 | Concrete Adapters and Local Deployment | ✅ Done | Vertical Slice 01 **Phase 6** only: concrete PostgreSQL/Kafka adapters, runtime process composition, application image, and a local PostgreSQL + Apache Kafka Compose topology, validated end-to-end (submission, crash recovery, assignment fencing, quarantine) against real services. Apache Kafka replaces Redpanda as the initial broker per [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md). See [docs/sprint-6/done.md](docs/sprint-6/done.md). |
+| 7 | Integration, Recovery, Security, and End-to-End Tests | ✅ Done (partial, scoped) | Vertical Slice 01 **Phase 7**, a deliberately chosen subset: an automated, opt-in `external_service` pytest suite (49 tests) covering Event Bus delivery, Concurrency, Security boundary, and Recovery/crash window against the real Sprint 6 topology — not the complete Section 19 matrix. See [docs/sprint-7/done.md](docs/sprint-7/done.md). |
 
 ## 8. Current State
 
 **What works:**
 - Repository-wide contributor guidance ([AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md)).
-- Complete platform architecture description and 12 Accepted ADRs.
+- Complete platform architecture description and 13 Accepted ADRs.
 - A fully specified, ADR-aligned implementation plan for the first vertical slice.
 - Root tooling metadata (`pyproject.toml`, `uv.lock`) and the `src/ai_platform/` package skeleton (ADR-0003), validated locally with `uv sync`, Ruff, BasedPyright (strict), and pytest.
 - Canonical contracts under `contracts/`: JSON Schema (Draft 2020-12), OpenAPI 3.1.1, and AsyncAPI 3.0.0 for the Workflow API and task-commands/task-outcomes messages, including the ADR-0012 correlation contract and 12 examples.
@@ -190,6 +198,8 @@ be introduced starting with the sprint that implements Phase 6
 - A Docker application image (`infrastructure/Dockerfile`), built and run locally via Podman.
 - A local PostgreSQL + Apache Kafka Compose deployment topology (`infrastructure/compose/`) with pinned images, migrations/role bootstrap, topics, least-privilege ACLs, file-based secrets, and health-ordered startup.
 - [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md): Apache Kafka selected as the initial self-hosted broker instead of Redpanda, superseding only the broker-selection clauses of ADR-0005.
+- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 23-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
+- A documented, working dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) for a genuine Windows/WSL2/Podman host-port-forwarding reliability gap found and diagnosed during Sprint 7.
 
 **What doesn't work yet:**
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
@@ -197,9 +207,11 @@ be introduced starting with the sprint that implements Phase 6
 - Multi-principal authorization / owner-mismatch disclosure paths are structurally unreachable under the current single-principal `LocalDevelopmentAuthorizationPolicy` and are not implemented.
 - Deliberate, operator-initiated quarantine replay has not been exercised (quarantine itself has been, repeatedly).
 - The Compose topology is explicitly local-only: single broker, single database node, no TLS, application ports not reachable from the host by design (loopback-only).
+- The remaining Section 19 test categories beyond what Sprint 7 automated (Contract, most of Idempotency/Ownership/State machine/Agent readiness/Audit-observability, the full Correlation Normalization table), and a dedicated pytest-automated full-container End-to-End harness.
+- On this development host specifically, direct connections from Windows-native Python to the topology's host-published ports remain unreliable at the protocol-handshake level even after fixing the underlying WSL2/firewall configuration issues; the documented workaround (`run-in-network.sh`) is a permanent, working capability, not merely a stopgap, but the root cause of the remaining handshake-level flakiness is not fully understood.
 
 **What's next:**
-- Phase 7: the isolated integration, recovery, security, rebalance, and end-to-end test matrix beyond Sprint 6's real-service smoke and recovery checks. Phase 8 then documents only behavior demonstrated by those runs.
+- The remainder of Phase 7's Section 19 matrix not yet automated (see [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of scope"), then Phase 8 documenting only behavior demonstrated by those runs.
 
 ## 9. Security Rules
 
