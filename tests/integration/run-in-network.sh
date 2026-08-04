@@ -27,4 +27,4 @@ podman run --rm --network ai-platform-local_default \
     -e AI_PLATFORM_TEST_KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
     -e AI_PLATFORM_TEST_SKIP_COMPOSE_UP=1 \
     ghcr.io/astral-sh/uv:0.11.8-python3.14-trixie-slim \
-    bash -c "uv sync --locked && uv run pytest -m external_service tests/integration/ -v ${*:+"$@"}"
+    bash -c 'uv sync --locked && uv run pytest -m external_service tests/integration/ -v "$@"' bash "$@"

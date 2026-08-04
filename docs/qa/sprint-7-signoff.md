@@ -44,7 +44,7 @@ Kafka 3.9 (KRaft) topology:
   serialization.
 - **Security boundary**: PostgreSQL role isolation confirmed by connecting
   as the real `_app` logins and observing real `InsufficientPrivilege`
-  errors on cross-schema access and on DDL; a 23-case Kafka ACL matrix
+  errors on cross-schema access and on DDL; a 24-case Kafka ACL matrix
   across all four principals confirms real `TOPIC_AUTHORIZATION_FAILED`/
   `GROUP_AUTHORIZATION_FAILED` denial outside each principal's allow-list;
   secret redaction confirmed against real credential material; a forced

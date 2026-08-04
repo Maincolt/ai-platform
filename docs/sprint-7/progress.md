@@ -108,7 +108,7 @@ Against the real broker/database, using the real adapter code
   `ai_platform_agent_app` logins are confirmed denied cross-schema access;
   runtime (`_app`) logins are confirmed denied DDL, which only migrator
   logins can perform (and only after `SET ROLE`).
-- **Kafka ACL matrix**: a parametrized 23-case matrix across all four
+- **Kafka ACL matrix**: a parametrized 24-case matrix across all four
   provisioned principals and every topic/consumer-group from
   `init-kafka.sh`, confirming each principal is denied everything outside
   its documented allow-list (not just the one pair Sprint 6 proved by
