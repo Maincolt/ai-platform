@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — AI Platform
 
-> Last updated: 2026-08-04 | Sprint 7 | Status: Done (partial, scoped)
+> Last updated: 2026-08-05 | Sprint 8 | Status: Done
 
 > **Note on terminology:** the roles in Section 6 are a *virtual contributor
 > team* used to plan and execute sprints in this repository. They are not the
@@ -41,7 +41,9 @@ validated against real services. Phase 7 (isolated integration/recovery/
 security/end-to-end suites) is partially complete — a scoped automated
 subset (Event Bus delivery, Concurrency, Security boundary, Recovery/crash
 window) is done; the remainder of its Section 19 matrix has not started.
-Phase 8 (operational documentation) has not started.
+Phase 8 (verified operational documentation, [docs/operations/README.md](docs/operations/README.md))
+is done, completing the eight-phase plan with that Phase 7 caveat carried
+forward.
 
 ## 3. Tech Stack
 
@@ -175,6 +177,7 @@ be introduced starting with the sprint that implements Phase 6
 | 5 | Workflow API | ✅ Done | Vertical Slice 01 **Phase 5** only: submit/read/health HTTP operations, trusted synthetic context, ADR-0012 correlation normalization, RFC 8785 fingerprinting, Problem Details. Composed over in-memory reference ports (explicitly non-production). See [docs/sprint-5/done.md](docs/sprint-5/done.md). |
 | 6 | Concrete Adapters and Local Deployment | ✅ Done | Vertical Slice 01 **Phase 6** only: concrete PostgreSQL/Kafka adapters, runtime process composition, application image, and a local PostgreSQL + Apache Kafka Compose topology, validated end-to-end (submission, crash recovery, assignment fencing, quarantine) against real services. Apache Kafka replaces Redpanda as the initial broker per [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md). See [docs/sprint-6/done.md](docs/sprint-6/done.md). |
 | 7 | Integration, Recovery, Security, and End-to-End Tests | ✅ Done (partial, scoped) | Vertical Slice 01 **Phase 7**, a deliberately chosen subset: an automated, opt-in `external_service` pytest suite (49 tests) covering Event Bus delivery, Concurrency, Security boundary, and Recovery/crash window against the real Sprint 6 topology — not the complete Section 19 matrix. See [docs/sprint-7/done.md](docs/sprint-7/done.md). |
+| 8 | Verified Operational Documentation | ✅ Done | Vertical Slice 01 **Phase 8**: [docs/operations/README.md](docs/operations/README.md) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every one independently re-run against the real local environment during this sprint. No production-readiness claim. Completes the eight-phase Vertical Slice 01 plan (with the Phase 7 scope caveat above carried forward). See [docs/sprint-8/done.md](docs/sprint-8/done.md). |
 
 ## 8. Current State
 
@@ -198,8 +201,9 @@ be introduced starting with the sprint that implements Phase 6
 - A Docker application image (`infrastructure/Dockerfile`), built and run locally via Podman.
 - A local PostgreSQL + Apache Kafka Compose deployment topology (`infrastructure/compose/`) with pinned images, migrations/role bootstrap, topics, least-privilege ACLs, file-based secrets, and health-ordered startup.
 - [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md): Apache Kafka selected as the initial self-hosted broker instead of Redpanda, superseding only the broker-selection clauses of ADR-0005.
-- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 23-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
+- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
 - A documented, working dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) for a genuine Windows/WSL2/Podman host-port-forwarding reliability gap found and diagnosed during Sprint 7.
+- [docs/operations/README.md](docs/operations/README.md): verified operational documentation (Phase 8) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every command independently re-run against the real local environment during Sprint 8. Completes Vertical Slice 01's eight-phase plan.
 
 **What doesn't work yet:**
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
@@ -211,7 +215,14 @@ be introduced starting with the sprint that implements Phase 6
 - On this development host specifically, direct connections from Windows-native Python to the topology's host-published ports remain unreliable at the protocol-handshake level even after fixing the underlying WSL2/firewall configuration issues; the documented workaround (`run-in-network.sh`) is a permanent, working capability, not merely a stopgap, but the root cause of the remaining handshake-level flakiness is not fully understood.
 
 **What's next:**
-- The remainder of Phase 7's Section 19 matrix not yet automated (see [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of scope"), then Phase 8 documenting only behavior demonstrated by those runs.
+- Vertical Slice 01's eight-phase plan is complete, with the Phase 7 scope
+  caveat above carried forward honestly rather than backfilled. Candidate
+  next directions, none started: the remainder of Phase 7's Section 19
+  matrix (see [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of
+  scope"); or a new architecture stream for a real AI-capable Agent and
+  the AI Router boundary (both explicitly deferred by Vertical Slice 01
+  and not yet designed — see [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md)
+  Section 21, "Explicit Deferrals").
 
 ## 9. Security Rules
 
