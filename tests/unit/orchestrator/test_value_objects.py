@@ -55,9 +55,9 @@ def test_task_attempt_number_must_be_one() -> None:
         )
 
 
-def test_workflow_result_rejects_negative_word_count() -> None:
-    with pytest.raises(ValueError, match="non-negative"):
-        WorkflowResult(word_count=-1)
+def test_workflow_result_rejects_empty_result_data() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        WorkflowResult(result_data={})
 
 
 def test_workflow_failure_holds_code_and_detail() -> None:
@@ -70,7 +70,7 @@ def test_agent_outcome_rejects_both_success_and_failure_fields() -> None:
         AgentOutcome(
             task_attempt_id=TaskAttemptId("019fbdd6-ab3d-77aa-8e61-4c425fab5f4b"),
             completed_at=NOW,
-            word_count=9,
+            result_data={"word_count": 9},
             failure_code="TASK_EXECUTION_FAILED",
         )
 
@@ -87,7 +87,7 @@ def test_agent_outcome_success_only() -> None:
     outcome = AgentOutcome(
         task_attempt_id=TaskAttemptId("019fbdd6-ab3d-77aa-8e61-4c425fab5f4b"),
         completed_at=NOW,
-        word_count=9,
+        result_data={"word_count": 9},
     )
-    assert outcome.word_count == 9
+    assert outcome.result_data == {"word_count": 9}
     assert outcome.failure_code is None

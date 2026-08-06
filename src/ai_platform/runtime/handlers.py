@@ -3,9 +3,9 @@
 import hashlib
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Protocol, cast
 
-from ai_platform.agents.test_agent.agent import TestAgentDisposition, TestAgentResult
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
 from ai_platform.orchestrator.application.terminal import (
     TerminalDisposition,
@@ -41,8 +41,23 @@ class QuarantineCoordinatorPort(Protocol):
         ...
 
 
+class ExecutorResult(Protocol):
+    """Structural result shape shared by every Agent executor's `handle()`.
+
+    Deliberately capability-agnostic: `TestAgentResult` and
+    `SummarizeAgentResult` are separate dataclasses with their own
+    disposition enums (`TestAgentDisposition`, `SummarizeAgentDisposition`),
+    not a shared base type -- each Agent deployable owns its own result
+    shape (ADR-0001, ADR-0007 Section 1). Only `disposition` is used here,
+    compared by enum member name so this handler needs no per-Agent import.
+    """
+
+    @property
+    def disposition(self) -> Enum: ...
+
+
 class CommandExecutorPort(Protocol):
-    async def handle(self, context: ExecuteTaskContext, *, now: datetime) -> TestAgentResult: ...
+    async def handle(self, context: ExecuteTaskContext, *, now: datetime) -> ExecutorResult: ...
 
 
 class TerminalProcessorPort(Protocol):
@@ -129,7 +144,7 @@ class ExecuteTaskDeliveryHandler:
             task_result_deadline=_datetime(payload, "task_result_deadline"),
         )
         result = await self._executor.handle(context, now=datetime.now(UTC))
-        if result.disposition is TestAgentDisposition.DUPLICATE_RESOLVED:
+        if result.disposition.name == "DUPLICATE_RESOLVED":
             return DeliveryHandlingDisposition.DUPLICATE
         return DeliveryHandlingDisposition.DURABLY_PROCESSED
 
@@ -171,7 +186,7 @@ class TerminalOutcomeDeliveryHandler:
         outcome = AgentOutcome(
             task_attempt_id=task_attempt_id,
             completed_at=_datetime(payload, completed_at_key),
-            word_count=_optional_int(payload, "word_count"),
+            result_data=_optional_json_object(payload, "result"),
             failure_code=_optional_string(payload, "failure_code"),
             summary=_optional_string(payload, "summary"),
         )
@@ -274,13 +289,13 @@ def _optional_string(value: Mapping[str, object], key: str) -> str | None:
     return item
 
 
-def _optional_int(value: Mapping[str, object], key: str) -> int | None:
+def _optional_json_object(value: Mapping[str, object], key: str) -> Mapping[str, object] | None:
     item = value.get(key)
     if item is None:
         return None
-    if not isinstance(item, int):
-        raise ValueError(f"Validated property {key} is not an integer")
-    return item
+    if not isinstance(item, dict):
+        raise ValueError(f"Validated property {key} is not an object")
+    return cast(dict[str, object], item)
 
 
 def _datetime(value: Mapping[str, object], key: str) -> datetime:

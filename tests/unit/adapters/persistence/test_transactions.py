@@ -208,7 +208,9 @@ def test_agent_receipt_outcome_event_outbox_and_audit_share_one_transaction() ->
             completed_at=NOW,
         ),
         outcome=AgentOutcome(
-            task_attempt_id=TaskAttemptId("attempt-1"), completed_at=NOW, word_count=2
+            task_attempt_id=TaskAttemptId("attempt-1"),
+            completed_at=NOW,
+            result_data={"word_count": 2},
         ),
         event_outbox=AgentEventOutboxRecord(
             message_id=MessageId("event-1"),

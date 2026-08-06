@@ -29,12 +29,12 @@ def test_full_happy_path_to_completed() -> None:
     workflow.receive(occurred_at=NOW)
     workflow.prepare(occurred_at=NOW)
     workflow.dispatch(occurred_at=NOW)
-    workflow.complete(WorkflowResult(word_count=9), occurred_at=NOW)
+    workflow.complete(WorkflowResult(result_data={"word_count": 9}), occurred_at=NOW)
 
     assert workflow.state == WorkflowState.COMPLETED
     assert workflow.revision == 4
     assert workflow.is_terminal
-    assert workflow.result == WorkflowResult(word_count=9)
+    assert workflow.result == WorkflowResult(result_data={"word_count": 9})
     assert [t.to_state for t in workflow.history] == [
         WorkflowState.RECEIVED,
         WorkflowState.PENDING,
@@ -77,7 +77,7 @@ def test_illegal_transitions_raise(setup_steps: list[str], illegal_call: str) ->
 
     with pytest.raises(IllegalTransitionError):
         if illegal_call == "complete":
-            workflow.complete(WorkflowResult(word_count=1), occurred_at=NOW)
+            workflow.complete(WorkflowResult(result_data={"word_count": 1}), occurred_at=NOW)
         else:
             getattr(workflow, illegal_call)(occurred_at=NOW)
 
@@ -98,13 +98,13 @@ def test_duplicate_completion_after_terminal_raises_and_does_not_mutate() -> Non
     workflow.receive(occurred_at=NOW)
     workflow.prepare(occurred_at=NOW)
     workflow.dispatch(occurred_at=NOW)
-    workflow.complete(WorkflowResult(word_count=9), occurred_at=NOW)
+    workflow.complete(WorkflowResult(result_data={"word_count": 9}), occurred_at=NOW)
 
     with pytest.raises(TerminalWorkflowError):
-        workflow.complete(WorkflowResult(word_count=999), occurred_at=NOW)
+        workflow.complete(WorkflowResult(result_data={"word_count": 999}), occurred_at=NOW)
 
     # The original result and history are unchanged by the rejected duplicate.
-    assert workflow.result == WorkflowResult(word_count=9)
+    assert workflow.result == WorkflowResult(result_data={"word_count": 9})
     assert len(workflow.history) == 4
     assert workflow.revision == 4
 
@@ -114,7 +114,7 @@ def test_late_failure_after_completion_raises_and_does_not_mutate() -> None:
     workflow.receive(occurred_at=NOW)
     workflow.prepare(occurred_at=NOW)
     workflow.dispatch(occurred_at=NOW)
-    workflow.complete(WorkflowResult(word_count=9), occurred_at=NOW)
+    workflow.complete(WorkflowResult(result_data={"word_count": 9}), occurred_at=NOW)
 
     with pytest.raises(TerminalWorkflowError):
         workflow.fail(WorkflowFailure(code="LATE", detail="too late"), occurred_at=NOW)
@@ -138,4 +138,4 @@ def test_deadline_expiry_cause_is_recorded_but_still_exclusive() -> None:
     assert workflow.history[-1].cause == "deadline_expired"
     # A subsequent (late) TaskCompleted must still be rejected.
     with pytest.raises(TerminalWorkflowError):
-        workflow.complete(WorkflowResult(word_count=9), occurred_at=NOW)
+        workflow.complete(WorkflowResult(result_data={"word_count": 9}), occurred_at=NOW)

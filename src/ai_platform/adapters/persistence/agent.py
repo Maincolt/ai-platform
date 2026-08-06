@@ -1,6 +1,7 @@
 """Async Psycopg adapter for the Agent outcome integrity unit."""
 
 from datetime import datetime
+from typing import cast
 
 from psycopg.types.json import Jsonb
 
@@ -19,6 +20,9 @@ from ai_platform.ports.persistence.transactions import (
     AgentOutcomeCommitIntent,
     AgentOutcomeCommitResult,
     CompletedAgentWork,
+    ExistingProviderCallClaim,
+    ProviderCallClaimIntent,
+    ProviderCallClaimResult,
 )
 from ai_platform.shared.identifiers import AgentId, MessageId, TaskAttemptId, WorkflowId
 from ai_platform.shared.outcomes import AgentOutcome
@@ -103,17 +107,37 @@ class PsycopgAgentPersistence:
             await connection.execute(
                 """
                 INSERT INTO agent.outcomes (
-                    task_attempt_id, completed_at, word_count, failure_code, summary
+                    task_attempt_id, completed_at, result_data, failure_code, summary
                 ) VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     work.outcome.task_attempt_id,
                     work.outcome.completed_at,
-                    work.outcome.word_count,
+                    None
+                    if work.outcome.result_data is None
+                    else Jsonb(dict(work.outcome.result_data)),
                     work.outcome.failure_code,
                     work.outcome.summary,
                 ),
             )
+            if intent.usage is not None:
+                await connection.execute(
+                    """
+                    INSERT INTO agent.provider_call_usage (
+                        task_attempt_id, provider, model,
+                        input_tokens, output_tokens, latency_seconds, recorded_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        work.outcome.task_attempt_id,
+                        intent.usage.provider,
+                        intent.usage.model,
+                        intent.usage.input_tokens,
+                        intent.usage.output_tokens,
+                        intent.usage.latency_seconds,
+                        work.outcome.completed_at,
+                    ),
+                )
             await insert_outbox(
                 connection,
                 event,
@@ -122,6 +146,49 @@ class PsycopgAgentPersistence:
             )
             await insert_audit(connection, intent.audit, schema="agent")
             return AgentOutcomeCommitResult(completed_work=work, created=True)
+
+    async def claim_provider_call(self, intent: ProviderCallClaimIntent) -> ProviderCallClaimResult:
+        async with self._pool.transaction() as connection:
+            inserted = await (
+                await connection.execute(
+                    """
+                    INSERT INTO agent.provider_call_claims (
+                        task_attempt_id, command_message_id, command_digest, claimed_at
+                    ) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (task_attempt_id) DO NOTHING
+                    RETURNING task_attempt_id
+                    """,
+                    (
+                        intent.task_attempt_id,
+                        intent.command_message_id,
+                        intent.command_digest,
+                        intent.claimed_at,
+                    ),
+                )
+            ).fetchone()
+            if inserted is not None:
+                return ProviderCallClaimResult(created=True, existing=None)
+
+            row = await (
+                await connection.execute(
+                    """
+                    SELECT command_message_id, command_digest, claimed_at
+                    FROM agent.provider_call_claims
+                    WHERE task_attempt_id = %s
+                    """,
+                    (intent.task_attempt_id,),
+                )
+            ).fetchone()
+            if row is None or not isinstance(row[2], datetime):
+                raise PermanentPersistenceError("Stored provider call claim is invalid.")
+            return ProviderCallClaimResult(
+                created=False,
+                existing=ExistingProviderCallClaim(
+                    command_message_id=MessageId(str(row[0])),
+                    command_digest=str(row[1]),
+                    claimed_at=row[2],
+                ),
+            )
 
     @staticmethod
     async def _select_completed(
@@ -133,7 +200,7 @@ class PsycopgAgentPersistence:
                 SELECT r.environment, r.agent_deployment_id, r.task_attempt_id,
                        r.command_message_id, r.command_digest,
                        r.terminal_event_message_id, r.completed_at,
-                       o.completed_at, o.word_count, o.failure_code, o.summary,
+                       o.completed_at, o.result_data, o.failure_code, o.summary,
                        e.message_id, e.workflow_id, e.logical_channel, e.ordering_key,
                        e.payload_bytes, e.headers, e.creation_sequence, e.created_at
                 FROM agent.completed_receipts r
@@ -169,7 +236,7 @@ class PsycopgAgentPersistence:
         outcome = AgentOutcome(
             task_attempt_id=receipt.task_attempt_id,
             completed_at=row[7],
-            word_count=_optional_int(row[8]),
+            result_data=_optional_json_object(row[8]),
             failure_code=None if row[9] is None else str(row[9]),
             summary=None if row[10] is None else str(row[10]),
         )
@@ -186,9 +253,9 @@ class PsycopgAgentPersistence:
         return CompletedAgentWork(receipt=receipt, outcome=outcome, event_outbox=event)
 
 
-def _optional_int(value: object) -> int | None:
+def _optional_json_object(value: object) -> dict[str, object] | None:
     if value is None:
         return None
-    if not isinstance(value, int):
-        raise PermanentPersistenceError("Stored Agent outcome count is invalid.")
-    return value
+    if not isinstance(value, dict):
+        raise PermanentPersistenceError("Stored Agent outcome result is invalid.")
+    return cast(dict[str, object], value)

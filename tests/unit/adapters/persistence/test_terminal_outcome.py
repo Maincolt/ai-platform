@@ -127,7 +127,9 @@ def _intent() -> TerminalOutcomeIntent:
         result_text="one two three",
         agent_evidence_component="test-agent",
         agent_evidence_instance_id="agent-1",
-        outcome=AgentOutcome(task_attempt_id=attempt_id, completed_at=NOW, word_count=3),
+        outcome=AgentOutcome(
+            task_attempt_id=attempt_id, completed_at=NOW, result_data={"word_count": 3}
+        ),
         occurred_at=NOW,
         audit=AuditRecord(
             kind="workflow_terminal_outcome",
@@ -159,7 +161,7 @@ def test_first_seen_late_inbox_and_audit_share_transaction() -> None:
             "correlation-1",
             "COMPLETED",
             4,
-            3,
+            {"word_count": 3},
             None,
             None,
         ),

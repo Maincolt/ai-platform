@@ -113,7 +113,7 @@ def _outcome() -> dict[str, object]:
         "producer": {"component": "test-agent", "instance_id": AGENT_ID},
         "payload": {
             "text": "one two",
-            "word_count": 2,
+            "result": {"word_count": 2},
             "completed_at": "2026-08-01T12:00:01Z",
             "capability": "text.word-count",
             "capability_version": "1.0",
@@ -143,7 +143,7 @@ class _Executor:
             outcome=AgentOutcome(
                 task_attempt_id=context.task_attempt_id,
                 completed_at=now,
-                word_count=2,
+                result_data={"word_count": 2},
             ),
         )
 

@@ -225,6 +225,7 @@ class SubmissionOrchestrator:
             headers=(),
             creation_sequence=1,
             created_at=now,
+            capability_name=selection.capability_name,
         )
 
         audit = AuditRecord(

@@ -107,9 +107,43 @@ podman compose --profile app up -d platform test-agent
 ```
 
 `compose/runtime/registry.json` is one Registry/declaration artifact shared
-by both processes (the Test Agent's declaration format is the same
-single-binding shape as the Orchestrator's Registry, so one file satisfies
-both `AI_PLATFORM_REGISTRY_PATH` and `AI_PLATFORM_AGENT_DECLARATION_PATH`).
+by every process (the Orchestrator and every Agent deployment all point
+`AI_PLATFORM_REGISTRY_PATH`/`AI_PLATFORM_AGENT_DECLARATION_PATH` at the same
+file). As of Sprint 9 (ADR-0014/ADR-0015) it carries one binding per Agent
+class -- `text.word-count` (test-agent/test-agent-2) and `text.summarize`
+(summarize-agent) -- and each Agent process selects its own binding from the
+shared file by `agent_id`, not by file position or binding count
+(`load_agent_deployment_declaration` in
+`src/ai_platform/runtime/loading.py`).
+
+### Sprint 9: `summarize-agent` and the AI Router
+
+`summarize-agent` runs the second built-in Agent class, `text.summarize`
+(ADR-0014). It reuses the same `ai-platform-test-agent` console script as
+`test-agent`/`test-agent-2` -- `build_agent_process()` selects the executor
+class (`TestAgent` vs `SummarizeAgent`) from the loaded declaration's
+`capability_name`, so there is only one generic Agent process entrypoint.
+Per ADR-0014 Section 6, `task-commands` is now capability-scoped at the
+physical-topic level (`...task-commands.text-word-count.v1` and
+`...task-commands.text-summarize.v1`, each with its own `.quarantine`
+companion), and Kafka ACLs are narrowed accordingly: `agent-producer`/
+`agent-consumer` (test-agent/test-agent-2) now see only the
+`text-word-count` command topic and their existing consumer group;
+`summarize-agent-producer`/`summarize-agent-consumer` are new principals
+scoped to `text-summarize`'s command topic, its own quarantine topic, and a
+new `ai-platform-summarize-agent-commands` consumer group.
+
+**`ai_router_anthropic_api_key.txt` / `ai_router_openai_api_key.txt` in
+`compose/secrets/` are obviously-fake placeholders**
+(`sk-ant-PLACEHOLDER-NOT-A-REAL-KEY-see-sprint-9-docs` /
+`sk-PLACEHOLDER-NOT-A-REAL-KEY-see-sprint-9-docs`), not real provider
+credentials -- this environment has no real Anthropic/OpenAI API access
+(explicit Sprint 9 scope exclusion). `summarize-agent` therefore starts and
+reaches `READY`, but any real `text.summarize` submission fails at the
+provider call (`PROVIDER_UNAVAILABLE`/authentication failure translated by
+the adapter, never a raw provider exception -- ADR-0014 Section 1). Replace
+both files with real keys (never commit them; `compose/secrets/` is
+git-ignored) to exercise a real completion.
 
 `test-agent` runs with `network_mode: "service:platform"` — it shares the
 platform container's network namespace rather than getting its own. This is

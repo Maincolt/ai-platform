@@ -245,7 +245,7 @@ def _terminal_intent(
         outcome=AgentOutcome(
             task_attempt_id=fixture.task_attempt_id,
             completed_at=now,
-            word_count=word_count,
+            result_data=None if word_count is None else {"word_count": word_count},
             failure_code=failure_code,
         ),
         occurred_at=now,
@@ -302,7 +302,7 @@ def test_duplicate_command_execution_produces_exactly_one_agent_receipt(
                         completed_at=now,
                     ),
                     outcome=AgentOutcome(
-                        task_attempt_id=attempt_id, completed_at=now, word_count=7
+                        task_attempt_id=attempt_id, completed_at=now, result_data={"word_count": 7}
                     ),
                     event_outbox=AgentEventOutboxRecord(
                         message_id=event_id,

@@ -6,6 +6,7 @@ Kept as small pure functions, separate from the lifecycle class, so their
 shape can be tested and evolved independently of execution orchestration.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from ai_platform.shared.identifiers import (
@@ -33,7 +34,7 @@ def build_task_completed_payload(
     agent_component: str,
     agent_instance_id: AgentId,
     text: str,
-    word_count: int,
+    result_data: Mapping[str, object],
     capability_name: str,
     capability_version: str,
     completed_at: datetime,
@@ -57,7 +58,7 @@ def build_task_completed_payload(
         },
         "payload": {
             "text": text,
-            "word_count": word_count,
+            "result": dict(result_data),
             "completed_at": _iso8601_utc(completed_at),
             "capability": capability_name,
             "capability_version": capability_version,

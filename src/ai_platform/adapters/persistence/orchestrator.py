@@ -210,9 +210,9 @@ class PsycopgOrchestratorPersistence:
                 )
 
             expected_revision = workflow.revision
-            if intent.outcome.word_count is not None:
+            if intent.outcome.result_data is not None:
                 workflow.complete(
-                    WorkflowResult(word_count=intent.outcome.word_count),
+                    WorkflowResult(result_data=intent.outcome.result_data),
                     occurred_at=intent.occurred_at,
                 )
                 state = "COMPLETED"
@@ -230,7 +230,9 @@ class PsycopgOrchestratorPersistence:
                 task_id=str(intent.task_id),
                 task_attempt_id=str(intent.task_attempt_id),
                 state=state,
-                word_count=intent.outcome.word_count,
+                result_data=None
+                if intent.outcome.result_data is None
+                else dict(intent.outcome.result_data),
                 failure_code=intent.outcome.failure_code,
                 failure_detail=intent.outcome.summary,
                 completed_at=intent.outcome.completed_at,
@@ -316,7 +318,7 @@ class PsycopgOrchestratorPersistence:
                 task_id=str(row[0]),
                 task_attempt_id=str(candidate.task_attempt_id),
                 state="FAILED",
-                word_count=None,
+                result_data=None,
                 failure_code="TASK_RESULT_DEADLINE_EXCEEDED",
                 failure_detail="No terminal outcome was received before the task result deadline.",
                 completed_at=now,
@@ -432,7 +434,7 @@ class PsycopgOrchestratorPersistence:
             and intent.agent_evidence_instance_id != str(row[1])
         ):
             return False
-        if intent.outcome.word_count is None:
+        if intent.outcome.result_data is None:
             return intent.result_text is None
         if intent.result_text is None:
             return False

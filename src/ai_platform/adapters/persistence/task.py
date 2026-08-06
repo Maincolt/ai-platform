@@ -57,26 +57,27 @@ async def update_task_outcome(
     task_id: str,
     task_attempt_id: str,
     state: str,
-    word_count: int | None,
+    result_data: dict[str, object] | None,
     failure_code: str | None,
     failure_detail: str | None,
     completed_at: object,
 ) -> None:
+    result_json = None if result_data is None else Jsonb(result_data)
     await connection.execute(
         """
         UPDATE orchestrator.tasks
-        SET state = %s, result_word_count = %s, failure_code = %s,
+        SET state = %s, result_data = %s, failure_code = %s,
             failure_detail = %s, updated_at = %s
         WHERE task_id = %s
         """,
-        (state, word_count, failure_code, failure_detail, completed_at, task_id),
+        (state, result_json, failure_code, failure_detail, completed_at, task_id),
     )
     await connection.execute(
         """
         UPDATE orchestrator.task_attempts
-        SET state = %s, result_word_count = %s, failure_code = %s,
+        SET state = %s, result_data = %s, failure_code = %s,
             failure_detail = %s, completed_at = %s
         WHERE task_attempt_id = %s
         """,
-        (state, word_count, failure_code, failure_detail, completed_at, task_attempt_id),
+        (state, result_json, failure_code, failure_detail, completed_at, task_attempt_id),
     )

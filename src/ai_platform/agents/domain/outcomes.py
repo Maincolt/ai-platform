@@ -16,7 +16,13 @@ from ai_platform.shared.identifiers import AgentId, MessageId, TaskAttemptId, Wo
 
 @dataclass(frozen=True, slots=True)
 class AgentEventOutboxRecord:
-    """One immutable TaskCompleted/TaskFailed publication, keyed by (task-outcomes, workflow_id)."""
+    """One immutable TaskCompleted/TaskFailed publication, keyed by (task-outcomes, workflow_id).
+
+    `capability_name` exists only for structural symmetry with
+    `OrchestratorOutboxRecord` (shared outbox persistence code handles both
+    uniformly); task-outcomes is never capability-scoped (ADR-0014 Section
+    6), so this is always `None` here.
+    """
 
     message_id: MessageId
     workflow_id: WorkflowId
@@ -26,6 +32,7 @@ class AgentEventOutboxRecord:
     headers: tuple[tuple[str, bytes], ...]
     creation_sequence: int
     created_at: datetime
+    capability_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.logical_channel:

@@ -57,6 +57,8 @@ services:
       - kafka_orchestrator_consumer_password
       - kafka_agent_producer_password
       - kafka_agent_consumer_password
+      - kafka_summarize_agent_producer_password
+      - kafka_summarize_agent_consumer_password
     volumes:
       - ./kafka/entrypoint.sh:/opt/kafka-init/entrypoint.sh:ro
       - kafka-data:/var/lib/kafka/data
@@ -103,8 +105,13 @@ services:
       AI_PLATFORM_ORCHESTRATOR_DATABASE_DSN_FILE: /run/secrets/dsn_orchestrator
       AI_PLATFORM_ORCHESTRATOR_DATABASE_TIMEOUT_SECONDS: "5"
       AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.v1
-      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.v1.quarantine
+      # Fallback-only value (ADR-0014 Section 6): the Orchestrator's command
+      # publisher now resolves the physical task-commands topic per
+      # capability at publish time (KafkaEventPublisher._resolve_topic /
+      # command_topic_binding_for_capability), so this is used only if a
+      # command is ever published without a capability_name hint.
+      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.text-word-count.v1
+      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.text-word-count.v1.quarantine
       AI_PLATFORM_TASK_OUTCOMES_TOPIC: ai-platform.development.task-outcomes.v1
       AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC: ai-platform.development.task-outcomes.v1.quarantine
       AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY: /app/contracts/json-schema/v1
@@ -165,8 +172,8 @@ services:
       AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
       AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
       AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.v1
-      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.v1.quarantine
+      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.text-word-count.v1
+      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.text-word-count.v1.quarantine
       AI_PLATFORM_TASK_OUTCOMES_TOPIC: ai-platform.development.task-outcomes.v1
       AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC: ai-platform.development.task-outcomes.v1.quarantine
       AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY: /app/contracts/json-schema/v1
@@ -225,8 +232,8 @@ services:
       AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
       AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
       AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.v1
-      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.v1.quarantine
+      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.text-word-count.v1
+      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.text-word-count.v1.quarantine
       AI_PLATFORM_TASK_OUTCOMES_TOPIC: ai-platform.development.task-outcomes.v1
       AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC: ai-platform.development.task-outcomes.v1.quarantine
       AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY: /app/contracts/json-schema/v1
@@ -264,6 +271,80 @@ services:
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
 
+  # The second built-in Agent class (ADR-0014): text.summarize, backed by
+  # the AI Router. Reuses the same generic ai-platform-test-agent console
+  # script as test-agent/test-agent-2 -- build_agent_process() selects the
+  # SummarizeAgent executor from this deployment's registry.json binding
+  # (capability_name == "text.summarize"), not from the process name. Not
+  # network_mode: "service:platform" (that trick is test-agent-specific);
+  # reaches kafka/postgres by service name like test-agent-2, with its own
+  # loopback-only readiness listener on its own container network namespace.
+  summarize-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    command: ["ai-platform-test-agent"]
+    depends_on:
+      platform:
+        condition: service_started
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_KAFKA_SECURITY_PROTOCOL: LOCAL_DEVELOPMENT_SASL_PLAINTEXT
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "5"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.text-summarize.v1
+      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.text-summarize.v1.quarantine
+      AI_PLATFORM_TASK_OUTCOMES_TOPIC: ai-platform.development.task-outcomes.v1
+      AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC: ai-platform.development.task-outcomes.v1.quarantine
+      AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY: /app/contracts/json-schema/v1
+      AI_PLATFORM_PUBLISH_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_CONSUMER_POLL_TIMEOUT_SECONDS: "1"
+      AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS: "0.5"
+      AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS: "5"
+      AI_PLATFORM_WORKER_IDLE_DELAY_SECONDS: "0.5"
+      AI_PLATFORM_OUTBOX_CLAIM_TTL_SECONDS: "30"
+      AI_PLATFORM_OUTBOX_MAXIMUM_PUBLICATION_ATTEMPTS: "5"
+      AI_PLATFORM_QUARANTINE_RECONCILIATION_LIMIT: "50"
+      AI_PLATFORM_QUARANTINE_QUERY_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_KAFKA_PRODUCER_USERNAME: summarize-agent-producer
+      AI_PLATFORM_AGENT_KAFKA_PRODUCER_PASSWORD_FILE: /run/secrets/kafka_summarize_agent_producer_password
+      AI_PLATFORM_AGENT_KAFKA_CONSUMER_USERNAME: summarize-agent-consumer
+      AI_PLATFORM_AGENT_KAFKA_CONSUMER_PASSWORD_FILE: /run/secrets/kafka_summarize_agent_consumer_password
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-abcdef987654"
+      AI_PLATFORM_AGENT_READINESS_HOST: 127.0.0.1
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_AGENT_MAXIMUM_CONCURRENCY: "4"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-summarize-agent
+      AI_PLATFORM_AGENT_DECLARATION_DIGEST: "sha256:local-compose-summarize-declaration"
+      AI_PLATFORM_AGENT_DECLARATION_PATH: /app/runtime-config/registry.json
+      AI_PLATFORM_AGENT_PUBLISHER_INSTANCE_ID: "1f2e3d4c-5b6a-7c91-8a2e-9f8e7d6c5b4a"
+      AI_PLATFORM_AGENT_COMMAND_CONSUMER_GROUP_ID: ai-platform-summarize-agent-commands
+      AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID: summarize-agent-commands
+      # AI Router (ADR-0014). The referenced keys are checked-in, obviously-
+      # fake Sprint 9 placeholders (infrastructure/README.md) -- no real
+      # Anthropic/OpenAI credentials exist in this environment, so real
+      # text.summarize submissions fail at the provider call, not at startup.
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-3-5-haiku-20241022
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-4o-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+    secrets:
+      - dsn_agent
+      - kafka_summarize_agent_producer_password
+      - kafka_summarize_agent_consumer_password
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+    volumes:
+      - ./runtime/registry.json:/app/runtime-config/registry.json:ro
+
 secrets:
   postgres_admin_password:
     file: ./secrets/postgres_admin_password.txt
@@ -285,12 +366,20 @@ secrets:
     file: ./secrets/kafka_agent_producer_password.txt
   kafka_agent_consumer_password:
     file: ./secrets/kafka_agent_consumer_password.txt
+  kafka_summarize_agent_producer_password:
+    file: ./secrets/kafka_summarize_agent_producer_password.txt
+  kafka_summarize_agent_consumer_password:
+    file: ./secrets/kafka_summarize_agent_consumer_password.txt
   dsn_orchestrator:
     file: ./secrets/dsn_orchestrator.txt
   dsn_agent:
     file: ./secrets/dsn_agent.txt
   readiness_credential:
     file: ./secrets/readiness_credential.txt
+  ai_router_anthropic_api_key:
+    file: ./secrets/ai_router_anthropic_api_key.txt
+  ai_router_openai_api_key:
+    file: ./secrets/ai_router_openai_api_key.txt
 
 volumes:
   postgres-data:

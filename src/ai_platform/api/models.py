@@ -17,14 +17,20 @@ class WorkflowSubmitRequest(BaseModel):
 
     request_id: str | None = Field(default=None, pattern=_UUIDV7_PATTERN)
     text: str = Field(min_length=1, max_length=10000)
-    capability: Literal["text.word-count"]
+    capability: Literal["text.word-count", "text.summarize"]
     capability_version: Literal["1.0"]
 
 
 class WorkflowResultModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Generic, capability-scoped result payload (ADR-0015 Section 4).
 
-    word_count: int = Field(ge=0)
+    Deliberately looser than the internal event contracts: the caller
+    already knows which capability it submitted and can interpret the
+    result accordingly (e.g. `word_count` for `text.word-count`,
+    `summary` for `text.summarize`).
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 class WorkflowFailureModel(BaseModel):

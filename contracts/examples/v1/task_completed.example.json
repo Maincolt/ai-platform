@@ -15,7 +15,7 @@
   },
   "payload": {
     "text": "the quick brown fox jumps over the lazy dog",
-    "word_count": 9,
+    "result": { "word_count": 9 },
     "completed_at": "2026-08-01T12:00:01Z",
     "capability": "text.word-count",
     "capability_version": "1.0",

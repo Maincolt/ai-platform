@@ -53,6 +53,7 @@ def test_claim_uses_database_time_skip_locked_and_preserves_exact_bytes() -> Non
         NOW,
         NOW + timedelta(seconds=30),
         2,
+        "text.word-count",
     )
     fake = _Connection([_Cursor(None), _Cursor(row)])
 

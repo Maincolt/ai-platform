@@ -153,7 +153,7 @@ def _terminal(intent: SubmissionCommitIntent, message: str = "event-1") -> Termi
         outcome=AgentOutcome(
             task_attempt_id=intent.task_attempt.task_attempt_id,
             completed_at=NOW + timedelta(seconds=1),
-            word_count=3,
+            result_data={"word_count": 3},
         ),
         occurred_at=NOW + timedelta(seconds=1),
         audit=AuditRecord(
@@ -169,7 +169,7 @@ def _agent_outcome(intent: SubmissionCommitIntent) -> AgentOutcomeCommitIntent:
     outcome = AgentOutcome(
         task_attempt_id=intent.task_attempt.task_attempt_id,
         completed_at=NOW,
-        word_count=3,
+        result_data={"word_count": 3},
     )
     event = AgentEventOutboxRecord(
         message_id=MessageId("agent-event-1"),
@@ -274,7 +274,7 @@ def test_agent_outcome_reuses_exact_winner_and_rejects_content_conflict() -> Non
         reused = await store.commit_outcome(replace(intent, completed_work=competing_work))
         conflicting_work = replace(
             intent.completed_work,
-            outcome=replace(intent.completed_work.outcome, word_count=99),
+            outcome=replace(intent.completed_work.outcome, result_data={"word_count": 99}),
         )
         with pytest.raises(PersistenceConflictError):
             await store.commit_outcome(replace(intent, completed_work=conflicting_work))

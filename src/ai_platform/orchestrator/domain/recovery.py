@@ -16,7 +16,14 @@ from ai_platform.shared.identifiers import MessageId, TaskAttemptId, WorkflowId
 
 @dataclass(frozen=True, slots=True)
 class OrchestratorOutboxRecord:
-    """One immutable ExecuteTask publication, keyed by (task-commands, workflow_id)."""
+    """One immutable ExecuteTask publication, keyed by (task-commands, workflow_id).
+
+    `capability_name` is explicit routing metadata (ADR-0014 Section 6): the
+    physical task-commands topic is capability-scoped, so the publisher
+    needs this alongside the opaque `payload_bytes` rather than parsing the
+    immutable bytes to discover it. `None` only for logical channels that
+    are not capability-scoped (task-outcomes has none today).
+    """
 
     message_id: MessageId
     workflow_id: WorkflowId
@@ -26,6 +33,7 @@ class OrchestratorOutboxRecord:
     headers: tuple[tuple[str, bytes], ...]
     creation_sequence: int
     created_at: datetime
+    capability_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.logical_channel:

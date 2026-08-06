@@ -103,7 +103,9 @@ class TestAgent:
         else:
             word_count = compute_word_count(context.input_text)
             outcome = AgentOutcome(
-                task_attempt_id=context.task_attempt_id, completed_at=now, word_count=word_count
+                task_attempt_id=context.task_attempt_id,
+                completed_at=now,
+                result_data={"word_count": word_count},
             )
             disposition = TestAgentDisposition.COMPLETED
 
@@ -169,7 +171,7 @@ class TestAgent:
         message_id: MessageId,
         now: datetime,
     ) -> AgentEventOutboxRecord:
-        if outcome.word_count is not None:
+        if outcome.result_data is not None:
             payload = build_task_completed_payload(
                 message_id=message_id,
                 correlation_id=context.correlation_id,
@@ -180,7 +182,7 @@ class TestAgent:
                 agent_component=self._agent_component,
                 agent_instance_id=self._agent_deployment_id,
                 text=context.input_text,
-                word_count=outcome.word_count,
+                result_data=outcome.result_data,
                 capability_name=CAPABILITY_NAME,
                 capability_version=CAPABILITY_VERSION,
                 completed_at=outcome.completed_at,

@@ -41,6 +41,7 @@ async def insert_outbox(
         Jsonb(encode_headers(record.headers)),
         record.creation_sequence,
         record.created_at,
+        record.capability_name,
     )
     if schema == "agent":
         if task_attempt_id is None:
@@ -48,8 +49,8 @@ async def insert_outbox(
         query = sql.SQL("""
             INSERT INTO {} (
                 message_id, workflow_id, logical_channel, ordering_key, payload_bytes,
-                headers, creation_sequence, created_at, task_attempt_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                headers, creation_sequence, created_at, capability_name, task_attempt_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """).format(table)
         await connection.execute(
             query,
@@ -59,8 +60,8 @@ async def insert_outbox(
         query = sql.SQL("""
             INSERT INTO {} (
                 message_id, workflow_id, logical_channel, ordering_key, payload_bytes,
-                headers, creation_sequence, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                headers, creation_sequence, created_at, capability_name
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """).format(table)
         await connection.execute(
             query,
@@ -129,7 +130,8 @@ async def claim_next(
             RETURNING claimed.message_id, claimed.workflow_id, claimed.logical_channel,
                       claimed.ordering_key, claimed.payload_bytes, claimed.headers,
                       claimed.creation_sequence, claimed.created_at,
-                      claimed.claim_expires_at, claimed.publication_attempts
+                      claimed.claim_expires_at, claimed.publication_attempts,
+                      claimed.capability_name
             """).format(table=table),
             (
                 logical_channel,
@@ -203,11 +205,12 @@ def claimed_from_row(
     row: tuple[object, ...], *, fencing_token: str, schema: str
 ) -> ClaimedOutboxRecord:
     if (
-        len(row) != 10
+        len(row) != 11
         or not isinstance(row[4], bytes | bytearray)
         or not isinstance(row[7], datetime)
         or not isinstance(row[8], datetime)
         or not isinstance(row[9], int)
+        or (row[10] is not None and not isinstance(row[10], str))
     ):
         raise PermanentPersistenceError("Stored outbox data is invalid.")
     message_id = MessageId(str(row[0]))
@@ -218,6 +221,7 @@ def claimed_from_row(
     headers = decode_headers(row[5])
     creation_sequence = _positive_int(row[6])
     created_at = row[7]
+    capability_name = None if row[10] is None else str(row[10])
     record = (
         OrchestratorOutboxRecord(
             message_id=message_id,
@@ -228,6 +232,7 @@ def claimed_from_row(
             headers=headers,
             creation_sequence=creation_sequence,
             created_at=created_at,
+            capability_name=capability_name,
         )
         if schema == "orchestrator"
         else AgentEventOutboxRecord(
@@ -239,6 +244,7 @@ def claimed_from_row(
             headers=headers,
             creation_sequence=creation_sequence,
             created_at=created_at,
+            capability_name=capability_name,
         )
     )
     return ClaimedOutboxRecord(

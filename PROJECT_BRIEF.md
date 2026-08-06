@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — AI Platform
 
-> Last updated: 2026-08-05 | Sprint 8 | Status: Done
+> Last updated: 2026-08-06 | Sprint 9 | Status: Done
 
 > **Note on terminology:** the roles in Section 6 are a *virtual contributor
 > team* used to plan and execute sprints in this repository. They are not the
@@ -13,12 +13,16 @@
 
 AI Platform is a foundation for coordinating specialized AI agents through
 modular boundaries and event-driven communication (see
-[README.md](README.md)). Thirteen Accepted ADRs govern the first
-deterministic vertical slice. Phases 1–6 are merged: concrete persistence,
-Event Bus, runtime, and local-deployment boundaries are implemented and
-validated against real PostgreSQL and Apache Kafka. Phase 7 is partially
-complete: a deliberately scoped subset of its real-service test matrix is
-automated (see [docs/sprint-7/done.md](docs/sprint-7/done.md)).
+[README.md](README.md)). Fifteen Accepted ADRs govern the platform.
+Vertical Slice 01's eight-phase deterministic proof of architecture
+(`text.word-count`) completed at Sprint 8. Sprint 9 is the first work
+beyond it: a real, provider-backed second capability (`text.summarize`,
+[ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md))
+behind a new AI Router boundary, and the generic capability result model
+([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md))
+it depends on. Real-provider (Anthropic/OpenAI) credentials are not
+available in this environment — `text.summarize` is validated against
+fakes only; see [docs/sprint-9/done.md](docs/sprint-9/done.md).
 
 ## 2. Platform Concept
 
@@ -44,6 +48,13 @@ window) is done; the remainder of its Section 19 matrix has not started.
 Phase 8 (verified operational documentation, [docs/operations/README.md](docs/operations/README.md))
 is done, completing the eight-phase plan with that Phase 7 caveat carried
 forward.
+
+Beyond Vertical Slice 01, Sprint 9 adds the platform's second built-in
+Agent, `text.summarize` v1.0, the first to call a real external AI
+provider through the new AI Router boundary (`src/ai_platform/ports/ai_router/`,
+`src/ai_platform/adapters/ai_router/`). This is where the "AI Router"
+and "Skills" boxes in the diagram below start being real rather than
+placeholders (Skills remain deferred).
 
 ## 3. Tech Stack
 
@@ -119,14 +130,17 @@ src/
     │   ├── registry/          # Sprint 3: Capability Registry (declarations, snapshot, availability, selection)
     │   └── application/       # Sprint 3: submission/terminal/deadline application services
     ├── agents/
-    │   ├── domain/            # Sprint 4: Agent-owned outcome/receipt/event-outbox records
-    │   └── test_agent/        # Sprint 4: the built-in text.word-count capability and lifecycle
+    │   ├── domain/             # Sprint 4: Agent-owned outcome/receipt/event-outbox records
+    │   ├── test_agent/         # Sprint 4: the built-in text.word-count capability and lifecycle
+    │   └── summarize_agent/    # Sprint 9: the built-in text.summarize capability, AI Router-backed
     ├── contracts/             # Contract package boundary; canonical artifacts remain under root contracts/
     ├── ports/
     │   ├── event_bus/
+    │   ├── ai_router/          # Sprint 9: AIRouterPort, completion request/result contract
     │   └── persistence/       # Capability and transaction-shaped durable ports
     ├── adapters/
     │   ├── event_bus/          # Kafka-protocol producer/consumer, health, topics, quarantine
+    │   ├── ai_router/          # Sprint 9: Anthropic/OpenAI provider adapters, fallback router
     │   └── persistence/        # Psycopg 3 component adapters
     ├── runtime/                # Process composition, configuration, workers, health and lifecycle
     └── shared/                 # Cross-boundary identifiers, messages, outcomes and operational signals
@@ -141,7 +155,7 @@ src/
 | Contributor guidance | [AGENTS.md](AGENTS.md) | Repository-wide philosophy, standards, ADR process |
 | Contribution workflow | [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR workflow, ADR process, testing/review expectations |
 | Platform architecture | [docs/architecture/README.md](docs/architecture/README.md) | Logical components, contracts, boundaries |
-| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 13 Accepted ADRs (0001–0013), governing all implementation |
+| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 15 Accepted ADRs (0001–0015), governing all implementation |
 | First implementation plan | [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md) | 8-phase plan for the first deterministic workflow |
 | Test strategy | [docs/testing/README.md](docs/testing/README.md) | Local vs. external-service test levels |
 | Platform agents (architecture) | [agents/](agents/) | Placeholder — populated after Phase 3+ (Orchestrator/Registry/Test Agent) |
@@ -178,6 +192,7 @@ be introduced starting with the sprint that implements Phase 6
 | 6 | Concrete Adapters and Local Deployment | ✅ Done | Vertical Slice 01 **Phase 6** only: concrete PostgreSQL/Kafka adapters, runtime process composition, application image, and a local PostgreSQL + Apache Kafka Compose topology, validated end-to-end (submission, crash recovery, assignment fencing, quarantine) against real services. Apache Kafka replaces Redpanda as the initial broker per [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md). See [docs/sprint-6/done.md](docs/sprint-6/done.md). |
 | 7 | Integration, Recovery, Security, and End-to-End Tests | ✅ Done (partial, scoped) | Vertical Slice 01 **Phase 7**, a deliberately chosen subset: an automated, opt-in `external_service` pytest suite (49 tests) covering Event Bus delivery, Concurrency, Security boundary, and Recovery/crash window against the real Sprint 6 topology — not the complete Section 19 matrix. See [docs/sprint-7/done.md](docs/sprint-7/done.md). |
 | 8 | Verified Operational Documentation | ✅ Done | Vertical Slice 01 **Phase 8**: [docs/operations/README.md](docs/operations/README.md) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every one independently re-run against the real local environment during this sprint. No production-readiness claim. Completes the eight-phase Vertical Slice 01 plan (with the Phase 7 scope caveat above carried forward). See [docs/sprint-8/done.md](docs/sprint-8/done.md). |
+| 9 | AI Router and the First AI-Backed Agent | ✅ Done (real-provider validation deferred) | First work beyond Vertical Slice 01: [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) (AI Router boundary, Anthropic/OpenAI provider adapters, deterministic fallback routing, durable redacted usage tracking, capability-scoped Kafka `task-commands` routing, the `text.summarize` v1.0 Agent with a durable pre-call claim model) and [ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md) (generalized `result_data` model replacing the `word_count`-specific shape across contracts, Agent/Orchestrator persistence, and the public API, proven not to regress `text.word-count`). 420 tests passing (up from 339); real Anthropic/OpenAI provider validation and real-topology re-validation of this sprint's own infrastructure changes are both explicitly deferred (no credentials in this environment; see [docs/sprint-9/done.md](docs/sprint-9/done.md)). |
 
 ## 8. Current State
 
@@ -204,6 +219,10 @@ be introduced starting with the sprint that implements Phase 6
 - An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
 - A documented, working dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) for a genuine Windows/WSL2/Podman host-port-forwarding reliability gap found and diagnosed during Sprint 7.
 - [docs/operations/README.md](docs/operations/README.md): verified operational documentation (Phase 8) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every command independently re-run against the real local environment during Sprint 8. Completes Vertical Slice 01's eight-phase plan.
+- **A generic capability result model** ([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md)): `AgentOutcome.result_data`/`WorkflowResult.result_data` (capability-scoped `Mapping[str, object]`) replace the `word_count`-specific fields across wire contracts (discriminated `if`/`then` union in `task_completed.schema.json`), Agent/Orchestrator persistence (migrations `0003`, `0004`), and the public API (`WorkflowResultModel` is now a generic passthrough). `text.word-count` was re-pointed at this model with its full test suite re-run and no regression, before any new capability was built on top of it.
+- **An AI Router boundary** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Sections 1–3, `src/ai_platform/ports/ai_router/`, `src/ai_platform/adapters/ai_router/`): a synchronous, provider-neutral `AIRouterPort.complete()` contract, Anthropic and OpenAI adapters built on the official SDKs (no third-party abstraction library), a deterministic configuration-ordered `FallbackAIRouter`, and durable redacted per-call usage tracking (`agent.provider_call_usage`) kept as internal evidence, never surfaced on the public API.
+- **Capability-scoped Kafka `task-commands` routing** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Section 6), resolving the routing-model review ADR-0005 Section 5 flagged for a second Agent class: `task-commands` stays one logical channel, but its physical topic is now computed per capability (`command_topic_binding_for_capability`), so a second Agent class's consumer group never receives the first class's commands.
+- **`text.summarize` v1.0** (`src/ai_platform/agents/summarize_agent/`), the platform's second built-in Agent and the first to call a real external AI provider. Its lifecycle adds a durable pre-call claim (`AgentOutcomeTransactionPort.claim_provider_call`) before invoking the AI Router, per ADR-0014 Section 5's execution-model requirements for a non-deterministic, provider-backed side effect (distinct from `text.word-count`'s safe-to-recompute model). A redelivery that finds its own unresolved claim resolves conservatively to a `PROVIDER_CALL_OUTCOME_UNKNOWN` failure rather than re-calling the provider or blocking — a deliberate scoping choice pending ADR-0014 Section 8 Q1's still-open reconciliation-window/operator-procedure design. Wired into `runtime/composition.py` (executor selection by capability name, failing closed on anything else), the Registry, and a new `summarize-agent` Compose service with its own Kafka principals and capability-scoped topic. Validated against fake `AIRouterPort`/persistence doubles only — no real provider credentials exist in this environment (checked-in placeholder secret files are obviously fake), and this sprint's own infrastructure changes (new migrations, renamed Kafka topics) have not yet been re-validated against the already-running local topology, which predates them. See [docs/sprint-9/done.md](docs/sprint-9/done.md).
 
 **What doesn't work yet:**
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
@@ -213,16 +232,25 @@ be introduced starting with the sprint that implements Phase 6
 - The Compose topology is explicitly local-only: single broker, single database node, no TLS, application ports not reachable from the host by design (loopback-only).
 - The remaining Section 19 test categories beyond what Sprint 7 automated (Contract, most of Idempotency/Ownership/State machine/Agent readiness/Audit-observability, the full Correlation Normalization table), and a dedicated pytest-automated full-container End-to-End harness.
 - On this development host specifically, direct connections from Windows-native Python to the topology's host-published ports remain unreliable at the protocol-handshake level even after fixing the underlying WSL2/firewall configuration issues; the documented workaround (`run-in-network.sh`) is a permanent, working capability, not merely a stopgap, but the root cause of the remaining handshake-level flakiness is not fully understood.
+- Real Anthropic/OpenAI provider calls: no credentials exist in this environment; a real `text.summarize` submission through the live Compose topology would reach the provider call and fail there, not at startup.
+- Real-topology re-validation of Sprint 9's own infrastructure changes (schema migrations `0003`–`0007`, renamed/capability-scoped Kafka topics, the new `summarize-agent` service) — the topology already running on this host predates them.
+- ADR-0014's five recorded open questions (Section 8): the `PROVIDER_CALL_OUTCOME_UNKNOWN` reconciliation window and operator procedure, exact retry-budget numbers, the approved Claude/OpenAI model list, Orchestrator-level AI Router invocation, and same-provider-vs-cross-provider fallback ordering.
 
 **What's next:**
-- Vertical Slice 01's eight-phase plan is complete, with the Phase 7 scope
-  caveat above carried forward honestly rather than backfilled. Candidate
-  next directions, none started: the remainder of Phase 7's Section 19
-  matrix (see [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of
-  scope"); or a new architecture stream for a real AI-capable Agent and
-  the AI Router boundary (both explicitly deferred by Vertical Slice 01
-  and not yet designed — see [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md)
-  Section 21, "Explicit Deferrals").
+- Bring the running local Compose topology up to date with Sprint 9's
+  migrations and Kafka topic changes, then re-run the `external_service`
+  suite and a real `text.summarize` submission end-to-end (it will
+  legitimately fail at the provider call given the placeholder
+  credentials — that failure path is itself worth observing for real).
+- Resolve ADR-0014 Section 8's open questions, starting with the
+  reconciliation-window/operator-procedure design for
+  `PROVIDER_CALL_OUTCOME_UNKNOWN`.
+- Obtain real Anthropic/OpenAI credentials for a genuine end-to-end
+  provider validation pass, if and when the repository owner wants to
+  pursue it.
+- The remainder of Phase 7's Section 19 matrix remains open too (see
+  [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of scope"),
+  independent of the AI Router stream.
 
 ## 9. Security Rules
 

@@ -10,6 +10,16 @@ from typing import cast
 import httpx
 from fastapi import FastAPI
 
+from ai_platform.adapters.ai_router.anthropic_adapter import (
+    AnthropicProviderAdapter,
+    AnthropicProviderConfig,
+)
+from ai_platform.adapters.ai_router.openai_adapter import (
+    OpenAIProviderAdapter,
+    OpenAIProviderConfig,
+)
+from ai_platform.adapters.ai_router.provider import ProviderAdapter
+from ai_platform.adapters.ai_router.router import FallbackAIRouter
 from ai_platform.adapters.event_bus.consumer import KafkaEventConsumer
 from ai_platform.adapters.event_bus.health import KafkaBrokerHealth
 from ai_platform.adapters.event_bus.producer import KafkaEventPublisher
@@ -30,7 +40,12 @@ from ai_platform.adapters.persistence import (
     PsycopgTransportRejectionTransaction,
 )
 from ai_platform.adapters.persistence.outbox import OutboxRecoveryPolicy
+from ai_platform.agents.summarize_agent.agent import SummarizeAgent
+from ai_platform.agents.summarize_agent.capability import (
+    CAPABILITY_NAME as SUMMARIZE_CAPABILITY_NAME,
+)
 from ai_platform.agents.test_agent.agent import TestAgent
+from ai_platform.agents.test_agent.capability import CAPABILITY_NAME as WORD_COUNT_CAPABILITY_NAME
 from ai_platform.api.app import app as workflow_api_app
 from ai_platform.api.app import configure_app_state
 from ai_platform.api.context import LocalDevelopmentAuthorizationPolicy
@@ -58,11 +73,13 @@ from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
     CommonRuntimeConfig,
     PlatformRuntimeConfig,
+    RuntimeConfigurationError,
     SecretFileReference,
 )
 from ai_platform.runtime.consumer import EventConsumerWorker
 from ai_platform.runtime.contracts import JsonSchemaMessageValidator
 from ai_platform.runtime.handlers import (
+    CommandExecutorPort,
     ExecuteTaskDeliveryHandler,
     TerminalOutcomeDeliveryHandler,
 )
@@ -456,12 +473,11 @@ def build_agent_process(
         ),
     )
     rejections = PsycopgTransportRejectionTransaction(pool)
-    executor = TestAgent(
-        environment=config.environment,
-        agent_deployment_id=agent_id,
-        agent_component=config.agent_component,
-        outcome_transaction=cast(AgentOutcomeTransactionPort, persistence),
-        id_factory=Uuid7IdentifierFactory(),
+    executor = _build_executor(
+        declaration.capability_name,
+        config=config,
+        agent_id=agent_id,
+        persistence=persistence,
     )
 
     outcome_publisher = KafkaEventPublisher(
@@ -597,6 +613,89 @@ def build_agent_process(
     )
 
 
+def _build_executor(
+    capability_name: str,
+    *,
+    config: AgentRuntimeConfig,
+    agent_id: AgentId,
+    persistence: PsycopgAgentPersistence,
+) -> CommandExecutorPort:
+    """Select the Agent executor for `declaration.capability_name`.
+
+    Fails closed: an unrecognized capability name never silently falls
+    back to `TestAgent` (or anything else) -- it is a configuration error.
+    """
+    outcome_transaction = cast(AgentOutcomeTransactionPort, persistence)
+    if capability_name == WORD_COUNT_CAPABILITY_NAME:
+        return TestAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+        )
+    if capability_name == SUMMARIZE_CAPABILITY_NAME:
+        return SummarizeAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
+    raise RuntimeConfigurationError(f"UNSUPPORTED_AGENT_CAPABILITY:{capability_name}")
+
+
+def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
+    providers: list[ProviderAdapter] = []
+    if (
+        config.ai_router_anthropic_api_key is not None
+        or config.ai_router_anthropic_model is not None
+    ):
+        providers.append(
+            AnthropicProviderAdapter(
+                AnthropicProviderConfig(
+                    api_key=_require_ai_router_secret(config, "ai_router_anthropic_api_key"),
+                    model=_require_ai_router_str(config, "ai_router_anthropic_model"),
+                )
+            )
+        )
+    if config.ai_router_openai_api_key is not None or config.ai_router_openai_model is not None:
+        providers.append(
+            OpenAIProviderAdapter(
+                OpenAIProviderConfig(
+                    api_key=_require_ai_router_secret(config, "ai_router_openai_api_key"),
+                    model=_require_ai_router_str(config, "ai_router_openai_model"),
+                )
+            )
+        )
+    if not providers:
+        raise RuntimeConfigurationError("MISSING_AI_ROUTER_PROVIDER_CONFIGURATION")
+    return FallbackAIRouter(providers)
+
+
+def _require_ai_router_secret(config: AgentRuntimeConfig, field_name: str) -> str:
+    reference = getattr(config, field_name)
+    if reference is None:
+        raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
+    return cast(SecretFileReference, reference).read()
+
+
+def _require_ai_router_str(config: AgentRuntimeConfig, field_name: str) -> str:
+    value = getattr(config, field_name)
+    if value is None:
+        raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
+    return cast(str, value)
+
+
+def _require_ai_router_int(config: AgentRuntimeConfig, field_name: str) -> int:
+    value = getattr(config, field_name)
+    if value is None:
+        raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
+    return cast(int, value)
+
+
 def _security(
     config: CommonRuntimeConfig,
     *,
@@ -629,10 +728,20 @@ def _topic_mapping(config: CommonRuntimeConfig) -> KafkaTopicMapping:
     )
 
 
+_EXPECTED_SCHEMA_VERSION: dict[str, int] = {
+    # Bump alongside the latest applied infrastructure/migrations/*.sql for
+    # each component so a stale database is rejected at startup rather than
+    # silently misread.
+    "orchestrator": 3,
+    "agent": 4,
+}
+
+
 def _pool(config: CommonRuntimeConfig, *, component_schema: str) -> AsyncPsycopgPool:
     return AsyncPsycopgPool(
         config.database_dsn.read(),
         component_schema=component_schema,
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION[component_schema],
         min_size=config.database_pool_min_size,
         max_size=config.database_pool_max_size,
         timeout_seconds=config.database_timeout_seconds,

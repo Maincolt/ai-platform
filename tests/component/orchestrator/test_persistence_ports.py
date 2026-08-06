@@ -172,7 +172,7 @@ def _agent_intent(
         outcome=AgentOutcome(
             task_attempt_id=attempt_id,
             completed_at=NOW,
-            word_count=word_count,
+            result_data={"word_count": word_count},
         ),
         event_outbox=AgentEventOutboxRecord(
             message_id=event_id,
@@ -273,7 +273,7 @@ def test_agent_outcome_transaction_rejects_different_outcome_for_attempt() -> No
         _run(persistence.commit_outcome(_agent_intent(word_count=1, event_message_id="event-2")))
 
     stored = _run(persistence.get_completed(TaskAttemptId("attempt-1")))
-    assert stored is not None and stored.outcome.word_count == 9
+    assert stored is not None and stored.outcome.result_data == {"word_count": 9}
 
 
 def test_workflow_query_returns_an_immutable_snapshot_copy() -> None:

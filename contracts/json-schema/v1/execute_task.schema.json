@@ -87,7 +87,8 @@
           "description": "The exact text submitted for text.word-count."
         },
         "capability": {
-          "const": "text.word-count"
+          "enum": ["text.word-count", "text.summarize"],
+          "description": "ADR-0015: an explicit, reviewable list, not an open string -- an unrecognized capability value fails validation immediately."
         },
         "capability_version": {
           "const": "1.0"

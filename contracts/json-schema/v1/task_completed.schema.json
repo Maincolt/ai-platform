@@ -63,7 +63,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["text", "word_count", "completed_at", "capability", "capability_version"],
+      "required": ["text", "result", "completed_at", "capability", "capability_version"],
       "properties": {
         "text": {
           "type": "string",
@@ -71,9 +71,10 @@
           "maxLength": 10000,
           "description": "The unchanged input text (Section 10)."
         },
-        "word_count": {
-          "type": "integer",
-          "minimum": 0
+        "result": {
+          "type": "object",
+          "description": "Capability-scoped result payload; exact shape validated per-capability below (ADR-0015).",
+          "minProperties": 1
         },
         "completed_at": {
           "type": "string",
@@ -81,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "const": "text.word-count"
+          "enum": ["text.word-count", "text.summarize"]
         },
         "capability_version": {
           "const": "1.0"
@@ -117,5 +118,47 @@
     "task_attempt_id",
     "producer",
     "payload"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "text.word-count" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["word_count"],
+                "properties": {
+                  "word_count": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "text.summarize" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["summary"],
+                "properties": {
+                  "summary": { "type": "string", "minLength": 1, "maxLength": 2000 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   ]
 }
