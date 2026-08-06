@@ -21,6 +21,7 @@ technical and structural choices.
 | [ADR-0012](ADR-0012-correlation-id-normalization.md) | Correlation ID Normalization | Accepted |
 | [ADR-0013](ADR-0013-initial-broker-selection-apache-kafka.md) | Initial Broker Selection — Apache Kafka Instead of Redpanda | Accepted |
 | [ADR-0014](ADR-0014-ai-router-and-first-ai-backed-agent.md) | AI Router and the First AI-Backed Agent | Accepted |
+| [ADR-0015](ADR-0015-generic-capability-result-model.md) | Generic Capability Result Model | Accepted |
 
 ## Naming
 
