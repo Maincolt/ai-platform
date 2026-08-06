@@ -165,7 +165,7 @@ def _terminal_arguments(persistence: InMemoryOrchestratorPersistence) -> dict[st
         "outcome": AgentOutcome(
             task_attempt_id=attempt.task_attempt_id,
             completed_at=NOW + timedelta(seconds=1),
-            word_count=9,
+            result_data={"word_count": 9},
         ),
         "occurred_at": NOW + timedelta(seconds=1),
     }
@@ -208,7 +208,7 @@ def test_full_lifecycle_submit_dispatch_complete_via_real_registry() -> None:
     final = _run(persistence.get(submission.workflow_id))
     assert final is not None and final.state is not None
     assert final.state.value == "COMPLETED"
-    assert final.result is not None and final.result.word_count == 9
+    assert final.result is not None and final.result.result_data == {"word_count": 9}
 
 
 def test_deadline_reconciler_does_not_override_real_completed_workflow() -> None:

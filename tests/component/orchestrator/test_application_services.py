@@ -189,7 +189,7 @@ def _terminal_arguments(
     resolved_outcome = outcome or AgentOutcome(
         task_attempt_id=attempt.task_attempt_id,
         completed_at=NOW,
-        word_count=9,
+        result_data={"word_count": 9},
     )
     return {
         "environment": "local-development",
@@ -207,7 +207,7 @@ def _terminal_arguments(
         "capability_version": attempt.selection.capability_version,
         "result_text": (
             "the quick brown fox jumps over the lazy dog"
-            if resolved_outcome.word_count is not None
+            if resolved_outcome.result_data is not None
             else None
         ),
         "agent_evidence_component": attempt.selection.implementation_identity,
@@ -432,5 +432,5 @@ def test_submission_then_terminal_completion_end_to_end() -> None:
     final = _run(persistence.get(submission.workflow_id))
     assert final is not None and final.state is not None
     assert final.state.value == "COMPLETED"
-    assert final.result is not None and final.result.word_count == 9
+    assert final.result is not None and final.result.result_data == {"word_count": 9}
     assert len(persistence.audit_records) == 2

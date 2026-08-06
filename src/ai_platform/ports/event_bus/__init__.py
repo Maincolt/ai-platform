@@ -35,13 +35,21 @@ class TransportHeader:
 
 @dataclass(frozen=True, slots=True)
 class OutboundMessage:
-    """One already validated immutable message prepared by an outbox."""
+    """One already validated immutable message prepared by an outbox.
+
+    `capability_name` is explicit routing metadata (ADR-0014 Section 6):
+    when set on a `TASK_COMMANDS` message, the adapter resolves the
+    capability-scoped physical topic instead of a single shared one. `None`
+    for logical channels that are not capability-scoped (task-outcomes has
+    none today) and is ignored by the adapter in that case.
+    """
 
     logical_channel: LogicalChannel
     message_id: str
     ordering_key: str
     value: bytes
     headers: tuple[TransportHeader, ...] = ()
+    capability_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

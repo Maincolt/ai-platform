@@ -127,9 +127,28 @@ class CompletedAgentWork:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderCallUsageRecord:
+    """Durable, redacted usage evidence for one resolved provider call
+    (ADR-0014 Section 3).
+
+    Attached to the outcome commit, never surfaced on the public API --
+    the public `result` payload comes only from `AgentOutcome.result_data`
+    (ADR-0015), consistent with ADR-0010's internal-evidence/
+    public-disclosure separation.
+    """
+
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class AgentOutcomeCommitIntent:
     completed_work: CompletedAgentWork
     audit: AuditRecord
+    usage: ProviderCallUsageRecord | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,11 +157,55 @@ class AgentOutcomeCommitResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderCallClaimIntent:
+    """A durable pre-call claim for a non-deterministic, provider-backed
+    execution step (ADR-0014 Section 5).
+
+    Recorded before the AI Router is invoked so a crash between claiming
+    and receiving a provider response is detectable on redelivery --
+    unlike `text.word-count`'s safe-to-recompute model, a redelivered
+    command must never blindly re-call the provider.
+    """
+
+    task_attempt_id: TaskAttemptId
+    command_message_id: MessageId
+    command_digest: str
+    claimed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingProviderCallClaim:
+    command_message_id: MessageId
+    command_digest: str
+    claimed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCallClaimResult:
+    created: bool
+    """True when this call durably recorded a new claim and the caller may
+    proceed to invoke the provider. False when a claim for this
+    `task_attempt_id` already existed -- the caller must not call the
+    provider again; see `existing` to classify the redelivery."""
+    existing: ExistingProviderCallClaim | None
+
+
 class AgentOutcomeTransactionPort(Protocol):
     async def get_completed(self, task_attempt_id: TaskAttemptId) -> CompletedAgentWork | None: ...
 
     async def commit_outcome(self, intent: AgentOutcomeCommitIntent) -> AgentOutcomeCommitResult:
-        """Atomically commit receipt, outcome, event outbox, and audit."""
+        """Atomically commit receipt, outcome, event outbox, audit, and usage."""
+        ...
+
+    async def claim_provider_call(self, intent: ProviderCallClaimIntent) -> ProviderCallClaimResult:
+        """Durably record a pre-call claim (ADR-0014 Section 5).
+
+        Called only by Agents with a non-deterministic, provider-backed
+        execution step, before invoking the AI Router. `text.word-count`
+        never calls this -- its execution is deterministic and free to
+        recompute, so it has no claim to make.
+        """
         ...
 
 

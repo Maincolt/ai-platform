@@ -1,6 +1,9 @@
 """Internal async SQL helpers for workflow snapshots and transition history."""
 
 from datetime import datetime
+from typing import cast
+
+from psycopg.types.json import Jsonb
 
 from ai_platform.adapters.persistence.connection import AsyncDbConnection
 from ai_platform.orchestrator.domain.audit import AuditRecord
@@ -27,7 +30,7 @@ async def select_workflow(
         await connection.execute(
             """
             SELECT workflow_id, request_id, correlation_id, state, revision,
-                   result_word_count, failure_code, failure_detail
+                   result_data, failure_code, failure_detail
             FROM orchestrator.workflows WHERE workflow_id = %s
             """
             + lock,
@@ -63,7 +66,7 @@ async def insert_workflow(
         """
         INSERT INTO orchestrator.workflows (
             workflow_id, request_id, correlation_id, state, revision,
-            result_word_count, failure_code, failure_detail, created_at, updated_at
+            result_data, failure_code, failure_detail, created_at, updated_at
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
@@ -72,7 +75,7 @@ async def insert_workflow(
             workflow.correlation_id,
             workflow.state.value,
             workflow.revision,
-            workflow.result.word_count if workflow.result else None,
+            Jsonb(dict(workflow.result.result_data)) if workflow.result else None,
             workflow.failure.code if workflow.failure else None,
             workflow.failure.detail if workflow.failure else None,
             workflow.history[0].occurred_at,
@@ -107,14 +110,14 @@ async def update_workflow(
     result = await connection.execute(
         """
         UPDATE orchestrator.workflows
-        SET state = %s, revision = %s, result_word_count = %s,
+        SET state = %s, revision = %s, result_data = %s,
             failure_code = %s, failure_detail = %s, updated_at = %s
         WHERE workflow_id = %s AND revision = %s
         """,
         (
             workflow.state.value,
             workflow.revision,
-            workflow.result.word_count if workflow.result else None,
+            Jsonb(dict(workflow.result.result_data)) if workflow.result else None,
             workflow.failure.code if workflow.failure else None,
             workflow.failure.detail if workflow.failure else None,
             latest.occurred_at,
@@ -182,7 +185,7 @@ def workflow_from_rows(row: tuple[object, ...], history_rows: list[tuple[object,
         revision=_int(row[4]),
     )
     if row[5] is not None:
-        workflow.result = WorkflowResult(word_count=_int(row[5]))
+        workflow.result = WorkflowResult(result_data=_json_object(row[5]))
     if row[6] is not None:
         workflow.failure = WorkflowFailure(code=str(row[6]), detail=str(row[7] or ""))
     workflow.history = []
@@ -206,3 +209,9 @@ def _int(value: object) -> int:
     if not isinstance(value, int):
         raise PermanentPersistenceError("Stored numeric data is invalid.")
     return value
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise PermanentPersistenceError("Stored workflow result data is invalid.")
+    return cast(dict[str, object], value)

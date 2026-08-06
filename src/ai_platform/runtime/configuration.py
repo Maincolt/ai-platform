@@ -195,6 +195,12 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
     publisher_instance_id: str
     command_consumer_group_id: str
     command_logical_subscription_id: str
+    ai_router_anthropic_api_key: SecretFileReference | None
+    ai_router_anthropic_model: str | None
+    ai_router_openai_api_key: SecretFileReference | None
+    ai_router_openai_model: str | None
+    ai_router_max_output_tokens: int | None
+    ai_router_provider_timeout_seconds: float | None
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None) -> AgentRuntimeConfig:
@@ -254,6 +260,24 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
             ),
             command_logical_subscription_id=_required(
                 values, "AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID"
+            ),
+            ai_router_anthropic_api_key=_optional_secret(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE"
+            ),
+            ai_router_anthropic_model=_optional_str(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL"
+            ),
+            ai_router_openai_api_key=_optional_secret(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE"
+            ),
+            ai_router_openai_model=_optional_str(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL"
+            ),
+            ai_router_max_output_tokens=_optional_int(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS", 1, 32_000
+            ),
+            ai_router_provider_timeout_seconds=_optional_float(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS", 0.1, 300.0
             ),
         )
 
@@ -366,3 +390,33 @@ def _optional_path(values: Mapping[str, str], name: str) -> Path | None:
     if not value.strip():
         raise RuntimeConfigurationError(f"EMPTY_CONFIGURATION:{name}")
     return Path(value.strip())
+
+
+def _optional_str(values: Mapping[str, str], name: str) -> str | None:
+    value = values.get(name)
+    if value is None:
+        return None
+    if not value.strip():
+        raise RuntimeConfigurationError(f"EMPTY_CONFIGURATION:{name}")
+    return value.strip()
+
+
+def _optional_secret(values: Mapping[str, str], name: str) -> SecretFileReference | None:
+    path = _optional_path(values, name)
+    return None if path is None else SecretFileReference(path)
+
+
+def _optional_int(values: Mapping[str, str], name: str, minimum: int, maximum: int) -> int | None:
+    value = values.get(name)
+    if value is None:
+        return None
+    return _bounded_int(values, name, minimum, maximum)
+
+
+def _optional_float(
+    values: Mapping[str, str], name: str, minimum: float, maximum: float
+) -> float | None:
+    value = values.get(name)
+    if value is None:
+        return None
+    return _bounded_float(values, name, minimum, maximum)

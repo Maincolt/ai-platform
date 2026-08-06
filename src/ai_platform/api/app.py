@@ -64,7 +64,7 @@ def _effective_correlation_id(request: Request) -> CorrelationId:
 def _result_model(workflow: Workflow) -> WorkflowResultModel | None:
     if workflow.result is None:
         return None
-    return WorkflowResultModel(word_count=workflow.result.word_count)
+    return WorkflowResultModel(**workflow.result.result_data)
 
 
 def _failure_model(workflow: Workflow) -> WorkflowFailureModel | None:

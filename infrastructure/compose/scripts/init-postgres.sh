@@ -105,4 +105,34 @@ PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
     -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
     -f /sql/migrations/0002_agent_schema.sql
 
+echo "Applying orchestrator migration 0003 as ${MIGRATOR_LOGIN[orchestrator]}..."
+PGPASSWORD="$(cat "${MIGRATOR_SECRET[orchestrator]}")" psql -v ON_ERROR_STOP=1 \
+    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[orchestrator]}" -d "${PGDATABASE}" \
+    -c "SET ROLE ${MIGRATION_ROLE[orchestrator]};" \
+    -f /sql/migrations/0003_orchestrator_generalize_result.sql
+
+echo "Applying agent migration 0004 as ${MIGRATOR_LOGIN[agent]}..."
+PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
+    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
+    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
+    -f /sql/migrations/0004_agent_generalize_result.sql
+
+echo "Applying orchestrator migration 0005 as ${MIGRATOR_LOGIN[orchestrator]}..."
+PGPASSWORD="$(cat "${MIGRATOR_SECRET[orchestrator]}")" psql -v ON_ERROR_STOP=1 \
+    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[orchestrator]}" -d "${PGDATABASE}" \
+    -c "SET ROLE ${MIGRATION_ROLE[orchestrator]};" \
+    -f /sql/migrations/0005_orchestrator_command_capability_routing.sql
+
+echo "Applying agent migration 0006 as ${MIGRATOR_LOGIN[agent]}..."
+PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
+    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
+    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
+    -f /sql/migrations/0006_agent_command_capability_routing.sql
+
+echo "Applying agent migration 0007 as ${MIGRATOR_LOGIN[agent]}..."
+PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
+    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
+    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
+    -f /sql/migrations/0007_agent_provider_call_claims.sql
+
 echo "PostgreSQL bootstrap complete."

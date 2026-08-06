@@ -94,8 +94,8 @@ def test_platform_configuration_requires_explicit_local_policy_opt_in() -> None:
         PlatformRuntimeConfig.from_environment(values)
 
 
-def test_agent_configuration_is_separate_and_loopback_bound() -> None:
-    values = {
+def _agent_values() -> dict[str, str]:
+    return {
         "AI_PLATFORM_ENVIRONMENT": "development",
         "AI_PLATFORM_AGENT_DATABASE_DSN_FILE": "secrets/agent-dsn",
         "AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS": "event-bus:9092",
@@ -135,10 +135,62 @@ def test_agent_configuration_is_separate_and_loopback_bound() -> None:
         "AI_PLATFORM_AGENT_COMMAND_CONSUMER_GROUP_ID": "test-agent-commands",
         "AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID": "test-agent-commands-v1",
     }
-    config = AgentRuntimeConfig.from_environment(values)
+
+
+def test_agent_configuration_is_separate_and_loopback_bound() -> None:
+    config = AgentRuntimeConfig.from_environment(_agent_values())
     assert config.maximum_concurrency == 4
     assert config.kafka_producer_username == "agent-producer"
     assert config.kafka_consumer_username == "agent-consumer"
+
+
+def test_agent_configuration_ai_router_fields_are_absent_by_default() -> None:
+    config = AgentRuntimeConfig.from_environment(_agent_values())
+    assert config.ai_router_anthropic_api_key is None
+    assert config.ai_router_anthropic_model is None
+    assert config.ai_router_openai_api_key is None
+    assert config.ai_router_openai_model is None
+    assert config.ai_router_max_output_tokens is None
+    assert config.ai_router_provider_timeout_seconds is None
+
+
+def test_agent_configuration_accepts_full_ai_router_configuration() -> None:
+    values = _agent_values()
+    values.update(
+        {
+            "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE": "secrets/anthropic-key",
+            "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL": "claude-sonnet-test",
+            "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE": "secrets/openai-key",
+            "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL": "gpt-test",
+            "AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS": "512",
+            "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS": "10.5",
+        }
+    )
+    config = AgentRuntimeConfig.from_environment(values)
+    assert config.ai_router_anthropic_api_key is not None
+    assert config.ai_router_anthropic_api_key.path == Path("secrets/anthropic-key")
+    assert config.ai_router_anthropic_model == "claude-sonnet-test"
+    assert config.ai_router_openai_api_key is not None
+    assert config.ai_router_openai_api_key.path == Path("secrets/openai-key")
+    assert config.ai_router_openai_model == "gpt-test"
+    assert config.ai_router_max_output_tokens == 512
+    assert config.ai_router_provider_timeout_seconds == 10.5
+
+
+def test_agent_configuration_accepts_partial_ai_router_configuration() -> None:
+    values = _agent_values()
+    values["AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL"] = "claude-sonnet-test"
+    config = AgentRuntimeConfig.from_environment(values)
+    assert config.ai_router_anthropic_model == "claude-sonnet-test"
+    assert config.ai_router_anthropic_api_key is None
+    assert config.ai_router_openai_model is None
+
+
+def test_agent_configuration_rejects_out_of_range_max_output_tokens() -> None:
+    values = _agent_values()
+    values["AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS"] = "0"
+    with pytest.raises(RuntimeConfigurationError, match="OUT_OF_RANGE"):
+        AgentRuntimeConfig.from_environment(values)
 
 
 def test_secret_file_reference_never_accepts_an_empty_value(tmp_path: Path) -> None:

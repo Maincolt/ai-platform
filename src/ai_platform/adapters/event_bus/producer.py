@@ -6,9 +6,13 @@ from time import monotonic
 from confluent_kafka import KafkaError, KafkaException, Message, Producer
 
 from ai_platform.adapters.event_bus.security import KafkaSecurityConfig
-from ai_platform.adapters.event_bus.topics import KafkaTopicMapping
+from ai_platform.adapters.event_bus.topics import (
+    KafkaTopicMapping,
+    command_topic_binding_for_capability,
+)
 from ai_platform.ports.event_bus import (
     EventBusOperationError,
+    LogicalChannel,
     OutboundMessage,
     PublicationDisposition,
     PublicationResult,
@@ -26,6 +30,7 @@ class KafkaEventPublisher:
         client_id: str,
         topic_mapping: KafkaTopicMapping,
         security: KafkaSecurityConfig,
+        environment: str | None = None,
     ) -> None:
         client_config: dict[str, object] = {
             "bootstrap.servers": bootstrap_servers,
@@ -42,6 +47,7 @@ class KafkaEventPublisher:
         except ValueError:
             raise EventBusOperationError("PRODUCER_CONFIG_INVALID", retryable=False) from None
         self._topic_mapping = topic_mapping
+        self._environment = environment
         self._operation_lock = Lock()
         self._stopping = Event()
 
@@ -77,7 +83,7 @@ class KafkaEventPublisher:
 
             try:
                 self._producer.produce(
-                    self._topic_mapping.topic_for(message.logical_channel),
+                    self._resolve_topic(message),
                     key=message.ordering_key.encode("utf-8"),
                     value=message.value,
                     headers=[(header.name, header.value) for header in message.headers],
@@ -114,6 +120,23 @@ class KafkaEventPublisher:
             return self._not_accepted("DELIVERY_REJECTED", retryable=error.retriable())
         finally:
             self._operation_lock.release()
+
+    def _resolve_topic(self, message: OutboundMessage) -> str:
+        """Capability-scoped task-commands routing (ADR-0014 Section 6).
+
+        Falls back to the single configured topic when no capability hint
+        is present (task-outcomes, or a task-commands message published
+        without one) -- backward compatible with the pre-ADR-0014 shape.
+        """
+        if message.logical_channel is LogicalChannel.TASK_COMMANDS and message.capability_name:
+            if self._environment is None:
+                raise EventBusOperationError(
+                    "CAPABILITY_ROUTING_REQUIRES_ENVIRONMENT", retryable=False
+                )
+            return command_topic_binding_for_capability(
+                environment=self._environment, capability_name=message.capability_name
+            ).topic
+        return self._topic_mapping.topic_for(message.logical_channel)
 
     @staticmethod
     def _not_accepted(reason_code: str, *, retryable: bool) -> PublicationResult:

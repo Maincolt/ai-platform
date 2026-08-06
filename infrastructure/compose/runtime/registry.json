@@ -1,5 +1,5 @@
 {
-  "revision": "local-compose-1",
+  "revision": "local-compose-2",
   "bindings": [
     {
       "capability_name": "text.word-count",
@@ -12,6 +12,20 @@
       "implementation_identity": "local-compose-test-agent",
       "implementation_version": "1.0",
       "deployment_declaration_digest": "sha256:local-compose-declaration",
+      "environment": "development",
+      "enabled": true
+    },
+    {
+      "capability_name": "text.summarize",
+      "capability_version": "1.0",
+      "command_contract_name": "ExecuteTask",
+      "command_contract_versions": ["1.0"],
+      "event_contract_names": ["TaskCompleted", "TaskFailed"],
+      "event_contract_versions": ["1.0", "1.0"],
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-abcdef987654",
+      "implementation_identity": "local-compose-summarize-agent",
+      "implementation_version": "1.0",
+      "deployment_declaration_digest": "sha256:local-compose-summarize-declaration",
       "environment": "development",
       "enabled": true
     }

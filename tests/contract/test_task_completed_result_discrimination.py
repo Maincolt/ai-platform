@@ -1,0 +1,80 @@
+"""Verify TaskCompleted's `payload.result` discrimination (ADR-0015 Section 1).
+
+`task_completed.schema.json` validates `payload.result`'s internal shape via
+an `allOf`/`if`/`then` pair keyed on `payload.capability`: `text.word-count`
+requires `{"word_count": integer}`, `text.summarize` requires
+`{"summary": string}`, and each capability's result must not accidentally
+validate against the other's branch (ADR-0015 Testing Strategy).
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from jsonschema import Draft202012Validator, ValidationError
+
+CONTRACTS_ROOT = Path(__file__).resolve().parents[2] / "contracts"
+JSON_SCHEMA_DIR = CONTRACTS_ROOT / "json-schema" / "v1"
+EXAMPLES_DIR = CONTRACTS_ROOT / "examples" / "v1"
+
+TASK_COMPLETED_SCHEMA = json.loads(
+    (JSON_SCHEMA_DIR / "task_completed.schema.json").read_text(encoding="utf-8")
+)
+BASE_EXAMPLE: dict[str, Any] = json.loads(
+    (EXAMPLES_DIR / "task_completed.example.json").read_text(encoding="utf-8")
+)
+
+
+def _validator() -> Draft202012Validator:
+    return Draft202012Validator(TASK_COMPLETED_SCHEMA)
+
+
+def _message(*, capability: str, result: dict[str, object]) -> dict[str, Any]:
+    message = copy.deepcopy(BASE_EXAMPLE)
+    message["payload"]["capability"] = capability
+    message["payload"]["result"] = result
+    return message
+
+
+def test_word_count_result_validates_against_word_count_branch() -> None:
+    message = _message(capability="text.word-count", result={"word_count": 9})
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_summarize_result_validates_against_summarize_branch() -> None:
+    message = _message(capability="text.summarize", result={"summary": "a short summary"})
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_word_count_capability_missing_word_count_is_rejected() -> None:
+    message = _message(capability="text.word-count", result={"summary": "not a word count"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_summarize_capability_missing_summary_is_rejected() -> None:
+    message = _message(capability="text.summarize", result={"word_count": 9})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_word_count_result_does_not_accept_the_other_capabilitys_extra_field() -> None:
+    message = _message(capability="text.word-count", result={"word_count": 9, "summary": "extra"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_summarize_result_does_not_accept_the_other_capabilitys_extra_field() -> None:
+    message = _message(capability="text.summarize", result={"summary": "ok", "word_count": 9})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_unrecognized_capability_is_rejected() -> None:
+    message = _message(capability="text.unknown", result={"word_count": 9})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]

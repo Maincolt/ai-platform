@@ -48,7 +48,11 @@ from ai_platform.ports.persistence.transactions import (
     AgentOutcomeCommitResult,
     CompletedAgentWork,
     DeadlinePersistenceDisposition,
+    ExistingProviderCallClaim,
     ExpiredAttempt,
+    ProviderCallClaimIntent,
+    ProviderCallClaimResult,
+    ProviderCallUsageRecord,
     SubmissionCommitIntent,
     SubmissionCommitResult,
     TerminalOutcomeCommitResult,
@@ -389,9 +393,9 @@ class InMemoryOrchestratorPersistence:
                 )
 
             transitioned = copy.deepcopy(workflow)
-            if intent.outcome.word_count is not None:
+            if intent.outcome.result_data is not None:
                 transitioned.complete(
-                    WorkflowResult(word_count=intent.outcome.word_count),
+                    WorkflowResult(result_data=intent.outcome.result_data),
                     occurred_at=intent.occurred_at,
                 )
             else:
@@ -545,7 +549,7 @@ class InMemoryOrchestratorPersistence:
             and intent.agent_evidence_instance_id != str(selection.agent_id)
         ):
             return False
-        if intent.outcome.word_count is None:
+        if intent.outcome.result_data is None:
             return intent.result_text is None
         if intent.result_text is None:
             return False
@@ -573,11 +577,27 @@ class InMemoryAgentPersistence:
     completed_work: dict[TaskAttemptId, CompletedAgentWork] = field(default_factory=dict)
     event_outbox: dict[MessageId, AgentEventOutboxRecord] = field(default_factory=dict)
     audit_records: list[AuditRecord] = field(default_factory=list)
+    provider_call_claims: dict[TaskAttemptId, ExistingProviderCallClaim] = field(
+        default_factory=dict
+    )
+    provider_call_usage: dict[TaskAttemptId, ProviderCallUsageRecord] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def get_completed(self, task_attempt_id: TaskAttemptId) -> CompletedAgentWork | None:
         async with self._lock:
             return self.completed_work.get(task_attempt_id)
+
+    async def claim_provider_call(self, intent: ProviderCallClaimIntent) -> ProviderCallClaimResult:
+        async with self._lock:
+            existing = self.provider_call_claims.get(intent.task_attempt_id)
+            if existing is not None:
+                return ProviderCallClaimResult(created=False, existing=existing)
+            self.provider_call_claims[intent.task_attempt_id] = ExistingProviderCallClaim(
+                command_message_id=intent.command_message_id,
+                command_digest=intent.command_digest,
+                claimed_at=intent.claimed_at,
+            )
+            return ProviderCallClaimResult(created=True, existing=None)
 
     async def commit_outcome(self, intent: AgentOutcomeCommitIntent) -> AgentOutcomeCommitResult:
         work = intent.completed_work
@@ -595,6 +615,8 @@ class InMemoryAgentPersistence:
             self.completed_work[attempt_id] = work
             self.event_outbox[work.event_outbox.message_id] = work.event_outbox
             self.audit_records.append(copy.deepcopy(intent.audit))
+            if intent.usage is not None:
+                self.provider_call_usage[attempt_id] = intent.usage
             return AgentOutcomeCommitResult(completed_work=work, created=True)
 
     def _validate_agent_outcome(self, intent: AgentOutcomeCommitIntent) -> None:
@@ -647,7 +669,7 @@ class InMemoryAgentPersistence:
             and existing_receipt.command_message_id == candidate_receipt.command_message_id
             and existing_receipt.command_digest == candidate_receipt.command_digest
             and existing_outcome.task_attempt_id == candidate_outcome.task_attempt_id
-            and existing_outcome.word_count == candidate_outcome.word_count
+            and existing_outcome.result_data == candidate_outcome.result_data
             and existing_outcome.failure_code == candidate_outcome.failure_code
             and existing_outcome.summary == candidate_outcome.summary
             and existing_event.workflow_id == candidate_event.workflow_id

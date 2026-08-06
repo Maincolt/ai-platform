@@ -26,6 +26,8 @@ from ai_platform.ports.persistence.transactions import (
     AgentOutcomeCommitIntent,
     AgentOutcomeCommitResult,
     CompletedAgentWork,
+    ProviderCallClaimIntent,
+    ProviderCallClaimResult,
 )
 from ai_platform.shared.identifiers import (
     AgentId,
@@ -113,7 +115,7 @@ def _completed_work(
         outcome=AgentOutcome(
             task_attempt_id=TaskAttemptId(outcome_attempt_id or task_attempt_id),
             completed_at=NOW,
-            word_count=4,
+            result_data={"word_count": 4},
         ),
         event_outbox=AgentEventOutboxRecord(
             message_id=event_message_id,
@@ -134,7 +136,7 @@ def test_first_execution_completes_and_enqueues_one_event() -> None:
     result = _run(agent.handle(_context(), now=NOW))
 
     assert result.disposition == TestAgentDisposition.COMPLETED
-    assert result.outcome.word_count == 4
+    assert result.outcome.result_data == {"word_count": 4}
     work = persistence.completed_work[TaskAttemptId("attempt-1")]
     assert work.receipt.terminal_event_message_id == work.event_outbox.message_id
     assert work.receipt.completed_at == result.outcome.completed_at
@@ -186,7 +188,7 @@ def test_deadline_already_expired_produces_safe_failure_without_executing() -> N
     )
 
     assert result.disposition == TestAgentDisposition.DEADLINE_EXPIRED_BEFORE_EXECUTION
-    assert result.outcome.word_count is None
+    assert result.outcome.result_data is None
     assert result.outcome.failure_code == "TASK_RESULT_DEADLINE_EXCEEDED"
     work = next(iter(persistence.completed_work.values()))
     assert json.loads(work.event_outbox.payload_bytes)["contract_name"] == "TaskFailed"
@@ -233,6 +235,12 @@ def test_concurrent_duplicate_at_commit_time_resolves_to_one_outcome() -> None:
         ) -> AgentOutcomeCommitResult:
             assert isinstance(intent.audit, AuditRecord)
             return AgentOutcomeCommitResult(completed_work=winning_work, created=False)
+
+        async def claim_provider_call(
+            self, intent: ProviderCallClaimIntent
+        ) -> ProviderCallClaimResult:
+            del intent
+            raise NotImplementedError("text.word-count never claims a provider call")
 
     agent = TestAgent(
         environment="local-development",

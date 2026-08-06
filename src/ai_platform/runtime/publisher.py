@@ -75,6 +75,7 @@ class OutboxPublisherWorker:
             headers=tuple(
                 TransportHeader(name=name, value=value) for name, value in record.headers
             ),
+            capability_name=record.capability_name,
         )
         attempted_at = datetime.now(UTC)
         try:

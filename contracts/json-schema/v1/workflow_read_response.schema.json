@@ -40,15 +40,9 @@
     },
     "result": {
       "type": "object",
-      "description": "Present only when state is COMPLETED.",
-      "additionalProperties": false,
-      "required": ["word_count"],
-      "properties": {
-        "word_count": {
-          "type": "integer",
-          "minimum": 0
-        }
-      }
+      "description": "Present only when state is COMPLETED. Shape is capability-scoped (ADR-0015): e.g. {\"word_count\": integer} for text.word-count, {\"summary\": string} for text.summarize. The caller already knows which capability it submitted.",
+      "additionalProperties": true,
+      "minProperties": 1
     },
     "failure": {
       "type": "object",

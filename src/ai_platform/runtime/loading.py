@@ -72,6 +72,15 @@ def load_registry_artifact(path: Path, *, maximum_bytes: int = 262_144) -> Regis
         raise ArtifactLoadingError("REGISTRY_VALIDATION_FAILED") from None
 
 
+# ADR-0014 Section 6 / ADR-0015: registry.json now carries one binding per
+# built-in Agent class (text.word-count, text.summarize), not exactly one
+# binding overall. Every Agent deployment (test-agent, summarize-agent, ...)
+# points AI_PLATFORM_AGENT_DECLARATION_PATH at the same shared registry.json
+# and selects its own binding by (environment, agent_id, implementation_identity,
+# deployment_declaration_digest) rather than by position/count.
+_SUPPORTED_CAPABILITY_NAMES = frozenset({"text.word-count", "text.summarize"})
+
+
 def load_agent_deployment_declaration(
     path: Path,
     *,
@@ -81,18 +90,22 @@ def load_agent_deployment_declaration(
     declaration_digest: str,
     maximum_bytes: int = 262_144,
 ) -> tuple[str, CapabilityBinding]:
-    """Load one Git-owned declaration and match it to built-in Agent metadata."""
+    """Load one Git-owned declaration and match it to one Agent deployment's metadata."""
     snapshot = load_registry_artifact(path, maximum_bytes=maximum_bytes)
-    if len(snapshot.bindings) != 1:
-        raise ArtifactLoadingError("AGENT_DECLARATION_REQUIRES_ONE_BINDING")
-    binding = snapshot.bindings[0]
+    # Select by agent_id, not position/count: each Agent deployment declares
+    # its own agent_id, which is expected to identify exactly one binding in
+    # the shared registry.json regardless of how many other Agent classes'
+    # bindings are also present.
+    candidates = [candidate for candidate in snapshot.bindings if candidate.agent_id == agent_id]
+    if len(candidates) != 1:
+        raise ArtifactLoadingError("AGENT_DECLARATION_REQUIRES_EXACTLY_ONE_BINDING_FOR_AGENT_ID")
+    binding = candidates[0]
     expected = (
         binding.environment == environment
-        and binding.agent_id == agent_id
         and binding.implementation_identity == implementation_identity
         and binding.deployment_declaration_digest == declaration_digest
         and binding.enabled
-        and binding.capability_name == "text.word-count"
+        and binding.capability_name in _SUPPORTED_CAPABILITY_NAMES
         and binding.capability_version == "1.0"
         and binding.command_contract_name == "ExecuteTask"
         and binding.command_contract_versions == ("1.0",)
