@@ -200,6 +200,53 @@ def test_past_deadline_short_circuits_to_provider_timeout() -> None:
     assert fake_client.chat.completions.calls == []
 
 
+def test_empty_choices_list_is_classified_as_rejected_output() -> None:
+    """Adversarial shape: a well-formed response with no choices at all
+    (not merely a choice with empty/None content)."""
+    completion = ChatCompletion(
+        id="cmpl_1",
+        choices=[],
+        created=0,
+        model="gpt-5",
+        object="chat.completion",
+        usage=CompletionUsage(completion_tokens=0, prompt_tokens=12, total_tokens=12),
+    )
+    adapter = _adapter(completion)
+
+    result = asyncio.run(adapter.complete(_request()))
+
+    assert result.failure_code is AICompletionFailureCode.PROVIDER_REJECTED_OUTPUT
+    assert result.usage is not None
+    assert result.usage.input_tokens == 12
+
+
+def test_missing_usage_defaults_to_zero_rather_than_crashing() -> None:
+    """Adversarial shape: the provider omits `usage` entirely (allowed by
+    the SDK's typed response, e.g. some proxy/gateway deployments)."""
+    completion = ChatCompletion(
+        id="cmpl_1",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content="a concise summary"),
+            )
+        ],
+        created=0,
+        model="gpt-5",
+        object="chat.completion",
+        usage=None,
+    )
+    adapter = _adapter(completion)
+
+    result = asyncio.run(adapter.complete(_request()))
+
+    assert result.output_text == "a concise summary"
+    assert result.usage is not None
+    assert result.usage.input_tokens == 0
+    assert result.usage.output_tokens == 0
+
+
 def test_credential_is_redacted_from_config_repr() -> None:
     config = _config()
 

@@ -194,6 +194,51 @@ def test_past_deadline_short_circuits_to_provider_timeout() -> None:
     assert fake_client.messages.calls == []
 
 
+def test_empty_content_list_is_classified_as_rejected_output() -> None:
+    """Adversarial shape: a well-formed message with no content blocks at
+    all (not merely a text block with an empty string)."""
+    message = anthropic_types.Message(
+        id="msg_1",
+        content=[],
+        model="claude-haiku-4-5",
+        role="assistant",
+        stop_reason="end_turn",
+        stop_sequence=None,
+        type="message",
+        usage=anthropic_types.Usage(input_tokens=12, output_tokens=0),
+    )
+    adapter = _adapter(message)
+
+    result = asyncio.run(adapter.complete(_request()))
+
+    assert result.failure_code is AICompletionFailureCode.PROVIDER_REJECTED_OUTPUT
+    assert result.usage is not None
+    assert result.usage.input_tokens == 12
+
+
+def test_multiple_text_blocks_are_concatenated() -> None:
+    """Adversarial shape: the provider splits its output across more than
+    one text content block instead of returning a single block."""
+    message = anthropic_types.Message(
+        id="msg_1",
+        content=[
+            anthropic_types.TextBlock(type="text", text="first part. "),
+            anthropic_types.TextBlock(type="text", text="second part."),
+        ],
+        model="claude-haiku-4-5",
+        role="assistant",
+        stop_reason="end_turn",
+        stop_sequence=None,
+        type="message",
+        usage=anthropic_types.Usage(input_tokens=12, output_tokens=8),
+    )
+    adapter = _adapter(message)
+
+    result = asyncio.run(adapter.complete(_request()))
+
+    assert result.output_text == "first part. second part."
+
+
 def test_credential_is_redacted_from_config_repr() -> None:
     config = _config()
 
