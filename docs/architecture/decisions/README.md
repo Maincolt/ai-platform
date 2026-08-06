@@ -22,6 +22,7 @@ technical and structural choices.
 | [ADR-0013](ADR-0013-initial-broker-selection-apache-kafka.md) | Initial Broker Selection — Apache Kafka Instead of Redpanda | Accepted |
 | [ADR-0014](ADR-0014-ai-router-and-first-ai-backed-agent.md) | AI Router and the First AI-Backed Agent | Accepted |
 | [ADR-0015](ADR-0015-generic-capability-result-model.md) | Generic Capability Result Model | Accepted |
+| [ADR-0016](ADR-0016-provider-call-claim-reconciliation.md) | Provider Call Claim Reconciliation | Accepted |
 
 ## Naming
 

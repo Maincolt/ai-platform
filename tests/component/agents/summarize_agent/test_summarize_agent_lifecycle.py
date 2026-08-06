@@ -22,6 +22,7 @@ from ai_platform.agents.summarize_agent.errors import (
     CommandIdentityConflictError,
     CommandIntegrityError,
     MissingOutcomeInvariantError,
+    ProviderCallReconciliationPendingError,
 )
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
 from ai_platform.api.inmemory_ports import InMemoryAgentPersistence
@@ -217,7 +218,10 @@ def test_deadline_already_expired_never_claims_or_calls_router() -> None:
     assert payload["contract_name"] == "TaskFailed"
 
 
-def test_redelivery_with_unresolved_matching_claim_fails_with_outcome_unknown() -> None:
+def test_redelivery_with_unresolved_matching_claim_raises_reconciliation_pending() -> None:
+    """ADR-0016: no synthetic outcome is committed for this case -- the
+    exception propagates to the runtime's existing retry-then-quarantine
+    and deadline-expiry mechanisms instead."""
     persistence = InMemoryAgentPersistence()
     persistence.provider_call_claims[TaskAttemptId("attempt-1")] = ExistingProviderCallClaim(
         command_message_id=MessageId("msg-1"),
@@ -226,14 +230,12 @@ def test_redelivery_with_unresolved_matching_claim_fails_with_outcome_unknown() 
     )
     agent, persistence = _build_agent(persistence=persistence)
 
-    result = _run(agent.handle(_context(), now=NOW))
+    with pytest.raises(ProviderCallReconciliationPendingError) as excinfo:
+        _run(agent.handle(_context(), now=NOW))
 
-    assert result.disposition == SummarizeAgentDisposition.PROVIDER_CALL_OUTCOME_UNKNOWN
-    assert result.outcome.failure_code == "PROVIDER_CALL_OUTCOME_UNKNOWN"
+    assert excinfo.value.task_attempt_id == TaskAttemptId("attempt-1")
     # The router (an _UnreachableAIRouter here) would have raised if called.
-    assert persistence.completed_work[TaskAttemptId("attempt-1")].outcome.failure_code == (
-        "PROVIDER_CALL_OUTCOME_UNKNOWN"
-    )
+    assert persistence.completed_work == {}
 
 
 def test_redelivery_with_resolved_outcome_short_circuits_without_new_claim() -> None:

@@ -1,5 +1,5 @@
-"""The Summarize Agent execution lifecycle (ADR-0014 Section 5, mirroring
-`ai_platform.agents.test_agent.agent`'s ordering).
+"""The Summarize Agent execution lifecycle (ADR-0014 Section 5, ADR-0016,
+mirroring `ai_platform.agents.test_agent.agent`'s ordering).
 
 Ordering matches TestAgent's skeleton: resolve any completed receipt first
 (so a redelivered duplicate never gets a different outcome), only then
@@ -14,15 +14,17 @@ real external side effect (ADR-0007 Section 19-20):
 2. A redelivery that finds its own matching claim with no resolved outcome
    is the ADR-0014 Section 5 "unknown outcome" case -- a possibly-already
    -billed, possibly-already-generated completion whose actual result was
-   never durably recorded. ADR-0014 Section 8 Q1 leaves the bounded
-   reconciliation window and operator procedure for this case as an open
-   question, explicitly out of this sprint's scope. Pending that decision,
-   this Agent resolves it immediately and conservatively: commit a FAILED
-   outcome with failure_code `PROVIDER_CALL_OUTCOME_UNKNOWN` rather than
-   silently retrying the provider (which could double-bill/double-generate)
-   or blocking forever waiting for a reconciliation window that does not
-   yet exist. This is a deliberate, documented scoping choice, not an
-   oversight.
+   never durably recorded. Per ADR-0016 (resolving ADR-0014 Section 8 Q1),
+   this is deliberately NOT resolved to a synthetic outcome here: the
+   original attempt may still be genuinely in flight, and committing a
+   synthetic outcome now could race a late-arriving real completion and
+   silently discard it. Instead, `handle()` raises
+   `ProviderCallReconciliationPendingError`, which propagates uncaught to
+   the runtime's `EventConsumerWorker`. That worker's existing
+   retry-then-quarantine path provides the operator-review signal, and the
+   Orchestrator's existing `DeadlineReconciler` provides the bounded
+   reconciliation window (the attempt's own `task_result_deadline`) --
+   both already-Accepted mechanisms, reused rather than duplicated.
 3. A claim with mismatched command identity/digest is real corruption,
    handled exactly like TestAgent's duplicate-resolution conflicts.
 """
@@ -38,6 +40,7 @@ from ai_platform.agents.summarize_agent.errors import (
     CommandIdentityConflictError,
     CommandIntegrityError,
     MissingOutcomeInvariantError,
+    ProviderCallReconciliationPendingError,
 )
 from ai_platform.agents.summarize_agent.ids import IdentifierFactory
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
@@ -63,7 +66,6 @@ from ai_platform.shared.messages import canonical_message_bytes
 from ai_platform.shared.outcomes import AgentOutcome
 
 _DEADLINE_FAILURE_CODE = "TASK_RESULT_DEADLINE_EXCEEDED"
-_PROVIDER_CALL_OUTCOME_UNKNOWN_FAILURE_CODE = "PROVIDER_CALL_OUTCOME_UNKNOWN"
 
 
 class SummarizeAgentDisposition(Enum):
@@ -71,7 +73,6 @@ class SummarizeAgentDisposition(Enum):
     FAILED = "FAILED"
     DUPLICATE_RESOLVED = "DUPLICATE_RESOLVED"
     DEADLINE_EXPIRED_BEFORE_EXECUTION = "DEADLINE_EXPIRED_BEFORE_EXECUTION"
-    PROVIDER_CALL_OUTCOME_UNKNOWN = "PROVIDER_CALL_OUTCOME_UNKNOWN"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,23 +147,13 @@ class SummarizeAgent:
                 if claim.existing.command_digest != context.command_digest:
                     raise CommandIntegrityError(context.command_message_id)
 
-                # ADR-0014 Section 5 / Section 8 Q1: a redelivery found our own
-                # unresolved claim -- a crash between claiming and receiving a
-                # provider response. The bounded reconciliation window and
-                # operator procedure are an explicit open question, not
-                # resolved by this sprint; resolve conservatively now rather
-                # than re-call the provider or block.
-                outcome = AgentOutcome(
-                    task_attempt_id=context.task_attempt_id,
-                    completed_at=now,
-                    failure_code=_PROVIDER_CALL_OUTCOME_UNKNOWN_FAILURE_CODE,
-                    summary=(
-                        "A prior provider call claim for this task attempt has no "
-                        "resolved outcome; the actual provider result is unknown."
-                    ),
-                )
-                disposition = SummarizeAgentDisposition.PROVIDER_CALL_OUTCOME_UNKNOWN
-                usage = None
+                # ADR-0016: a redelivery found our own unresolved claim -- a
+                # crash between claiming and receiving a provider response,
+                # or the original attempt still genuinely in flight. Do not
+                # resolve synthetically; raise and let the runtime's
+                # existing retry-then-quarantine and deadline-expiry
+                # mechanisms handle it (see module docstring).
+                raise ProviderCallReconciliationPendingError(context.task_attempt_id)
             else:
                 completion = await self._ai_router.complete(
                     AICompletionRequest(
