@@ -66,3 +66,25 @@ class MissingOutcomeInvariantError(SummarizeAgentError):
             f"task_attempt_id {task_attempt_id} has a completed receipt but no outcome; "
             "this violates the receipt/outcome atomicity invariant"
         )
+
+
+class ProviderCallReconciliationPendingError(SummarizeAgentError):
+    """A redelivery found this Agent's own unresolved provider-call claim
+    (ADR-0016).
+
+    Deliberately not resolved to a synthetic outcome: the original attempt
+    may still be genuinely in flight. Raising lets the existing
+    `EventConsumerWorker` retry-then-quarantine path (`DeliveryHandlingDisposition
+    .RETRYABLE`) and the Orchestrator's existing `DeadlineReconciler` --
+    both already Accepted infrastructure -- provide the bounded
+    reconciliation window and operator-review signal ADR-0014 Section 8
+    Q1 asked for, without inventing a synthetic outcome that could race a
+    late-arriving real completion.
+    """
+
+    def __init__(self, task_attempt_id: TaskAttemptId) -> None:
+        self.task_attempt_id = task_attempt_id
+        super().__init__(
+            f"task_attempt_id {task_attempt_id} has an unresolved provider call claim; "
+            "not re-calling the provider or resolving synthetically (ADR-0016)"
+        )

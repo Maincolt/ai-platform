@@ -177,6 +177,32 @@ def test_valid_command_is_executed_after_target_and_key_validation() -> None:
     asyncio.run(run())
 
 
+def test_executor_exception_propagates_uncaught() -> None:
+    """ADR-0016 relies on this: `SummarizeAgent.handle()` raising
+    `ProviderCallReconciliationPendingError` must reach the runtime's
+    `EventConsumerWorker` (which treats any handler exception as
+    retryable-then-quarantine), not be swallowed or converted here."""
+
+    class _RaisingExecutor:
+        async def handle(self, context: ExecuteTaskContext, *, now: datetime) -> TestAgentResult:
+            del context, now
+            raise ValueError("simulated: unresolved provider call claim")
+
+    async def run() -> None:
+        handler = ExecuteTaskDeliveryHandler(
+            validator=_validator(),
+            executor=_RaisingExecutor(),
+            quarantine=_Quarantine(),
+            expected_orchestrator_component="orchestrator",
+            expected_agent_component="test-agent",
+            expected_agent_id=AGENT_ID,
+        )
+        with pytest.raises(ValueError, match="simulated"):
+            await handler.handle(_delivery(LogicalChannel.TASK_COMMANDS, _command()))
+
+    asyncio.run(run())
+
+
 def test_invalid_message_advances_only_after_durable_quarantine() -> None:
     async def run(confirmed: bool) -> DeliveryHandlingDisposition:
         handler = ExecuteTaskDeliveryHandler(
