@@ -49,7 +49,6 @@ def _platform_values() -> dict[str, str]:
         "AI_PLATFORM_API_PORT": "8080",
         "AI_PLATFORM_LOCAL_POLICY_ENABLED": "true",
         "AI_PLATFORM_REGISTRY_PATH": "config/registry.json",
-        "AI_PLATFORM_AGENT_READINESS_URL": "http://127.0.0.1:8081/health/ready",
         "AI_PLATFORM_READINESS_CREDENTIAL_FILE": "secrets/readiness",
         "AI_PLATFORM_ORCHESTRATOR_INSTANCE_ID": "orchestrator-1",
         "AI_PLATFORM_ORCHESTRATOR_OUTCOME_CONSUMER_GROUP_ID": "orchestrator-outcomes",
@@ -77,13 +76,6 @@ def test_platform_configuration_rejects_nonliteral_or_nonloopback_api_host(host:
     values = _platform_values()
     values["AI_PLATFORM_API_HOST"] = host
     with pytest.raises(RuntimeConfigurationError, match="API_HOST_MUST_BE_LOOPBACK"):
-        PlatformRuntimeConfig.from_environment(values)
-
-
-def test_platform_configuration_rejects_nonloopback_readiness_route() -> None:
-    values = _platform_values()
-    values["AI_PLATFORM_AGENT_READINESS_URL"] = "http://agent:8081/health/ready"
-    with pytest.raises(RuntimeConfigurationError, match="READINESS_URL_MUST_BE_LOOPBACK"):
         PlatformRuntimeConfig.from_environment(values)
 
 
@@ -142,6 +134,26 @@ def test_agent_configuration_is_separate_and_loopback_bound() -> None:
     assert config.maximum_concurrency == 4
     assert config.kafka_producer_username == "agent-producer"
     assert config.kafka_consumer_username == "agent-consumer"
+
+
+def test_agent_configuration_accepts_all_interfaces_readiness_host() -> None:
+    """An Agent not sharing the platform process's network namespace
+    (ADR-0017 Decision 5, e.g. summarize-agent) must bind every interface to
+    be reachable from the platform container over the Compose network --
+    loopback there is only reachable from inside the Agent's own container."""
+    values = _agent_values()
+    values["AI_PLATFORM_AGENT_READINESS_HOST"] = "0.0.0.0"
+    config = AgentRuntimeConfig.from_environment(values)
+    assert config.readiness_host == "0.0.0.0"
+
+
+def test_agent_configuration_rejects_other_nonloopback_readiness_hosts() -> None:
+    values = _agent_values()
+    values["AI_PLATFORM_AGENT_READINESS_HOST"] = "192.168.1.5"
+    with pytest.raises(
+        RuntimeConfigurationError, match="READINESS_HOST_MUST_BE_LOOPBACK_OR_ALL_INTERFACES"
+    ):
+        AgentRuntimeConfig.from_environment(values)
 
 
 def test_agent_configuration_ai_router_fields_are_absent_by_default() -> None:

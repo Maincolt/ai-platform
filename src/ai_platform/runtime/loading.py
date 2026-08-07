@@ -5,6 +5,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import cast
+from urllib.parse import urlsplit
 
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import (
@@ -141,7 +142,29 @@ def _parse_binding(value: object) -> CapabilityBinding:
         deployment_declaration_digest=_required_string(binding, "deployment_declaration_digest"),
         environment=_required_string(binding, "environment"),
         enabled=enabled,
+        readiness_url=_required_readiness_url(binding, "readiness_url"),
     )
+
+
+def _required_readiness_url(document: Mapping[str, object], key: str) -> str:
+    """A binding's own readiness endpoint (ADR-0017 Decision 5).
+
+    Deliberately *not* restricted to a loopback literal, unlike this
+    platform's other locally-exposed endpoints (`runtime/configuration.py`'s
+    API-host/Agent-readiness-host checks): a binding is not necessarily
+    reachable via a shared-network-namespace loopback trick the way
+    `test-agent` is -- `summarize-agent`'s real address is its own Compose
+    service DNS name (`summarize-agent:8100`), never loopback. The
+    Registry artifact is a trusted, Git-owned deployment input (the same
+    trust level as `docker-compose.yml` itself), not a boundary crossed by
+    untrusted input, so only well-formedness (an `http(s)` scheme with a
+    hostname) is validated here, not reachability topology.
+    """
+    value = _required_string(document, key)
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ArtifactLoadingError(f"REGISTRY_BINDING_READINESS_URL_MALFORMED:{key}")
+    return value
 
 
 def _required_string(document: Mapping[str, object], key: str) -> str:

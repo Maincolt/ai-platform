@@ -252,13 +252,13 @@ them being resolved unilaterally:
 - **Model allowlist**: formalized (`claude-haiku-4-5`,
   `gpt-5-mini`), to be enforced at startup by `_build_ai_router`. Not yet
   implemented -- follow-up PR.
-- **Retry-budget numbers**: Compose defaults raised
-  (`maximum_processing_attempts` 3->5, `retry_delay_seconds` 0.1->2),
-  giving `text.summarize` a ~10-second bounded window before a genuinely
-  in-flight provider call gets quarantined, instead of ~0.3 seconds. The
-  shared-config architecture limitation ADR-0016 already flagged (one
-  value across every consumer, not per-capability) remains open --
-  raising the default is a compromise, not a fix.
+- **Retry-budget numbers**: Compose `retry_delay_seconds` raised 0.5->2
+  (attempts stay at 5), giving `text.summarize` a ~10-second bounded
+  window before a genuinely in-flight provider call gets quarantined,
+  instead of ~2.5 seconds. The shared-config architecture limitation
+  ADR-0016 already flagged (one value across every consumer, not
+  per-capability) remains open -- raising the default is a compromise,
+  not a fix.
 
 Also resolved, though not one of ADR-0014's original five: the
 multi-agent readiness-routing gap this workstream's own finding above
@@ -297,3 +297,78 @@ command/duplicate result/deadline race, not this first-acceptance row.
   serialization, not by coroutine scheduling order in this process.
 
 Both run against the live topology (`67 passed, 2 skipped`, up from `65`).
+
+## ADR-0017 implementation: multi-agent readiness routing (Decision 5)
+
+Implements the fix for the readiness gap workstream 1 found:
+`text.summarize` submissions got `AGENT_TEMPORARILY_UNAVAILABLE` forever
+because the platform could only ever reach one Agent process.
+
+- `CapabilityBinding` gains a `readiness_url: str` field, validated as a
+  well-formed `http(s)` URL with a hostname at Registry-load time
+  (`runtime/loading.py`) -- deliberately *not* loopback-only, since
+  `summarize-agent`'s real address is its own Compose service DNS name.
+- `AI_PLATFORM_AGENT_READINESS_URL` removed from `PlatformRuntimeConfig`
+  entirely; `runtime/composition.py`'s `refresh_agent_availability()` now
+  builds one `AgentReadinessClient` per distinct `readiness_url` across
+  the Registry's bindings instead of one shared client, and looks up each
+  binding's own client when refreshing it.
+- `infrastructure/compose/runtime/registry.json` gains a `readiness_url`
+  per binding (`test-agent`: `http://127.0.0.1:8100/health/ready`,
+  unchanged reachability; `summarize-agent`:
+  `http://summarize-agent:8100/health/ready`, its real Compose DNS name).
+
+**A second, deeper bug found while implementing** (not anticipated by the
+ADR text as originally accepted): routing to `summarize-agent:8100` only
+works if something is listening there. `summarize-agent`'s readiness
+server was still bound to `AI_PLATFORM_AGENT_READINESS_HOST=127.0.0.1`
+like every other Agent -- but unlike `test-agent`, it does not share
+platform's network namespace, so a loopback bind is only reachable from
+*inside its own container*. Verified directly: a one-off container on the
+Compose network got `Connection refused` (not a DNS failure) connecting
+to `summarize-agent:8100` before this was fixed. `AgentRuntimeConfig`'s
+loopback-only validation was relaxed to also accept `0.0.0.0` (bind every
+interface), and `summarize-agent`'s Compose service now binds it. Still
+not a public exposure: the Compose network itself is not reachable from
+the host, and every readiness request still requires the shared bearer
+credential. ADR-0017 and `docs/operations/README.md`'s security-limitations
+section were both corrected to describe this accurately (the ADR
+originally said `readiness_url` would be loopback-validated, which turns
+out to be impossible for `summarize-agent`'s real address -- corrected in
+place per this repository's "correct minor errors without changing the
+decision's meaning" ADR-immutability rule).
+
+**Live-verified**, not just unit/component-tested:
+- A one-off `podman run` (not part of the persistent compose lifecycle)
+  confirmed `load_registry_artifact` parses both bindings' distinct
+  `readiness_url` values, and that composition's per-URL client-building
+  logic produces exactly 2 distinct clients from them.
+- The running platform process's own logs show
+  `GET http://127.0.0.1:8100/health/ready` **and**
+  `GET http://summarize-agent:8100/health/ready` both returning `200 OK`
+  in the same refresh cycle.
+- A real `POST /api/v1/workflows` submission for `text.summarize` got
+  `202 DISPATCHED` (workflow/task/attempt/outbox committed) -- previously
+  always `503 AGENT_TEMPORARILY_UNAVAILABLE` regardless of wait time. This
+  is the fix's actual functional proof: the readiness gate that was
+  wrongly blocking every `text.summarize` submission no longer does.
+- `text.word-count` (the capability using the *unchanged* loopback/shared-netns
+  path) continued working throughout, confirming no regression to the
+  already-working case.
+- The full `external_service` suite: `67 passed, 2 skipped` (unchanged).
+- Full local suite: `449 passed`; `ruff check .` and `basedpyright` both
+  clean.
+
+**Not cleanly demonstrated**: the submitted workflow's own completion
+(reaching a real provider-call failure, as originally anticipated) --
+this environment's `platform` container hit the same pre-existing,
+already-documented Windows/Podman restart-latency flakiness repeatedly
+during this session (`PLATFORM_SHUTDOWN_INCOMPLETE`, no application
+exception, consistent with the unexplained host issue
+`PROJECT_BRIEF.md`/`docs/operations/README.md` already describe), which
+interrupted the outbox publisher before the command could reach
+`summarize-agent`, and the workflow reached `FAILED`/
+`TASK_RESULT_DEADLINE_EXCEEDED` instead. This is host instability
+unrelated to the readiness fix, not a flaw in it -- the fix's own claim
+(readiness observed, submission dispatched) is independently verified
+above by direct evidence, not inferred from this workflow's fate.

@@ -22,6 +22,7 @@ def _binding() -> CapabilityBinding:
         deployment_declaration_digest="sha256:abc",
         environment="production",
         enabled=True,
+        readiness_url="http://127.0.0.1:8100/health/ready",
     )
 
 

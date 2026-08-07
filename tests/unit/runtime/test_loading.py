@@ -32,6 +32,7 @@ def _registry_document() -> dict[str, object]:
                 "deployment_declaration_digest": "sha256:declaration",
                 "environment": "development",
                 "enabled": True,
+                "readiness_url": "http://127.0.0.1:8100/health/ready",
             }
         ],
     }
