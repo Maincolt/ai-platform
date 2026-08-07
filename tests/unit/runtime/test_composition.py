@@ -175,17 +175,26 @@ def _fake_server_factory(app: object, host: str, port: int) -> ManagedService:
     return _FakeServer()
 
 
-_kafka_client_calls: list[dict[str, object]] = []
+_kafka_client_calls: dict[str, list[dict[str, object]]] = {}
 
 
-def _recording_kafka_client(config: dict[str, object]) -> MagicMock:
-    _kafka_client_calls.append(config)
-    return MagicMock()
+def _record_kafka_client(target: str) -> Any:
+    def construct(config: dict[str, object]) -> MagicMock:
+        _kafka_client_calls[target].append(config)
+        return MagicMock()
+
+    return construct
 
 
 @pytest.fixture
 def _no_kafka(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
-    """Prevent every composition path from starting a real librdkafka client."""
+    """Prevent every composition path from starting a real librdkafka client.
+
+    Calls are recorded per patched target rather than pooled, so tests can
+    assert which specific collaborator (e.g. the command consumer vs. the
+    quarantine publisher) received which credential -- pooling them into one
+    set would let a producer/consumer credential swap pass unnoticed.
+    """
     _kafka_client_calls.clear()
     for target in (
         "ai_platform.adapters.event_bus.producer.Producer",
@@ -193,9 +202,10 @@ def _no_kafka(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[repor
         "ai_platform.adapters.event_bus.consumer.Consumer",
         "ai_platform.adapters.event_bus.health.AdminClient",
     ):
+        _kafka_client_calls[target] = []
         module_path, class_name = target.rsplit(".", 1)
         module = importlib.import_module(module_path)
-        monkeypatch.setattr(module, class_name, _recording_kafka_client)
+        monkeypatch.setattr(module, class_name, _record_kafka_client(target))
 
 
 _PLACEHOLDER_SCHEMA: dict[str, object] = {"type": "object"}
@@ -375,12 +385,25 @@ def test_build_platform_process_wires_producer_and_consumer_credentials_separate
 
     assert process.registry is registry
     assert process.app_state.registry_loaded is True
-    # Two Kafka clients are constructed for the command-outbox publisher and
-    # the outcome consumer/quarantine publisher; producer and consumer
-    # credentials must never be swapped.
-    usernames = {call["sasl.username"] for call in _kafka_client_calls}
-    assert "orchestrator-producer" in usernames
-    assert "orchestrator-consumer" in usernames
+    # The command-outbox publisher and the broker-health probe must use
+    # producer credentials; the outcome consumer and its quarantine
+    # publisher must use consumer credentials. Checked per collaborator
+    # (not pooled) so a producer/consumer swap cannot pass unnoticed.
+    def _usernames(target: str) -> set[object]:
+        return {call["sasl.username"] for call in _kafka_client_calls[target]}
+
+    assert _usernames("ai_platform.adapters.event_bus.producer.Producer") == {
+        "orchestrator-producer"
+    }
+    assert _usernames("ai_platform.adapters.event_bus.health.AdminClient") == {
+        "orchestrator-producer"
+    }
+    assert _usernames("ai_platform.adapters.event_bus.consumer.Consumer") == {
+        "orchestrator-consumer"
+    }
+    assert _usernames("ai_platform.adapters.event_bus.quarantine.Producer") == {
+        "orchestrator-consumer"
+    }
 
 
 def test_build_platform_process_deadline_reconciler_uses_configured_batch_size(
@@ -450,9 +473,17 @@ def test_build_agent_process_wires_word_count_executor_and_readiness_identity(
     assert snapshot.declaration_revision == "rev-1"
     assert snapshot.capabilities == ((WORD_COUNT_CAPABILITY_NAME, "1.0"),)
     assert snapshot.ready is False
-    usernames = {call["sasl.username"] for call in _kafka_client_calls}
-    assert "agent-producer" in usernames
-    assert "agent-consumer" in usernames
+
+    def _usernames(target: str) -> set[object]:
+        return {call["sasl.username"] for call in _kafka_client_calls[target]}
+
+    # The outcome-outbox publisher and the broker-health probe must use
+    # producer credentials; the command consumer and its quarantine
+    # publisher must use consumer credentials.
+    assert _usernames("ai_platform.adapters.event_bus.producer.Producer") == {"agent-producer"}
+    assert _usernames("ai_platform.adapters.event_bus.health.AdminClient") == {"agent-producer"}
+    assert _usernames("ai_platform.adapters.event_bus.consumer.Consumer") == {"agent-consumer"}
+    assert _usernames("ai_platform.adapters.event_bus.quarantine.Producer") == {"agent-consumer"}
 
 
 def test_build_agent_process_fails_closed_for_unrecognized_declared_capability(
