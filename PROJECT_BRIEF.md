@@ -236,21 +236,36 @@ be introduced starting with the sprint that implements Phase 6
 - Real-topology re-validation of Sprint 9's own infrastructure changes (schema migrations `0003`–`0007`, renamed/capability-scoped Kafka topics, the new `summarize-agent` service) — the topology already running on this host predates them.
 - ADR-0014's five recorded open questions (Section 8): the `PROVIDER_CALL_OUTCOME_UNKNOWN` reconciliation window and operator procedure, exact retry-budget numbers, the approved Claude/OpenAI model list, Orchestrator-level AI Router invocation, and same-provider-vs-cross-provider fallback ordering.
 
-**What's next:**
-- Bring the running local Compose topology up to date with Sprint 9's
-  migrations and Kafka topic changes, then re-run the `external_service`
-  suite and a real `text.summarize` submission end-to-end (it will
-  legitimately fail at the provider call given the placeholder
-  credentials — that failure path is itself worth observing for real).
-- Resolve ADR-0014 Section 8's open questions, starting with the
-  reconciliation-window/operator-procedure design for
-  `PROVIDER_CALL_OUTCOME_UNKNOWN`.
+**What's next (Sprint 10, in progress — see [docs/sprint-10/plan.md](docs/sprint-10/plan.md)):**
+- All five of ADR-0014 Section 8's open questions are now resolved:
+  [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
+  resolved the reconciliation-window/operator-procedure question, and
+  [ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md)
+  resolved the remaining four (Orchestrator-invocation stays out of
+  scope, fallback ordering ratified as already-correct, a model allowlist
+  formalized, retry-budget defaults raised) plus a fifth,
+  ADR-0014-caused gap found along the way: `summarize-agent`'s readiness
+  is never observed by the platform (one fixed readiness URL can only
+  reach one Agent process). ADR-0017's model-allowlist enforcement and
+  the multi-agent readiness-routing fix are Accepted but **not yet
+  implemented** — tracked as follow-up engineering work.
+- The local Compose topology has been brought up to date with Sprint 9's
+  migrations/Kafka topic changes and the `external_service` suite re-run
+  against it (65 passed, 2 skipped — see
+  [docs/sprint-10/progress.md](docs/sprint-10/progress.md)). A real
+  `text.summarize` submission was attempted; it did not reach the
+  provider call at all, surfacing the readiness gap above instead of the
+  anticipated placeholder-credential failure.
+- An ADR-0016 operator runbook now exists
+  (`docs/operations/README.md` Section 5), verified against real
+  live-produced evidence, not written from the code alone.
+- Phase 7's Section 19 matrix continuation has started (Agent
+  selection/readiness wire-contract coverage); most categories remain
+  open — see `docs/sprint-10/progress.md` for the itemized remainder.
 - Obtain real Anthropic/OpenAI credentials for a genuine end-to-end
   provider validation pass, if and when the repository owner wants to
-  pursue it.
-- The remainder of Phase 7's Section 19 matrix remains open too (see
-  [docs/sprint-7/plan.md](docs/sprint-7/plan.md)'s "Out of scope"),
-  independent of the AI Router stream.
+  pursue it — still not done; ADR-0017's model allowlist should land
+  first so a real pass validates the approved models specifically.
 
 ## 9. Security Rules
 
