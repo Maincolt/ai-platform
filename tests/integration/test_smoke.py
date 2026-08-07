@@ -16,11 +16,15 @@ from confluent_kafka.admin import AdminClient
 
 pytestmark = pytest.mark.external_service
 
-# The four ADR-0005 Section 6 topics provisioned by
-# infrastructure/compose/scripts/init-kafka.sh.
+# ADR-0005 Section 6's topic shape, provisioned by
+# infrastructure/compose/scripts/init-kafka.sh. `task-commands` itself is
+# capability-scoped at the physical-topic level since Sprint 9 (ADR-0014
+# Section 6): one pair per built-in capability, not one shared pair.
 _EXPECTED_TOPICS = {
-    "ai-platform.development.task-commands.v1",
-    "ai-platform.development.task-commands.v1.quarantine",
+    "ai-platform.development.task-commands.text-word-count.v1",
+    "ai-platform.development.task-commands.text-word-count.v1.quarantine",
+    "ai-platform.development.task-commands.text-summarize.v1",
+    "ai-platform.development.task-commands.text-summarize.v1.quarantine",
     "ai-platform.development.task-outcomes.v1",
     "ai-platform.development.task-outcomes.v1.quarantine",
 }
@@ -46,7 +50,7 @@ def test_kafka_admin_can_list_adr0005_topics(kafka_admin_client: AdminClient) ->
     topic_names = set(metadata.topics.keys())
     missing = _EXPECTED_TOPICS - topic_names
     assert not missing, (
-        f"Expected ADR-0005 topics missing from Kafka: {missing}. "
+        f"Expected ADR-0005/ADR-0014 topics missing from Kafka: {missing}. "
         "Has 'podman compose up kafka-init' been run "
         "(see infrastructure/README.md)?"
     )

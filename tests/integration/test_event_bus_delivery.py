@@ -47,7 +47,12 @@ from ai_platform.adapters.event_bus.quarantine import (
     KafkaTransportQuarantineCoordinator,
 )
 from ai_platform.adapters.event_bus.security import KafkaSecurityConfig, KafkaSecurityProtocol
-from ai_platform.adapters.event_bus.topics import KafkaTopicMapping, default_topic_mapping
+from ai_platform.adapters.event_bus.topics import (
+    KafkaTopicMapping,
+    TopicBinding,
+    command_topic_binding_for_capability,
+    default_topic_mapping,
+)
 from ai_platform.adapters.persistence.connection import AsyncPsycopgPool
 from ai_platform.adapters.persistence.recovery import PsycopgTransportRejectionTransaction
 from ai_platform.ports.event_bus import (
@@ -80,6 +85,12 @@ _ENVIRONMENT = "development"
 _OVERALL_POLL_BUDGET_SECONDS = 90.0
 _POLL_TIMEOUT_SECONDS = 2.0
 
+# Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
+# (see tests/integration/conftest.py's copy of this same constant/comment).
+_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+
+_WORD_COUNT_CAPABILITY_NAME = "text.word-count"
+
 
 def _new_group_id() -> str:
     return f"sprint7-test-{uuid.uuid4()}"
@@ -92,6 +103,33 @@ def _new_ordering_key() -> str:
 @pytest.fixture(scope="session")
 def topic_mapping() -> KafkaTopicMapping:
     return default_topic_mapping(environment=_ENVIRONMENT)
+
+
+@pytest.fixture(scope="session")
+def word_count_command_topic_mapping() -> KafkaTopicMapping:
+    """TASK_COMMANDS bound to the real capability-scoped topic (ADR-0014 Section 6).
+
+    `KafkaEventConsumer` has no capability-aware fallback the way
+    `KafkaEventPublisher._resolve_topic` does -- it subscribes to whatever
+    `topic_mapping.topic_for(TASK_COMMANDS)` says, so tests that consume
+    TASK_COMMANDS directly need this instead of the plain `topic_mapping`
+    fixture, which still resolves TASK_COMMANDS to the pre-ADR-0014 bare
+    topic no longer provisioned by `init-kafka.sh`.
+    """
+    command_binding = command_topic_binding_for_capability(
+        environment=_ENVIRONMENT, capability_name=_WORD_COUNT_CAPABILITY_NAME
+    )
+    outcomes_topic = f"ai-platform.{_ENVIRONMENT}.{LogicalChannel.TASK_OUTCOMES.value}.v1"
+    return KafkaTopicMapping(
+        (
+            command_binding,
+            TopicBinding(
+                logical_channel=LogicalChannel.TASK_OUTCOMES,
+                topic=outcomes_topic,
+                quarantine_topic=f"{outcomes_topic}.quarantine",
+            ),
+        )
+    )
 
 
 @pytest.fixture(scope="session")
@@ -114,6 +152,14 @@ def _make_publisher(
         client_id=f"sprint7-test-producer-{uuid.uuid4()}",
         topic_mapping=topic_mapping,
         security=kafka_admin_security,
+        # Required for TASK_COMMANDS: `_resolve_topic` only applies
+        # capability-scoped routing (ADR-0014 Section 6) when both this and
+        # the message's `capability_name` are set; otherwise it falls back
+        # to `topic_mapping`'s single shared TASK_COMMANDS entry, which
+        # `default_topic_mapping` still computes as the pre-ADR-0014 bare
+        # topic name -- no longer provisioned by `init-kafka.sh` since
+        # Sprint 9, so publishing without this never gets a delivery report.
+        environment=_ENVIRONMENT,
     )
 
 
@@ -176,13 +222,15 @@ def _find_matching_without_ack(
 
 def test_keyed_ordering_preserves_publish_order_for_same_partition_key(
     kafka_bootstrap_servers: str,
-    topic_mapping: KafkaTopicMapping,
+    word_count_command_topic_mapping: KafkaTopicMapping,
     kafka_admin_security: KafkaSecurityConfig,
 ) -> None:
     ordering_key = _new_ordering_key()
     message_count = 5
 
-    publisher = _make_publisher(kafka_bootstrap_servers, topic_mapping, kafka_admin_security)
+    publisher = _make_publisher(
+        kafka_bootstrap_servers, word_count_command_topic_mapping, kafka_admin_security
+    )
     try:
         for sequence in range(message_count):
             outcome = publisher.publish(
@@ -192,6 +240,7 @@ def test_keyed_ordering_preserves_publish_order_for_same_partition_key(
                     ordering_key=ordering_key,
                     value=f'{{"sequence":{sequence}}}'.encode(),
                     headers=(TransportHeader(name="content-type", value=b"application/json"),),
+                    capability_name=_WORD_COUNT_CAPABILITY_NAME,
                 ),
                 timeout_seconds=10.0,
             )
@@ -201,7 +250,7 @@ def test_keyed_ordering_preserves_publish_order_for_same_partition_key(
 
     consumer = _make_consumer(
         kafka_bootstrap_servers,
-        topic_mapping,
+        word_count_command_topic_mapping,
         kafka_admin_security,
         channel=LogicalChannel.TASK_COMMANDS,
         group_id=_new_group_id(),
@@ -227,7 +276,7 @@ def test_keyed_ordering_preserves_publish_order_for_same_partition_key(
 
 def test_manual_acknowledgment_redelivers_after_crash_before_commit(
     kafka_bootstrap_servers: str,
-    topic_mapping: KafkaTopicMapping,
+    word_count_command_topic_mapping: KafkaTopicMapping,
     kafka_admin_security: KafkaSecurityConfig,
 ) -> None:
     ordering_key = _new_ordering_key()
@@ -235,7 +284,9 @@ def test_manual_acknowledgment_redelivers_after_crash_before_commit(
     marker = f"redelivery-{uuid.uuid4()}".encode()
     group_id = _new_group_id()
 
-    publisher = _make_publisher(kafka_bootstrap_servers, topic_mapping, kafka_admin_security)
+    publisher = _make_publisher(
+        kafka_bootstrap_servers, word_count_command_topic_mapping, kafka_admin_security
+    )
     try:
         outcome = publisher.publish(
             OutboundMessage(
@@ -243,6 +294,7 @@ def test_manual_acknowledgment_redelivers_after_crash_before_commit(
                 message_id=str(uuid.uuid7()),
                 ordering_key=ordering_key,
                 value=marker,
+                capability_name=_WORD_COUNT_CAPABILITY_NAME,
             ),
             timeout_seconds=10.0,
         )
@@ -252,7 +304,7 @@ def test_manual_acknowledgment_redelivers_after_crash_before_commit(
 
     first_consumer = _make_consumer(
         kafka_bootstrap_servers,
-        topic_mapping,
+        word_count_command_topic_mapping,
         kafka_admin_security,
         channel=LogicalChannel.TASK_COMMANDS,
         group_id=group_id,
@@ -271,7 +323,7 @@ def test_manual_acknowledgment_redelivers_after_crash_before_commit(
 
     second_consumer = _make_consumer(
         kafka_bootstrap_servers,
-        topic_mapping,
+        word_count_command_topic_mapping,
         kafka_admin_security,
         channel=LogicalChannel.TASK_COMMANDS,
         group_id=group_id,
@@ -367,7 +419,12 @@ def test_malformed_payload_is_quarantined_through_the_real_runtime_pipeline(
     )
 
     async def _run() -> None:
-        pool = AsyncPsycopgPool(postgres_dsn, component_schema="orchestrator", max_size=2)
+        pool = AsyncPsycopgPool(
+            postgres_dsn,
+            component_schema="orchestrator",
+            expected_schema_version=_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION,
+            max_size=2,
+        )
         await pool.open()
         try:
             rejections = PsycopgTransportRejectionTransaction(pool)

@@ -36,6 +36,18 @@ COMPOSE_DIR = REPO_ROOT / "infrastructure" / "compose"
 SECRETS_DIR = COMPOSE_DIR / "secrets"
 GENERATE_SECRETS_SCRIPT = COMPOSE_DIR / "scripts" / "generate-secrets.sh"
 
+# Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`,
+# which is bumped alongside the latest applied
+# `infrastructure/migrations/*.sql` for each component. A test-side
+# `AsyncPsycopgPool` constructed with a stale value fails closed with
+# PermanentPersistenceError against an up-to-date database, rather than
+# silently reading data through mismatched assumptions -- see Sprint 10's
+# topology re-validation, which caught these three call sites still
+# defaulting to the class's `expected_schema_version=1` default after
+# Sprint 9's migrations 0003-0007 shipped without these being updated.
+EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+EXPECTED_AGENT_SCHEMA_VERSION = 4
+
 # Overridable so this suite can run either from the host (default: the
 # published host ports) or from inside a container attached to the
 # `ai-platform-local_default` compose network (internal service names/ports
@@ -334,8 +346,10 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the four least-privilege application principals
-    provisioned by `infrastructure/compose/scripts/init-kafka.sh`."""
+    """confluent_kafka client configs for the six least-privilege application principals
+    provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four plus
+    the `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added
+    in Sprint 9 for capability-scoped `text-summarize` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -348,5 +362,11 @@ def kafka_principal_client_configs(
         ),
         "agent-consumer": _kafka_principal_client_config(
             "agent-consumer", "kafka_agent_consumer_password.txt"
+        ),
+        "summarize-agent-producer": _kafka_principal_client_config(
+            "summarize-agent-producer", "kafka_summarize_agent_producer_password.txt"
+        ),
+        "summarize-agent-consumer": _kafka_principal_client_config(
+            "summarize-agent-consumer", "kafka_summarize_agent_consumer_password.txt"
         ),
     }

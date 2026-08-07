@@ -65,19 +65,36 @@ pytestmark = pytest.mark.external_service
 _CAPABILITY_NAME = "text.word-count"
 _CAPABILITY_VERSION = "1.0"
 
+# Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
+# (see tests/integration/conftest.py's copy of this same constant/comment).
+_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+_EXPECTED_AGENT_SCHEMA_VERSION = 4
+
 
 def _new_id() -> str:
     return str(uuid.uuid7())
 
 
 async def _open_orchestrator_pool(dsn: str) -> AsyncPsycopgPool:
-    pool = AsyncPsycopgPool(dsn, component_schema="orchestrator", min_size=1, max_size=3)
+    pool = AsyncPsycopgPool(
+        dsn,
+        component_schema="orchestrator",
+        expected_schema_version=_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION,
+        min_size=1,
+        max_size=3,
+    )
     await pool.open()
     return pool
 
 
 async def _open_agent_pool(dsn: str) -> AsyncPsycopgPool:
-    pool = AsyncPsycopgPool(dsn, component_schema="agent", min_size=1, max_size=3)
+    pool = AsyncPsycopgPool(
+        dsn,
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_AGENT_SCHEMA_VERSION,
+        min_size=1,
+        max_size=3,
+    )
     await pool.open()
     return pool
 
