@@ -192,6 +192,50 @@ scoped slice, not a single remaining task):
   both proved the underlying behavior by hand; automating the full
   container lifecycle under pytest remains unstarted).
 
+## Workstream 2: ADR-0016 operator runbook (done)
+
+Added `docs/operations/README.md` Section 5 ("Provider-call outcome
+reconciliation (ADR-0016)"), closing the gap ADR-0016's own "Negative"
+consequences flagged: no operator runbook existed for correlating a
+quarantined `text.summarize` command against an expired workflow by
+`task_attempt_id`. Every command and query in it was run against real,
+live-produced evidence during this session, not written from the code
+alone:
+
+- The Step 1 correlation query (`orchestrator.task_attempts` JOIN
+  `orchestrator.workflows` JOIN `agent.provider_call_claims` LEFT JOIN
+  `agent.completed_receipts`) was verified against a real case: a
+  directly-inserted `DISPATCHED` workflow/task/attempt with an
+  already-past `task_result_deadline` plus a matching unresolved
+  `agent.provider_call_claims` row, expired for real by the *actual*
+  `DeadlineReconciler` running inside `platform-1` (not a test-only code
+  path) -- the query returned exactly that attempt, `workflow_state =
+  FAILED`, `failure_code = TASK_RESULT_DEADLINE_EXCEEDED`.
+- The Step 2 quarantine-envelope inspection (`kafka-console-consumer.sh`
+  against the `.quarantine` topic, decoding `original.bytes_base64`) was
+  verified against a real quarantined message: a deliberately malformed
+  command produced directly to `summarize-agent`'s command topic, which
+  the real running `summarize-agent` container actually quarantined
+  (`agent.transport_rejections` gained a real `MALFORMED_JSON` row); the
+  envelope's `rejection_id` matched that row exactly and the decoded bytes
+  matched what was sent.
+- Synthetic rows inserted for verification were deleted afterward; the one
+  real quarantine event was left in place as genuine historical evidence,
+  consistent with how the rest of this dev topology already accumulates
+  real data.
+
+Not reproduced live: the exact crash race ADR-0016 describes (a redelivery
+finding its *own* unresolved claim, via `ProviderCallReconciliationPendingError`).
+That specific timing window is the same class of fragile, host-dependent
+race `test_recovery.py` already struggles with on this host (see
+workstream 1's findings above); the runbook's correlation procedure is
+verified against realistic real evidence instead, which is what an
+operator actually needs regardless of how the evidence was produced. Also
+added a Section 8 troubleshooting note explaining that `text.summarize`'s
+`503` is not the same transient-cache-lag issue `test-agent` has -- it is
+the structural readiness-URL gap from workstream 1, which waiting does not
+fix.
+
 ## Workstream 4: second Phase 7 slice -- submission idempotency against the real database
 
 Added `tests/integration/test_submission_idempotency.py` (2 tests):
