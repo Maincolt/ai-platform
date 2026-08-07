@@ -272,3 +272,28 @@ marked directly Accepted (not Proposed) per this repository's own ADR
 process note ("Proposed unless the decision has already been explicitly
 accepted") -- the repository owner's answers were the acceptance.
 `PROJECT_BRIEF.md`'s "What's next" section was updated to match.
+
+## Workstream 4: second Phase 7 slice -- submission idempotency against the real database
+
+Added `tests/integration/test_submission_idempotency.py` (2 tests):
+Section 19's "One workflow per complete key" row, specifically the
+persistence-level arbitration mechanism itself
+(`PsycopgOrchestratorPersistence.commit_submission` relying on a real
+PostgreSQL `PRIMARY KEY`/`UNIQUE` constraint on
+`orchestrator.accepted_requests`), which was proven at the component/API
+level with in-memory ports but never against the real constraint that
+actually does the arbitration. `test_concurrency.py` covers duplicate
+command/duplicate result/deadline race, not this first-acceptance row.
+
+- Sequential resubmission of the same `AcceptedRequestKey`: second commit
+  resolves to the first's already-durable workflow (`created=False`,
+  same `workflow_id`), and real row counts confirm exactly one
+  `orchestrator.workflows`/`accepted_requests` row exists between the two
+  candidate identifiers -- the second workflow was never persisted.
+- Concurrent first acceptance (`asyncio.gather`, two separate connection
+  pools): exactly one of the two real, independent commits wins, both
+  results agree on the same winner, and again exactly one workflow row
+  exists -- decided by the real constraint under real transaction
+  serialization, not by coroutine scheduling order in this process.
+
+Both run against the live topology (`67 passed, 2 skipped`, up from `65`).
