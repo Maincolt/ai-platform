@@ -94,7 +94,6 @@ def _platform_env(tmp_path: Path) -> dict[str, str]:
         "AI_PLATFORM_API_PORT": "8080",
         "AI_PLATFORM_LOCAL_POLICY_ENABLED": "true",
         "AI_PLATFORM_REGISTRY_PATH": str(tmp_path / "registry.json"),
-        "AI_PLATFORM_AGENT_READINESS_URL": "http://127.0.0.1:8081/health/ready",
         "AI_PLATFORM_READINESS_CREDENTIAL_FILE": _write_secret(
             tmp_path, "readiness", "readiness-secret"
         ),
@@ -385,6 +384,7 @@ def test_build_platform_process_wires_producer_and_consumer_credentials_separate
 
     assert process.registry is registry
     assert process.app_state.registry_loaded is True
+
     # The command-outbox publisher and the broker-health probe must use
     # producer credentials; the outcome consumer and its quarantine
     # publisher must use consumer credentials. Checked per collaborator
@@ -437,6 +437,7 @@ def _declaration(capability_name: str) -> CapabilityBinding:
         deployment_declaration_digest="sha256:declaration",
         environment="development",
         enabled=True,
+        readiness_url="http://127.0.0.1:8100/health/ready",
     )
 
 

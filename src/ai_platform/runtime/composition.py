@@ -224,17 +224,25 @@ def build_platform_process(
 
     availability = CachedAgentAvailability(ttl_seconds=config.readiness_ttl_seconds)
     readiness_http_client = httpx.AsyncClient()
-    readiness_client: AgentReadinessClient | None = None
+    # One client per distinct readiness_url (ADR-0017 Decision 5): bindings
+    # are not uniformly reachable at the same address, so a single shared
+    # client can no longer serve every binding the way it could when only
+    # one Agent class existed.
+    readiness_clients: dict[str, AgentReadinessClient] = {}
     if registry is None:
         candidate_selector = _UnavailableCandidateSelector()
     else:
-        readiness_client = AgentReadinessClient(
-            client=readiness_http_client,
-            readiness_url=config.readiness_url,
-            credential=config.readiness_credential.read(),
-            cache=availability,
-            timeout_seconds=config.readiness_timeout_seconds,
-        )
+        readiness_credential = config.readiness_credential.read()
+        for binding in registry.bindings:
+            if binding.readiness_url in readiness_clients:
+                continue
+            readiness_clients[binding.readiness_url] = AgentReadinessClient(
+                client=readiness_http_client,
+                readiness_url=binding.readiness_url,
+                credential=readiness_credential,
+                cache=availability,
+                timeout_seconds=config.readiness_timeout_seconds,
+            )
         candidate_selector = RegistryCandidateSelector(
             snapshot=registry,
             availability_port=availability,
@@ -303,12 +311,13 @@ def build_platform_process(
     configure_app_state(app_state)
 
     async def refresh_agent_availability() -> None:
-        if registry is None or readiness_client is None:
+        if registry is None:
             return
         now = datetime.now(UTC)
         for binding in registry.bindings:
             if not binding.enabled:
                 continue
+            readiness_client = readiness_clients[binding.readiness_url]
             await readiness_client.refresh(
                 environment=binding.environment,
                 agent_id=binding.agent_id,

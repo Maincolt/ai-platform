@@ -1,5 +1,5 @@
 {
-  "revision": "local-compose-2",
+  "revision": "local-compose-3",
   "bindings": [
     {
       "capability_name": "text.word-count",
@@ -13,7 +13,8 @@
       "implementation_version": "1.0",
       "deployment_declaration_digest": "sha256:local-compose-declaration",
       "environment": "development",
-      "enabled": true
+      "enabled": true,
+      "readiness_url": "http://127.0.0.1:8100/health/ready"
     },
     {
       "capability_name": "text.summarize",
@@ -27,7 +28,8 @@
       "implementation_version": "1.0",
       "deployment_declaration_digest": "sha256:local-compose-summarize-declaration",
       "environment": "development",
-      "enabled": true
+      "enabled": true,
+      "readiness_url": "http://summarize-agent:8100/health/ready"
     }
   ]
 }

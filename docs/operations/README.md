@@ -450,14 +450,25 @@ production-readiness claim:
   authentication, and no isolation between callers. Never treat this as
   production-ready (see `PROJECT_BRIEF.md` Section 9,
   `docs/architecture/decisions/ADR-0010-security-identity-authorization-and-trust-boundaries.md`).
-- **Loopback-only application exposure** is intentional:
-  `AI_PLATFORM_API_HOST` and the Agent readiness host/URL are validated as
-  loopback literals (`src/ai_platform/runtime/configuration.py`), and
-  `platform`/`test-agent` share one network namespace for exactly this
-  reason. The host-published `8000`/`8100` ports in
-  `infrastructure/compose/docker-compose.yml` are not reachable from
-  outside the container by design on this host's network backend — see
-  [infrastructure/README.md](../../infrastructure/README.md).
+- **Loopback-only application exposure** is intentional for `platform` and
+  any Agent sharing its network namespace: `AI_PLATFORM_API_HOST` and
+  `test-agent`'s readiness host are validated as loopback literals
+  (`src/ai_platform/runtime/configuration.py`), and `platform`/`test-agent`
+  share one network namespace for exactly this reason. The host-published
+  `8000`/`8100` ports in `infrastructure/compose/docker-compose.yml` are
+  not reachable from outside the container by design on this host's
+  network backend — see [infrastructure/README.md](../../infrastructure/README.md).
+  An Agent in its own network namespace (`summarize-agent`) cannot use
+  this pattern at all — a loopback bind there is only reachable from
+  inside that Agent's own container, never from `platform`'s, which needs
+  to query its readiness (ADR-0017 Decision 5) — so it instead binds every
+  interface (`AI_PLATFORM_AGENT_READINESS_HOST=0.0.0.0`) and is reached at
+  its Compose service DNS name (`summarize-agent:8100`, see
+  `infrastructure/compose/runtime/registry.json`). This is still not a
+  public exposure: the isolated Compose network itself is not reachable
+  from the host, and every readiness request still requires the shared
+  bearer credential — "internal-network-only, credential-gated" rather
+  than "loopback-only" for this specific case.
 - **No TLS** anywhere in this local topology — PostgreSQL and Kafka
   traffic is unencrypted `SASL_PLAINTEXT`/plain TCP within the isolated
   compose network.

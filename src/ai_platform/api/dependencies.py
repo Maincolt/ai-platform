@@ -96,6 +96,7 @@ def default_test_agent_binding() -> CapabilityBinding:
         deployment_declaration_digest="sha256:local-development-fixed-digest",
         environment="development",
         enabled=True,
+        readiness_url="http://127.0.0.1:8100/health/ready",
     )
 
 

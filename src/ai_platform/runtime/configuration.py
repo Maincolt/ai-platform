@@ -5,7 +5,6 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
 
 
 class RuntimeConfigurationError(ValueError):
@@ -66,7 +65,6 @@ class PlatformRuntimeConfig(CommonRuntimeConfig):
     api_port: int
     local_policy_enabled: bool
     registry_path: Path
-    readiness_url: str
     readiness_credential: SecretFileReference
     orchestrator_instance_id: str
     outcome_consumer_group_id: str
@@ -90,10 +88,6 @@ class PlatformRuntimeConfig(CommonRuntimeConfig):
         local_policy_enabled = _required(values, "AI_PLATFORM_LOCAL_POLICY_ENABLED") == "true"
         if not local_policy_enabled:
             raise RuntimeConfigurationError("LOCAL_POLICY_REQUIRES_EXPLICIT_OPT_IN")
-        readiness_url = _required(values, "AI_PLATFORM_AGENT_READINESS_URL")
-        readiness_host = urlsplit(readiness_url).hostname
-        if readiness_host is None or not _is_loopback_literal(readiness_host):
-            raise RuntimeConfigurationError("READINESS_URL_MUST_BE_LOOPBACK")
         return cls(
             environment=common.environment,
             database_dsn=common.database_dsn,
@@ -145,7 +139,6 @@ class PlatformRuntimeConfig(CommonRuntimeConfig):
             api_port=_bounded_int(values, "AI_PLATFORM_API_PORT", 1, 65_535),
             local_policy_enabled=local_policy_enabled,
             registry_path=Path(_required(values, "AI_PLATFORM_REGISTRY_PATH")),
-            readiness_url=readiness_url,
             readiness_credential=SecretFileReference(
                 Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
             ),
@@ -207,8 +200,19 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
         values = os.environ if environment is None else environment
         common = _common(values, prefix="AI_PLATFORM_AGENT_")
         readiness_host = _required(values, "AI_PLATFORM_AGENT_READINESS_HOST")
-        if not _is_loopback_literal(readiness_host):
-            raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK")
+        # Two legitimate patterns (ADR-0017 Decision 5): an Agent sharing
+        # the platform process's network namespace (network_mode:
+        # "service:platform") binds loopback-only and is reached at
+        # 127.0.0.1, exactly as before; an Agent in its own network
+        # namespace must bind every interface (0.0.0.0) to be reachable
+        # from the platform container at all -- loopback there would only
+        # ever be reachable from inside that Agent's own container, never
+        # from the platform container that needs to query it. Still not a
+        # public exposure: the isolated Compose network is not reachable
+        # from the host (infrastructure/README.md), and every readiness
+        # request still requires the shared bearer credential.
+        if not (_is_loopback_literal(readiness_host) or readiness_host == "0.0.0.0"):
+            raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK_OR_ALL_INTERFACES")
         return cls(
             environment=common.environment,
             database_dsn=common.database_dsn,
