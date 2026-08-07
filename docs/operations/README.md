@@ -47,12 +47,12 @@ safe (migrations and topic/ACL creation are idempotent).
 
 **Known gotcha on Windows/WSL2 + Podman**: bringing the topology up and
 verifying it are two different things on some hosts — see [Section
-6](#6-troubleshooting).
+7](#7-troubleshooting).
 
 ## 2. Health
 
 The platform and Test Agent expose readiness endpoints, but — by design
-(loopback-only exposure, see [Section 7](#7-security-limitations)) — they
+(loopback-only exposure, see [Section 8](#8-security-limitations)) — they
 are not reachable from the host. Check them via `podman exec`:
 
 ```bash
@@ -207,7 +207,141 @@ safely recorded rather than corrupting the terminal state, is a correct
 outcome. See `docs/sprint-6/progress.md` and
 `docs/sprint-7/progress.md` for the full account.
 
-## 5. Shutdown and cleanup
+## 5. Provider-call outcome reconciliation (ADR-0016)
+
+[ADR-0016](../architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
+resolved *when* a redelivered `text.summarize` command is quarantined
+instead of retried forever (once its own `agent.provider_call_claims` row
+is still unresolved after `maximum_processing_attempts`), and *how* the
+workflow itself reaches a terminal state (the Orchestrator's ordinary
+`DeadlineReconciler`, not a new mechanism). It deliberately left the
+*operator procedure* for the resulting evidence as follow-up work — this
+section is that follow-up, and every command and query below was run
+against a real, live-produced case during Sprint 10, not written from the
+code alone (see `docs/sprint-10/progress.md`).
+
+### What you're looking for
+
+A `task_attempt_id` where:
+
+- `agent.provider_call_claims` has a row (a provider call was claimed), but
+- `agent.completed_receipts` has **no** matching row (the claim was never
+  resolved to a completed/failed outcome), and
+- the Orchestrator's `orchestrator.workflows` row for that attempt reached
+  a terminal state anyway (almost always `FAILED` /
+  `TASK_RESULT_DEADLINE_EXCEEDED`, since nothing ever resolved the claim).
+
+This is ADR-0014 Section 5's "unknown outcome" case: the provider call may
+have completed and billed on the provider's side, or it may genuinely have
+never happened — the Agent's own database cannot tell you which. This
+procedure gets you the evidence to check the provider's own dashboard;
+resolving *that* ambiguity is still a manual, out-of-band step (ADR-0016's
+"Negative" consequences say this plainly — no automated reconciliation
+exists or is planned).
+
+### Step 1 — find candidate attempts
+
+Run as the `postgres` administrator (read-only; this query touches both
+the `orchestrator` and `agent` schemas in the same database, so it does
+not need cross-service correlation):
+
+```bash
+podman exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
+SELECT
+    ta.task_attempt_id,
+    ta.capability_name,
+    ta.state           AS attempt_state,
+    w.workflow_id,
+    w.state             AS workflow_state,
+    w.failure_code,
+    pcc.command_message_id,
+    pcc.claimed_at
+FROM orchestrator.task_attempts ta
+JOIN orchestrator.tasks t      ON t.task_id = ta.task_id
+JOIN orchestrator.workflows w  ON w.workflow_id = t.workflow_id
+JOIN agent.provider_call_claims pcc ON pcc.task_attempt_id = ta.task_attempt_id
+LEFT JOIN agent.completed_receipts cr ON cr.task_attempt_id = ta.task_attempt_id
+WHERE cr.task_attempt_id IS NULL
+  AND w.state = 'FAILED';
+"
+```
+
+Each row is one attempt to investigate. Verified during Sprint 10 by
+directly inserting a real `DISPATCHED` workflow/task/attempt with an
+already-past `task_result_deadline` plus a matching unresolved
+`agent.provider_call_claims` row, then waiting for the *real*
+`DeadlineReconciler` (running inside `platform-1` on its normal periodic
+interval, no test-only code path) to expire it — this query returned
+exactly that attempt, with `workflow_state = FAILED` and
+`failure_code = TASK_RESULT_DEADLINE_EXCEEDED`, confirming both the query
+and the real expiry path it depends on.
+
+### Step 2 — confirm whether the command was quarantined
+
+A `task_attempt_id` from Step 1 may or may not also have a quarantined
+command (retries can still be in flight, or the process could have been
+killed before `maximum_processing_attempts` was reached). Check the
+`summarize-agent`'s transport rejections:
+
+```bash
+podman exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
+SELECT rejection_id, safe_failure_code, quarantine_state, recorded_at
+FROM agent.transport_rejections
+ORDER BY recorded_at DESC
+LIMIT 20;
+"
+```
+
+`agent.transport_rejections` has no `task_attempt_id` column — quarantine
+happens at the transport layer, which does not always have a parsed
+command available (a malformed message may never even become one). To
+confirm a specific `rejection_id` corresponds to the `task_attempt_id`
+from Step 1, read the actual quarantined message from the
+`.quarantine` topic (`ai-platform.development.task-commands.text-summarize.v1.quarantine`)
+and decode its envelope:
+
+```bash
+podman exec ai-platform-local-kafka-1 bash -c '
+admin_pw=$(cat /run/secrets/kafka_admin_password)
+cat > /tmp/admin-client.properties <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-256
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="$admin_pw";
+EOF
+/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --consumer.config /tmp/admin-client.properties \
+  --topic ai-platform.development.task-commands.text-summarize.v1.quarantine \
+  --from-beginning --max-messages 20 --timeout-ms 8000
+'
+```
+
+(`--timeout-ms` makes the consumer exit on its own once it has drained
+whatever is currently on the topic, rather than hanging forever waiting
+for a 20th message that may not exist; a `TimeoutException` logged after
+the messages print is expected, not a failure.)
+
+Each line is one quarantine envelope (`record_type: "transport-quarantine"`,
+`src/ai_platform/adapters/event_bus/quarantine.py`'s `_quarantine_envelope`).
+Match `rejection_id` against Step 2's query output, then base64-decode
+`original.bytes_base64` (present when the original message was small
+enough to retain) and parse it as the `ExecuteTask` command JSON to read
+its `task_attempt_id` and confirm it matches Step 1's candidate. Verified
+during Sprint 10 against a real quarantined message (a deliberately
+malformed command produced directly to the topic): the envelope's
+`rejection_id` matched the corresponding `agent.transport_rejections` row
+from Step 2 exactly, and `original.bytes_base64` decoded to the exact
+bytes produced.
+
+### Step 3 — check the provider's own record
+
+Once you have a confirmed `task_attempt_id`, its idempotency key with the
+provider is the value itself (`AICompletionRequest`'s per-call idempotency
+binding — see ADR-0014 Section 5). Check the Anthropic/OpenAI dashboard or
+billing export for a request carrying that key to determine whether the
+call actually completed. This is the manual step ADR-0016 does not
+automate; there is no platform-side tooling for it.
+
+## 6. Shutdown and cleanup
 
 Graceful stop (containers can be restarted later, data persists in named
 volumes):
@@ -236,7 +370,7 @@ would need to be reissued):
 rm -rf infrastructure/compose/secrets
 ```
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 ### Windows/WSL2/Podman: containers healthy but unreachable from the host
 
@@ -292,7 +426,20 @@ cache refreshes on a bounded interval
 (`AI_PLATFORM_AGENT_READINESS_REFRESH_INTERVAL_SECONDS`, 5 seconds in this
 deployment); wait a few seconds and retry.
 
-## 7. Security limitations
+**If it's `text.summarize` and waiting does not help**, this is a
+different, structural gap found during Sprint 10, not a transient cache
+lag: `AI_PLATFORM_AGENT_READINESS_URL` is one fixed URL per platform
+process, and it only ever actually reaches `test-agent` (via the
+`network_mode: "service:platform"` trick described above).
+`summarize-agent` runs in its own separate container/network namespace and
+is never reachable at that URL, so its readiness is never observed and
+every `text.summarize` submission gets `AGENT_TEMPORARILY_UNAVAILABLE`
+regardless of how long you wait — see `docs/sprint-10/progress.md` for the
+full root-cause account. Not fixed as of this writing; it needs a design
+decision (per-binding readiness URLs? routing through the Registry's own
+binding data?), tracked as Sprint 10 workstream 3.
+
+## 8. Security limitations
 
 Everything below is a known, accepted, and documented limitation of this
 **local development deployment** — not a defect list, and none of it is a
@@ -328,7 +475,7 @@ production-readiness claim:
   but not that the configured principal actually holds the required
   produce/consume/quarantine permissions.
 
-## 8. Contract generation
+## 9. Contract generation
 
 **Not implemented.** No contract code-generation tooling exists in this
 repository (explicitly deferred since Phase 2 and still open — see
@@ -337,7 +484,7 @@ repository (explicitly deferred since Phase 2 and still open — see
 generator, validator-generator, or client-generation command to document
 here.
 
-## 9. Validation commands
+## 10. Validation commands
 
 Local quality gates (no live services required):
 
@@ -360,7 +507,7 @@ bash tests/integration/run-in-network.sh -v
 uv run pytest -m external_service tests/integration/test_recovery.py -v
 ```
 
-Expect `47 passed, 2 skipped` from the first command (the 2 skips are
+Expect `65 passed, 2 skipped` from the first command (the 2 skips are
 `test_recovery.py`, which cannot run inside that throwaway container — see
 below) and `2 passed` from the second. `test_recovery.py` kills and
 restarts the real `platform`/`test-agent` containers as part of the test
