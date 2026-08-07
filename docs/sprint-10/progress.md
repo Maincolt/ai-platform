@@ -236,6 +236,43 @@ added a Section 8 troubleshooting note explaining that `text.summarize`'s
 the structural readiness-URL gap from workstream 1, which waiting does not
 fix.
 
+## Workstream 3: ADR-0014 follow-up decisions (ADR drafted and Accepted)
+
+The four remaining ADR-0014 Section 8 open questions split into
+engineering-scoped and repository-owner decisions, as the sprint plan
+anticipated. The repository owner was asked directly rather than any of
+them being resolved unilaterally:
+
+- **Orchestrator-level AI Router invocation**: stays out of scope
+  (Agent-only, as today) -- closed for now, reopenable given a real use
+  case.
+- **Fallback ordering**: cross-provider immediately on failure, ratifying
+  `FallbackAIRouter`'s existing behavior (no code change needed -- it
+  already never retries the same provider).
+- **Model allowlist**: formalized (`claude-haiku-4-5`,
+  `gpt-5-mini`), to be enforced at startup by `_build_ai_router`. Not yet
+  implemented -- follow-up PR.
+- **Retry-budget numbers**: Compose defaults raised
+  (`maximum_processing_attempts` 3->5, `retry_delay_seconds` 0.1->2),
+  giving `text.summarize` a ~10-second bounded window before a genuinely
+  in-flight provider call gets quarantined, instead of ~0.3 seconds. The
+  shared-config architecture limitation ADR-0016 already flagged (one
+  value across every consumer, not per-capability) remains open --
+  raising the default is a compromise, not a fix.
+
+Also resolved, though not one of ADR-0014's original five: the
+multi-agent readiness-routing gap this workstream's own finding above
+surfaced. Decision: move `readiness_url` from a single
+`PlatformRuntimeConfig` value to a per-binding field on
+`CapabilityBinding`, validated at Registry-load time. Not yet implemented
+-- follow-up PR, same as the model allowlist.
+
+Recorded in [ADR-0017](../architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md),
+marked directly Accepted (not Proposed) per this repository's own ADR
+process note ("Proposed unless the decision has already been explicitly
+accepted") -- the repository owner's answers were the acceptance.
+`PROJECT_BRIEF.md`'s "What's next" section was updated to match.
+
 ## Workstream 4: second Phase 7 slice -- submission idempotency against the real database
 
 Added `tests/integration/test_submission_idempotency.py` (2 tests):
