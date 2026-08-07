@@ -1,6 +1,7 @@
 # Sprint 10 — Progress
 
-> Workstream 1 (topology re-validation) status as of 2026-08-07.
+> Workstream 1 (topology re-validation) and the start of workstream 4
+> (Phase 7 continuation) as of 2026-08-07.
 
 ## What was done
 
@@ -130,5 +131,63 @@ belongs with the ADR-0014 follow-up workstream, not silently patched here.
   restart-latency gap (`podman compose up -d test-agent` alone timed out
   at 30s during one restart attempt). Not investigated further -- explicitly
   out of scope per PROJECT_BRIEF.md's existing acknowledgment of this gap.
-- Workstreams 2 (operator runbook), 3 (ADR-0014 follow-ups), and 4 (Phase 7
-  continuation) not yet started.
+- Workstreams 2 (operator runbook) and 3 (ADR-0014 follow-ups) not yet
+  started. Workstream 4 (Phase 7 continuation) has started; see below.
+
+## Workstream 4: Phase 7 continuation (started)
+
+Added `tests/component/runtime/test_agent_readiness_wire_contract.py` (7
+tests, local/component -- no external service, no Docker): the Section 19
+"Agent selection/readiness" category's `AgentReadinessClient` and
+`create_agent_readiness_app` each already had thorough *unit* coverage
+(`tests/unit/runtime/test_runtime_readiness.py`), but only in isolation --
+the client's tests feed it hand-built fake JSON via `httpx.MockTransport`,
+never the server's real response bytes, and the server's tests never
+involve the client at all. The two halves had never been proven to agree on
+the wire contract between them. This closes that gap using
+`httpx.ASGITransport` (same mechanism `TestClient` uses) to pair the real
+client against the real app without a real socket: ready/fresh, draining,
+not-yet-ready, the real 404 identity-hiding disguise resolving to
+UNAVAILABLE (not a crash or UNKNOWN), a redeployed agent's changed
+declaration digest correctly failing closed, TTL expiry against a real
+refreshed-then-aged observation, and the never-refreshed-capability UNKNOWN
+default.
+
+This directly relates to the workstream 1 finding above: it proves the
+readiness *plumbing itself* is correct in isolation, which is exactly why
+that finding is a wiring/config gap (one fixed URL can't reach two Agent
+processes) rather than a correctness bug in either component.
+
+**Still open in Section 19** (not attempted this pass; each is its own
+scoped slice, not a single remaining task):
+
+- **Contract**: substantially covered already by `tests/contract/`
+  (JSON Schema/OpenAPI/AsyncAPI validity, examples, result discrimination)
+  -- worth an explicit audit against the Section 19 bullet list rather than
+  assuming full coverage, but not re-done here.
+- **Persistence/transaction** beyond what Concurrency/Recovery/Audit-rollback
+  already exercise (composite uniqueness, history/snapshot parity against
+  the real database specifically).
+- **Idempotency**: the fingerprint/replay matrix is covered at the
+  API/component level with in-memory ports (`tests/component/api/`); the
+  same guarantees have never been proven against the real Postgres adapter.
+- **Ownership/disclosure**: owner-mismatch/safe-404 is covered at component
+  level; not against the real database.
+- **Inbox/outbox**: claim fencing, unknown publication, duplicate/changed
+  payload identities, retention/replay boundaries beyond what Recovery/
+  Concurrency already touch.
+- **State machine**: every legal edge, illegal/late/conflicting events,
+  terminal immutability, history revisions -- against the real database
+  specifically (thoroughly covered already at the domain/component level
+  with in-memory fakes).
+- **Audit/observability** beyond the one audit-failure-rollback scenario
+  Sprint 7 automated: signal correlation, bounded labels, trace links,
+  telemetry-failure isolation.
+- **Correlation Normalization Scenarios** (Section 19's second table, 12
+  rows): only a handful covered at the component level via `TestClient`;
+  the rows about propagation "through supported logs, traces, audit,
+  command, and events" need real message-level proof, not just the API
+  response.
+- A true End-to-End pytest-automated full-container harness (Sprint 6/7
+  both proved the underlying behavior by hand; automating the full
+  container lifecycle under pytest remains unstarted).
