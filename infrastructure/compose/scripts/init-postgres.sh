@@ -62,6 +62,49 @@ declare -A APP_SECRET=(
     [agent]=/run/secrets/postgres_agent_app_password
 )
 
+declare -A SCHEMA_NAME=(
+    [orchestrator]=orchestrator
+    [agent]=agent
+)
+
+# Component migrations are not all internally idempotent (some do a plain
+# ALTER TABLE ... RENAME/TYPE-change with no IF EXISTS guard, unlike the
+# CREATE-style 0001/0002). This step re-runs on every `podman compose up`
+# that has platform/test-agent/summarize-agent as a dependency, not just on
+# a genuinely fresh database, so each migration is skipped once its
+# component's schema_version already meets or exceeds its target -- found
+# during Sprint 10's topology re-validation, where a second, dependency-
+# triggered run of this script against an already-migrated database failed
+# on 0003's non-idempotent RENAME COLUMN.
+apply_migration() {
+    local component="$1" target_version="$2" file="$3" description="$4"
+    local schema="${SCHEMA_NAME[$component]}"
+    local migrator_login="${MIGRATOR_LOGIN[$component]}"
+    local migration_role="${MIGRATION_ROLE[$component]}"
+    local current
+    # Before the first migration ever runs, `${schema}.schema_version` does
+    # not exist yet -- psql_admin's ON_ERROR_STOP=1 makes that probe query
+    # itself fail, which `set -e`/`pipefail` would otherwise treat as this
+    # function failing. That failure is expected and means "not yet
+    # migrated" (current=0), not a real error, so it is deliberately
+    # swallowed here rather than propagated.
+    current="$(psql_admin -tAc \
+        "SELECT version FROM ${schema}.schema_version WHERE component = '${component}'" \
+        2>/dev/null | tr -d '[:space:]')" || current=""
+    if [ -z "${current}" ]; then
+        current=0
+    fi
+    if [ "${current}" -ge "${target_version}" ]; then
+        echo "Skipping ${description} (schema already at version ${current} >= ${target_version})"
+        return 0
+    fi
+    echo "Applying ${description} as ${migrator_login}..."
+    PGPASSWORD="$(cat "${MIGRATOR_SECRET[$component]}")" psql -v ON_ERROR_STOP=1 \
+        -h "${PGHOST}" -p "${PGPORT}" -U "${migrator_login}" -d "${PGDATABASE}" \
+        -c "SET ROLE ${migration_role};" \
+        -f "${file}"
+}
+
 echo "Applying permission-role bootstrap (infrastructure/postgresql/bootstrap_roles.sql)..."
 psql_admin -f /sql/postgresql/bootstrap_roles.sql
 
@@ -93,46 +136,19 @@ GRANT ${RUNTIME_ROLE[$component]} TO ${app_login} WITH INHERIT TRUE;
 SQL
 done
 
-echo "Applying orchestrator migration 0001 as ${MIGRATOR_LOGIN[orchestrator]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[orchestrator]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[orchestrator]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[orchestrator]};" \
-    -f /sql/migrations/0001_orchestrator_schema.sql
-
-echo "Applying agent migration 0002 as ${MIGRATOR_LOGIN[agent]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
-    -f /sql/migrations/0002_agent_schema.sql
-
-echo "Applying orchestrator migration 0003 as ${MIGRATOR_LOGIN[orchestrator]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[orchestrator]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[orchestrator]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[orchestrator]};" \
-    -f /sql/migrations/0003_orchestrator_generalize_result.sql
-
-echo "Applying agent migration 0004 as ${MIGRATOR_LOGIN[agent]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
-    -f /sql/migrations/0004_agent_generalize_result.sql
-
-echo "Applying orchestrator migration 0005 as ${MIGRATOR_LOGIN[orchestrator]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[orchestrator]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[orchestrator]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[orchestrator]};" \
-    -f /sql/migrations/0005_orchestrator_command_capability_routing.sql
-
-echo "Applying agent migration 0006 as ${MIGRATOR_LOGIN[agent]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
-    -f /sql/migrations/0006_agent_command_capability_routing.sql
-
-echo "Applying agent migration 0007 as ${MIGRATOR_LOGIN[agent]}..."
-PGPASSWORD="$(cat "${MIGRATOR_SECRET[agent]}")" psql -v ON_ERROR_STOP=1 \
-    -h "${PGHOST}" -p "${PGPORT}" -U "${MIGRATOR_LOGIN[agent]}" -d "${PGDATABASE}" \
-    -c "SET ROLE ${MIGRATION_ROLE[agent]};" \
-    -f /sql/migrations/0007_agent_provider_call_claims.sql
+apply_migration orchestrator 1 /sql/migrations/0001_orchestrator_schema.sql \
+    "orchestrator migration 0001"
+apply_migration agent 1 /sql/migrations/0002_agent_schema.sql \
+    "agent migration 0002"
+apply_migration orchestrator 2 /sql/migrations/0003_orchestrator_generalize_result.sql \
+    "orchestrator migration 0003"
+apply_migration agent 2 /sql/migrations/0004_agent_generalize_result.sql \
+    "agent migration 0004"
+apply_migration orchestrator 3 /sql/migrations/0005_orchestrator_command_capability_routing.sql \
+    "orchestrator migration 0005"
+apply_migration agent 3 /sql/migrations/0006_agent_command_capability_routing.sql \
+    "agent migration 0006"
+apply_migration agent 4 /sql/migrations/0007_agent_provider_call_claims.sql \
+    "agent migration 0007"
 
 echo "PostgreSQL bootstrap complete."

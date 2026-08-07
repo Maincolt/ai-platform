@@ -32,13 +32,22 @@ pytestmark = pytest.mark.external_service
 
 _ENVIRONMENT = "development"
 _PREFIX = f"ai-platform.{_ENVIRONMENT}"
-_TASK_COMMANDS = f"{_PREFIX}.task-commands.v1"
-_TASK_COMMANDS_DLQ = f"{_TASK_COMMANDS}.quarantine"
+# Capability-scoped since Sprint 9 (ADR-0014 Section 6): `task-commands`
+# stays one logical channel, but its physical topic is computed per
+# capability, so a second Agent class's consumer group never receives the
+# first class's commands. Both topics exist; the isolation cases below
+# (agent-consumer denied on the summarize topic and vice versa) are the
+# ACL-level proof of that guarantee.
+_TASK_COMMANDS_WORD_COUNT = f"{_PREFIX}.task-commands.text-word-count.v1"
+_TASK_COMMANDS_WORD_COUNT_DLQ = f"{_TASK_COMMANDS_WORD_COUNT}.quarantine"
+_TASK_COMMANDS_SUMMARIZE = f"{_PREFIX}.task-commands.text-summarize.v1"
+_TASK_COMMANDS_SUMMARIZE_DLQ = f"{_TASK_COMMANDS_SUMMARIZE}.quarantine"
 _TASK_OUTCOMES = f"{_PREFIX}.task-outcomes.v1"
 _TASK_OUTCOMES_DLQ = f"{_TASK_OUTCOMES}.quarantine"
 
 _ORCHESTRATOR_OUTCOME_GROUP = "ai-platform-orchestrator-outcomes"
 _AGENT_COMMAND_GROUP = "ai-platform-agent-commands"
+_SUMMARIZE_AGENT_COMMAND_GROUP = "ai-platform-summarize-agent-commands"
 
 _PRODUCE_TIMEOUT_SECONDS = 10.0
 _POLL_TIMEOUT_SECONDS = 8.0
@@ -120,42 +129,88 @@ class _ReadCase:
 
 
 _WRITE_MATRIX: tuple[_WriteCase, ...] = (
-    # orchestrator-producer: allowed to write only task-commands.
-    _WriteCase("orchestrator-producer", _TASK_COMMANDS, True),
+    # orchestrator-producer: allowed to write task-commands for both
+    # capabilities (it routes to whichever one a submission needs), never
+    # outcomes or either quarantine topic.
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, True),
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_SUMMARIZE, True),
     _WriteCase("orchestrator-producer", _TASK_OUTCOMES, False),
-    _WriteCase("orchestrator-producer", _TASK_COMMANDS_DLQ, False),
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
     _WriteCase("orchestrator-producer", _TASK_OUTCOMES_DLQ, False),
     # orchestrator-consumer: allowed to write only the outcomes quarantine topic.
     _WriteCase("orchestrator-consumer", _TASK_OUTCOMES_DLQ, True),
     _WriteCase("orchestrator-consumer", _TASK_OUTCOMES, False),
-    _WriteCase("orchestrator-consumer", _TASK_COMMANDS, False),
-    _WriteCase("orchestrator-consumer", _TASK_COMMANDS_DLQ, False),
-    # agent-producer: allowed to write only task-outcomes.
+    _WriteCase("orchestrator-consumer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("orchestrator-consumer", _TASK_COMMANDS_SUMMARIZE, False),
+    _WriteCase("orchestrator-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    # agent-producer (text.word-count): allowed to write only task-outcomes,
+    # the one topic every Agent class shares regardless of capability.
     _WriteCase("agent-producer", _TASK_OUTCOMES, True),
-    _WriteCase("agent-producer", _TASK_COMMANDS, False),
-    _WriteCase("agent-producer", _TASK_COMMANDS_DLQ, False),
+    _WriteCase("agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("agent-producer", _TASK_COMMANDS_SUMMARIZE, False),
+    _WriteCase("agent-producer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
     _WriteCase("agent-producer", _TASK_OUTCOMES_DLQ, False),
-    # agent-consumer: allowed to write only the commands quarantine topic.
-    _WriteCase("agent-consumer", _TASK_COMMANDS_DLQ, True),
-    _WriteCase("agent-consumer", _TASK_COMMANDS, False),
+    # agent-consumer (text.word-count): allowed to write only its own
+    # commands quarantine topic -- never the summarize capability's.
+    _WriteCase("agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, True),
+    _WriteCase("agent-consumer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
+    _WriteCase("agent-consumer", _TASK_COMMANDS_WORD_COUNT, False),
     _WriteCase("agent-consumer", _TASK_OUTCOMES, False),
     _WriteCase("agent-consumer", _TASK_OUTCOMES_DLQ, False),
+    # summarize-agent-producer: same shape as agent-producer, only task-outcomes.
+    _WriteCase("summarize-agent-producer", _TASK_OUTCOMES, True),
+    _WriteCase("summarize-agent-producer", _TASK_COMMANDS_SUMMARIZE, False),
+    _WriteCase("summarize-agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("summarize-agent-producer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
+    # summarize-agent-consumer: allowed to write only its own commands
+    # quarantine topic -- never the word-count capability's (the isolation
+    # guarantee ADR-0014 Section 6 exists for).
+    _WriteCase("summarize-agent-consumer", _TASK_COMMANDS_SUMMARIZE_DLQ, True),
+    _WriteCase("summarize-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("summarize-agent-consumer", _TASK_COMMANDS_SUMMARIZE, False),
+    _WriteCase("summarize-agent-consumer", _TASK_OUTCOMES, False),
 )
 
 _READ_MATRIX: tuple[_ReadCase, ...] = (
     # orchestrator-consumer: allowed to read task-outcomes under its own group.
     _ReadCase("orchestrator-consumer", _TASK_OUTCOMES, _ORCHESTRATOR_OUTCOME_GROUP, True),
-    _ReadCase("orchestrator-consumer", _TASK_COMMANDS, _ORCHESTRATOR_OUTCOME_GROUP, False),
+    _ReadCase(
+        "orchestrator-consumer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False
+    ),
     # Denied group even against a topic it does have Read on: proves the
     # group-authorization dimension independently of topic authorization.
     _ReadCase("orchestrator-consumer", _TASK_OUTCOMES, _AGENT_COMMAND_GROUP, False),
-    # agent-consumer: allowed to read task-commands under its own group.
-    _ReadCase("agent-consumer", _TASK_COMMANDS, _AGENT_COMMAND_GROUP, True),
+    # agent-consumer (text.word-count): allowed to read only its own
+    # capability's commands topic under its own group -- denied on the
+    # summarize capability's topic even under its own group, proving
+    # ADR-0014 Section 6's per-capability isolation at the ACL level, not
+    # just at the application-routing level.
+    _ReadCase("agent-consumer", _TASK_COMMANDS_WORD_COUNT, _AGENT_COMMAND_GROUP, True),
+    _ReadCase("agent-consumer", _TASK_COMMANDS_SUMMARIZE, _AGENT_COMMAND_GROUP, False),
     _ReadCase("agent-consumer", _TASK_OUTCOMES, _AGENT_COMMAND_GROUP, False),
-    _ReadCase("agent-consumer", _TASK_COMMANDS, _ORCHESTRATOR_OUTCOME_GROUP, False),
-    # The two producer principals hold no Read/group grants at all.
-    _ReadCase("orchestrator-producer", _TASK_COMMANDS, _ORCHESTRATOR_OUTCOME_GROUP, False),
+    _ReadCase("agent-consumer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False),
+    # summarize-agent-consumer: the mirror image -- allowed on its own
+    # capability's topic/group, denied on text.word-count's.
+    _ReadCase(
+        "summarize-agent-consumer",
+        _TASK_COMMANDS_SUMMARIZE,
+        _SUMMARIZE_AGENT_COMMAND_GROUP,
+        True,
+    ),
+    _ReadCase(
+        "summarize-agent-consumer",
+        _TASK_COMMANDS_WORD_COUNT,
+        _SUMMARIZE_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase("summarize-agent-consumer", _TASK_OUTCOMES, _SUMMARIZE_AGENT_COMMAND_GROUP, False),
+    # The producer principals hold no Read/group grants at all.
+    _ReadCase(
+        "orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False
+    ),
     _ReadCase("agent-producer", _TASK_OUTCOMES, _AGENT_COMMAND_GROUP, False),
+    _ReadCase("summarize-agent-producer", _TASK_OUTCOMES, _SUMMARIZE_AGENT_COMMAND_GROUP, False),
 )
 
 

@@ -61,6 +61,10 @@ pytestmark = pytest.mark.external_service
 _CAPABILITY_NAME = "text.word-count"
 _CAPABILITY_VERSION = "1.0"
 
+# Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
+# (see tests/integration/conftest.py's copy of this same constant/comment).
+_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+
 
 def _new_id() -> str:
     return str(uuid.uuid7())
@@ -186,7 +190,10 @@ def test_failed_audit_write_rolls_back_the_entire_submission_transaction(
 
     async def _attempt_commit() -> None:
         pool = AsyncPsycopgPool(
-            postgres_orchestrator_app_dsn, component_schema="orchestrator", max_size=2
+            postgres_orchestrator_app_dsn,
+            component_schema="orchestrator",
+            expected_schema_version=_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION,
+            max_size=2,
         )
         await pool.open()
         try:
