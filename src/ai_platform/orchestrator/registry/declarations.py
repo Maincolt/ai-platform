@@ -29,3 +29,12 @@ class CapabilityBinding:
     deployment_declaration_digest: str
     environment: str
     enabled: bool
+    readiness_url: str
+    """This deployment's own readiness endpoint (ADR-0017 Decision 5).
+
+    Per-binding rather than a single platform-wide value: distinct Agent
+    deployments are not uniformly reachable at the same address (e.g. one
+    deployment sharing its platform process's network namespace vs. another
+    reachable at its own Compose service DNS name), so no single URL can
+    serve every binding.
+    """

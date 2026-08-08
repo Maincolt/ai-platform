@@ -88,6 +88,7 @@ def _test_agent_binding() -> CapabilityBinding:
         deployment_declaration_digest="digest-1",
         environment=ENVIRONMENT,
         enabled=True,
+        readiness_url="http://127.0.0.1:8100/health/ready",
     )
 
 

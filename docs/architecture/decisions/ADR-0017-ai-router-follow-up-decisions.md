@@ -89,25 +89,24 @@ implementation (e.g. ADR-0016 and its implementation PR).
 ### 4. Retry-budget numbers (ADR-0014 Section 8 Q2): raised defaults, architecture limitation stays open
 
 The current deployment-wide defaults
-(`AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS=3`,
-`AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS=0.1`, from
-`infrastructure/compose/docker-compose.yml`) give roughly a 0.3-second
+(`AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS=5`,
+`AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS=0.5`, from
+`infrastructure/compose/docker-compose.yml`) give roughly a 2.5-second
 bounded window before a redelivered command is quarantined. This is fine
 for `text.word-count` (deterministic, no external I/O, effectively
 instant) but is exactly the failure mode ADR-0016's "Negative"
 consequences warned about for `text.summarize`: a real Anthropic/OpenAI
-call can legitimately take several seconds, so a 0.3-second budget would
-quarantine a genuinely in-flight provider call on almost any redelivery
-trigger (consumer rebalance, a brief network blip), not just a genuinely
-stuck one.
+call can legitimately take several seconds, so a 2.5-second budget could
+still quarantine a genuinely in-flight provider call on a slower
+completion or a redelivery trigger that lands mid-call (consumer
+rebalance, a brief network blip), not just a genuinely stuck one.
 
-**Decision**: raise the Compose deployment defaults to
-`AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS=5` and
-`AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS=2`, giving a ~10-second bounded
-retry window — long enough to tolerate a typical in-flight completion
-without meaningfully slowing down `text.word-count`'s already-fast path
-(an extra few seconds of redelivery latency in the rare case it's ever
-needed is not user-visible at word-count's scale).
+**Decision**: raise `AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS` to `2`
+(attempts stay at `5`), giving a ~10-second bounded retry window — long
+enough to tolerate a typical in-flight completion without meaningfully
+slowing down `text.word-count`'s already-fast path (an extra few seconds
+of redelivery latency in the rare case it's ever needed is not
+user-visible at word-count's scale).
 
 **Explicitly not resolved by this ADR**: this remains one shared,
 deployment-wide value across every consumer (the Orchestrator's outcome
@@ -143,12 +142,16 @@ regardless of how long an operator waits.
 **Decision**: move `readiness_url` from platform-level configuration to
 the Registry's own binding data. `CapabilityBinding`
 (`src/ai_platform/orchestrator/registry/declarations.py`) gains a
-`readiness_url: str` field, validated as a loopback-literal URL
-(reusing `PlatformRuntimeConfig`'s existing `_is_loopback_literal`
-check, moved to somewhere both call, likely `runtime/loading.py`
-alongside the other Registry-artifact validation) at Registry-load time,
-the same fail-closed point every other binding field is already
-validated at. `refresh_agent_availability()` builds (or reuses) one
+`readiness_url: str` field, validated as a well-formed `http(s)` URL
+with a hostname at Registry-load time (`runtime/loading.py`, alongside
+the other Registry-artifact validation) — deliberately *not* restricted
+to a loopback literal the way `PlatformRuntimeConfig`'s single value was:
+`summarize-agent`'s real address is its own Compose service DNS name
+(`summarize-agent:8100`), never loopback, so a loopback-only check would
+reject the exact value this decision requires. The Registry artifact is
+a trusted, Git-owned deployment input at the same trust level as
+`docker-compose.yml` itself, so well-formedness is what is validated
+here, not reachability topology. `refresh_agent_availability()` builds (or reuses) one
 `AgentReadinessClient` per distinct `readiness_url` instead of one
 shared client for the whole Registry, and looks up each binding's own
 URL when refreshing it. `registry.json` gains a `readiness_url` value per
@@ -165,6 +168,27 @@ readiness endpoint checks) stays a single shared platform-wide value —
 that part of today's design was never the problem (every Agent already
 authenticates readiness requests against the same credential file by
 design; only the URL was wrongly assumed to be singular).
+
+**A second binding-side change, found while implementing this decision**:
+routing to `summarize-agent:8100` only works if something is actually
+listening there. `summarize-agent`'s readiness server previously bound
+`AI_PLATFORM_AGENT_READINESS_HOST=127.0.0.1` like every other Agent — but
+unlike `test-agent`, it does not share platform's network namespace, so a
+loopback bind is only reachable from *inside its own container*, never
+from platform's. `AgentRuntimeConfig`'s validation
+(`runtime/configuration.py`) required a loopback literal unconditionally,
+which would have made this unreachable by construction no matter what
+`registry.json` said. The validation now also accepts `0.0.0.0` (bind
+every interface), and `summarize-agent`'s Compose service configuration
+is changed to it. This is still not a public exposure: the isolated
+Compose network is not reachable from the host
+(`infrastructure/README.md`), and every readiness request still requires
+the shared bearer credential — the security property `docs/operations/README.md`
+Section 8 describes as "loopback-only exposure" is preserved for
+`test-agent`/`platform` (still genuinely loopback) and replaced with
+"internal-network-only, credential-gated" for any Agent in its own
+network namespace, which is the only way such an Agent's readiness can
+be reachable at all.
 
 **Not yet implemented as of this ADR's acceptance** — tracked as follow-up
 engineering work in a separate implementation PR, same as Decision 3.

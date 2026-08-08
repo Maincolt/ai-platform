@@ -76,6 +76,7 @@ def _binding(
         deployment_declaration_digest=digest,
         environment=environment,
         enabled=enabled,
+        readiness_url="http://127.0.0.1:8100/health/ready",
     )
 
 
