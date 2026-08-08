@@ -230,7 +230,7 @@ be introduced starting with the sprint that implements Phase 6
 - Multi-principal authorization / owner-mismatch disclosure paths are structurally unreachable under the current single-principal `LocalDevelopmentAuthorizationPolicy` and are not implemented.
 - Deliberate, operator-initiated quarantine replay has not been exercised (quarantine itself has been, repeatedly).
 - The Compose topology is explicitly local-only: single broker, single database node, no TLS, application ports not reachable from the host by design (loopback-only).
-- The remaining Section 19 test categories beyond what Sprint 7 automated (Contract, most of Idempotency/Ownership/State machine/Agent readiness/Audit-observability, the full Correlation Normalization table), and a dedicated pytest-automated full-container End-to-End harness.
+- A dedicated pytest-automated full-container End-to-End harness (driving `platform`/`test-agent`/`summarize-agent` as black boxes over HTTP, not exercising adapters/application services directly the way `tests/integration/` does) — the one Section 19 item Sprint 10 did not pick up; see "What's next" below.
 - On this development host specifically, direct connections from Windows-native Python to the topology's host-published ports remain unreliable at the protocol-handshake level even after fixing the underlying WSL2/firewall configuration issues; the documented workaround (`run-in-network.sh`) is a permanent, working capability, not merely a stopgap, but the root cause of the remaining handshake-level flakiness is not fully understood.
 - Real Anthropic/OpenAI provider calls: no credentials exist in this environment; a real `text.summarize` submission through the live Compose topology would reach the provider call and fail there, not at startup.
 - Real-topology re-validation of Sprint 9's own infrastructure changes (schema migrations `0003`–`0007`, renamed/capability-scoped Kafka topics, the new `summarize-agent` service) — the topology already running on this host predates them.
@@ -261,10 +261,21 @@ be introduced starting with the sprint that implements Phase 6
 - An ADR-0016 operator runbook now exists
   (`docs/operations/README.md` Section 5), verified against real
   live-produced evidence, not written from the code alone.
-- Phase 7's Section 19 matrix continuation has started (Agent
-  selection/readiness wire-contract coverage, submission idempotency
-  against the real database); most categories remain open — see
-  `docs/sprint-10/progress.md` for the itemized remainder.
+- Phase 7's Section 19 matrix continuation is largely complete: Agent
+  selection/readiness (wire-contract coverage plus the live
+  readiness-routing fix), Idempotency, Ownership/disclosure, State
+  machine, Inbox/outbox claim fencing, Contract (one genuine gap found
+  and closed — `Uuid7IdentifierFactory` had no test coverage anywhere),
+  and Correlation Normalization's real Kafka-message-level propagation
+  guarantee are all now proven against the real PostgreSQL/Kafka
+  topology (the live `external_service` suite grew from 65 to 79 passed,
+  2 skipped). Audit/observability was assessed and closed without new
+  tests — no telemetry backend exists anywhere in this codebase to test
+  against. Still genuinely open: a dedicated pytest-automated
+  full-container End-to-End harness driving the real Compose services as
+  black boxes over HTTP — a materially different piece of work from
+  everything above, not scoped into this sprint. See
+  `docs/sprint-10/progress.md` for the full workstream account.
 - Obtain real Anthropic/OpenAI credentials for a genuine end-to-end
   provider validation pass, if and when the repository owner wants to
   pursue it — still not done, now unblocked now that the approved models
