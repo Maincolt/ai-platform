@@ -372,3 +372,40 @@ interrupted the outbox publisher before the command could reach
 unrelated to the readiness fix, not a flaw in it -- the fix's own claim
 (readiness observed, submission dispatched) is independently verified
 above by direct evidence, not inferred from this workflow's fate.
+
+## ADR-0017 implementation: model allowlist (Decision 3)
+
+Implements the last unimplemented piece of ADR-0017: `text.summarize` is
+approved for exactly `claude-haiku-4-5` (Anthropic) and `gpt-5-mini`
+(OpenAI); any other configured model now fails startup closed rather than
+silently reaching a real provider call.
+
+- `runtime/composition.py` gains `_APPROVED_ANTHROPIC_MODELS`/
+  `_APPROVED_OPENAI_MODELS` frozensets and a
+  `_require_approved_ai_router_model` helper used in `_build_ai_router`
+  in place of the previous unchecked `_require_ai_router_str` calls for
+  the two model fields specifically -- other `str` config fields are
+  unaffected.
+- `infrastructure/compose/docker-compose.yml`'s `summarize-agent` service
+  updated from the placeholder `claude-3-5-haiku-20241022`/`gpt-4o-mini`
+  values to the approved `claude-haiku-4-5`/`gpt-5-mini`.
+
+**Live-verified**:
+- A one-off container confirmed the exact approved-model frozensets are
+  what's actually compiled into the image.
+- A direct `_build_ai_router` call with `claude-3-5-haiku-20241022`
+  (the *old* placeholder value) raised `UNAPPROVED_AI_ROUTER_MODEL`
+  as expected; the same call with `claude-haiku-4-5` succeeded.
+- `summarize-agent` restarted cleanly with the corrected Compose model
+  values (no `RuntimeConfigurationError` at startup).
+- A real `text.summarize` submission against the corrected deployment
+  again got `202 DISPATCHED` (both this fix and the readiness fix working
+  together); the same pre-existing host restart flakiness described above
+  again prevented observing the workflow's own later completion -- not
+  a flaw in either fix, same caveat as before.
+- Full local suite: `450 passed` (one new test,
+  `test_build_ai_router_fails_closed_on_an_unapproved_model`); `ruff
+  check`/`ruff format --check`/`basedpyright` all clean.
+
+This closes out ADR-0017 -- all five decisions are now both Accepted and
+implemented.

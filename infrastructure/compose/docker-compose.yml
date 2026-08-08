@@ -333,10 +333,14 @@ services:
       # fake Sprint 9 placeholders (infrastructure/README.md) -- no real
       # Anthropic/OpenAI credentials exist in this environment, so real
       # text.summarize submissions fail at the provider call, not at startup.
+      # Models must be on the ADR-0017 Decision 3 approved list
+      # (runtime/composition.py's _APPROVED_ANTHROPIC_MODELS/
+      # _APPROVED_OPENAI_MODELS) -- summarize-agent fails closed at
+      # startup on any other value.
       AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
-      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-3-5-haiku-20241022
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
       AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
-      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-4o-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
       AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
       AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
     secrets:

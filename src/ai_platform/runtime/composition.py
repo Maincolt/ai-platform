@@ -656,6 +656,16 @@ def _build_executor(
     raise RuntimeConfigurationError(f"UNSUPPORTED_AGENT_CAPABILITY:{capability_name}")
 
 
+# ADR-0017 Decision 3: the specific Claude/OpenAI models approved for
+# text.summarize, chosen for cost/latency suitability against short-input
+# summarization. Changing this list is a durable, reviewable ADR change
+# (edit this ADR or supersede it), not a silent config edit -- enforced
+# here in code specifically so an unreviewed model change cannot ship
+# silently through a Compose/environment-variable edit alone.
+_APPROVED_ANTHROPIC_MODELS = frozenset({"claude-haiku-4-5"})
+_APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
+
+
 def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
     providers: list[ProviderAdapter] = []
     if (
@@ -666,7 +676,11 @@ def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
             AnthropicProviderAdapter(
                 AnthropicProviderConfig(
                     api_key=_require_ai_router_secret(config, "ai_router_anthropic_api_key"),
-                    model=_require_ai_router_str(config, "ai_router_anthropic_model"),
+                    model=_require_approved_ai_router_model(
+                        config,
+                        "ai_router_anthropic_model",
+                        approved=_APPROVED_ANTHROPIC_MODELS,
+                    ),
                 )
             )
         )
@@ -675,7 +689,11 @@ def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
             OpenAIProviderAdapter(
                 OpenAIProviderConfig(
                     api_key=_require_ai_router_secret(config, "ai_router_openai_api_key"),
-                    model=_require_ai_router_str(config, "ai_router_openai_model"),
+                    model=_require_approved_ai_router_model(
+                        config,
+                        "ai_router_openai_model",
+                        approved=_APPROVED_OPENAI_MODELS,
+                    ),
                 )
             )
         )
@@ -696,6 +714,16 @@ def _require_ai_router_str(config: AgentRuntimeConfig, field_name: str) -> str:
     if value is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
     return cast(str, value)
+
+
+def _require_approved_ai_router_model(
+    config: AgentRuntimeConfig, field_name: str, *, approved: frozenset[str]
+) -> str:
+    """Fail closed on an unapproved model (ADR-0017 Decision 3)."""
+    value = _require_ai_router_str(config, field_name)
+    if value not in approved:
+        raise RuntimeConfigurationError(f"UNAPPROVED_AI_ROUTER_MODEL:{field_name}:{value}")
+    return value
 
 
 def _require_ai_router_int(config: AgentRuntimeConfig, field_name: str) -> int:

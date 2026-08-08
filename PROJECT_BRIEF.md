@@ -237,35 +237,38 @@ be introduced starting with the sprint that implements Phase 6
 - ADR-0014's five recorded open questions (Section 8): the `PROVIDER_CALL_OUTCOME_UNKNOWN` reconciliation window and operator procedure, exact retry-budget numbers, the approved Claude/OpenAI model list, Orchestrator-level AI Router invocation, and same-provider-vs-cross-provider fallback ordering.
 
 **What's next (Sprint 10, in progress — see [docs/sprint-10/plan.md](docs/sprint-10/plan.md)):**
-- All five of ADR-0014 Section 8's open questions are now resolved:
-  [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
+- All five of ADR-0014 Section 8's open questions are now resolved *and
+  implemented*: [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
   resolved the reconciliation-window/operator-procedure question, and
   [ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md)
   resolved the remaining four (Orchestrator-invocation stays out of
   scope, fallback ordering ratified as already-correct, a model allowlist
-  formalized, retry-budget defaults raised) plus a fifth,
-  ADR-0014-caused gap found along the way: `summarize-agent`'s readiness
-  is never observed by the platform (one fixed readiness URL can only
-  reach one Agent process). ADR-0017's model-allowlist enforcement and
-  the multi-agent readiness-routing fix are Accepted but **not yet
-  implemented** — tracked as follow-up engineering work.
+  formalized and enforced at startup, retry-budget defaults raised) plus
+  a fifth, ADR-0014-caused gap found along the way: `summarize-agent`'s
+  readiness was never observed by the platform (one fixed readiness URL
+  could only reach one Agent process) — now fixed with per-binding
+  readiness URLs and a corrected readiness-host bind, both live-verified
+  (a real `text.summarize` submission now reaches `202 DISPATCHED`
+  instead of a permanent `503`; `summarize-agent` starts cleanly with the
+  approved model configured, fails closed on the old placeholder model).
+  See `docs/sprint-10/progress.md` for the full live-verification account,
+  including an unrelated pre-existing host-flakiness caveat around
+  observing the dispatched workflow's own later completion.
 - The local Compose topology has been brought up to date with Sprint 9's
   migrations/Kafka topic changes and the `external_service` suite re-run
-  against it (65 passed, 2 skipped — see
-  [docs/sprint-10/progress.md](docs/sprint-10/progress.md)). A real
-  `text.summarize` submission was attempted; it did not reach the
-  provider call at all, surfacing the readiness gap above instead of the
-  anticipated placeholder-credential failure.
+  against it (67 passed, 2 skipped — see
+  [docs/sprint-10/progress.md](docs/sprint-10/progress.md)).
 - An ADR-0016 operator runbook now exists
   (`docs/operations/README.md` Section 5), verified against real
   live-produced evidence, not written from the code alone.
 - Phase 7's Section 19 matrix continuation has started (Agent
-  selection/readiness wire-contract coverage); most categories remain
-  open — see `docs/sprint-10/progress.md` for the itemized remainder.
+  selection/readiness wire-contract coverage, submission idempotency
+  against the real database); most categories remain open — see
+  `docs/sprint-10/progress.md` for the itemized remainder.
 - Obtain real Anthropic/OpenAI credentials for a genuine end-to-end
   provider validation pass, if and when the repository owner wants to
-  pursue it — still not done; ADR-0017's model allowlist should land
-  first so a real pass validates the approved models specifically.
+  pursue it — still not done, now unblocked now that the approved models
+  are configured and enforced.
 
 ## 9. Security Rules
 

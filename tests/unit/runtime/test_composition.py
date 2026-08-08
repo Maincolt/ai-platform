@@ -351,10 +351,23 @@ def test_build_ai_router_includes_both_providers_when_both_configured(tmp_path: 
         ai_router_openai_api_key=SecretFileReference(
             Path(_write_secret(tmp_path, "openai-key", "sk-test"))
         ),
-        ai_router_openai_model="gpt-test",
+        ai_router_openai_model="gpt-5-mini",
     )
     router = _build_ai_router(config)
     assert len(router._providers) == 2  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+
+
+def test_build_ai_router_fails_closed_on_an_unapproved_model(tmp_path: Path) -> None:
+    """ADR-0017 Decision 3: only specific reviewed models are approved."""
+    config = _agent_config(
+        tmp_path,
+        ai_router_anthropic_api_key=SecretFileReference(
+            Path(_write_secret(tmp_path, "anthropic-key", "sk-test"))
+        ),
+        ai_router_anthropic_model="claude-3-5-haiku-20241022",
+    )
+    with pytest.raises(RuntimeConfigurationError, match="UNAPPROVED_AI_ROUTER_MODEL"):
+        _build_ai_router(config)
 
 
 # --- full platform-process wiring -------------------------------------------
