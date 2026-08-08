@@ -409,3 +409,40 @@ silently reaching a real provider call.
 
 This closes out ADR-0017 -- all five decisions are now both Accepted and
 implemented.
+
+## Phase 7 continuation: Idempotency/Ownership-disclosure + State machine against the real database
+
+Two more Section 19 slices picked up, both real-database extensions of
+already-thoroughly-tested application-layer logic
+(`tests/component/`, `tests/unit/orchestrator/domain/`):
+
+**`tests/integration/test_accepted_request_ownership_and_replay.py`** (6
+tests): `AcceptedRequestQueryPort.resolve()` read-after-write and clean
+miss; `AcceptedRequestAccessAuditPort.record_request_access()` durably
+persisting each of the three `AcceptedRequestAccessDisposition` values
+with correct evidence, without mutating the original accepted
+request/workflow; `AuthorizedWorkflowQueryPort.get_authorized()`'s real
+safe-not-found guarantee (a workflow that genuinely exists, invisible to
+a caller resolved to the wrong owner, proven against the real query, not
+an in-memory `==`); and Section 19's "Same ID in two scopes" row (the
+same `request_id` under two different `idempotency_scope_id` values
+produces two fully independent workflows).
+
+**`tests/integration/test_workflow_state_machine_persistence.py`** (3
+tests): `orchestrator.workflow_history` round-trips every transition in
+the correct order (not just the latest state); a terminal transition via
+`apply_terminal_outcome` appends to that history rather than replacing
+it; and `orchestrator.workflows`' own `workflows_terminal_payload_check`
+CHECK constraint genuinely rejects a direct SQL write that claims a
+terminal state without its required payload -- proving the schema itself
+defends this invariant, not just application code. (One authoring bug
+caught and fixed in the second test: `causation_message_id` must match
+the original command's real outbox `message_id`, not a fresh random ID
+-- `apply_terminal_outcome`'s `_matches_attempt` check correctly rejected
+the mismatch with `PERMANENT_CONFLICT` until fixed, which is itself a
+small confirmation that check is doing its job.)
+
+Both files run against the live topology: `76 passed, 2 skipped` (up
+from `73`, up from `67` before this sprint's re-validation started). Full
+local suite unaffected: `450 passed`; `ruff`/`ruff format`/`basedpyright`
+all clean.
