@@ -474,3 +474,42 @@ directly exercise.
   itself (`UniqueViolation`), not merely discouraged by convention.
 
 Runs against the live topology: `78 passed, 2 skipped` (up from `76`).
+
+## Phase 7 continuation: Correlation Normalization -- real Kafka-message-level propagation
+
+`tests/unit/api/test_correlation.py` and
+`tests/component/api/test_workflow_api.py` already thoroughly prove the
+Correlation Normalization Scenarios table's validation/discard/generate
+rules and the HTTP response header (missing/valid/malformed/oversized/
+control-character header, replay, uniqueness); neither proves the
+"Propagation" column's claim that a valid correlation_id genuinely
+reaches a real downstream `ExecuteTask` command message, since both stop
+at the HTTP boundary or an in-memory/real-database commit.
+
+Added `tests/integration/test_correlation_propagation.py` (1 test): builds
+one real submission carrying a known correlation_id, commits it via
+`PsycopgOrchestratorPersistence.commit_submission` against the real
+database, reads back the *durable* outbox row's `payload_bytes` (not the
+in-memory dict the test already trusts), publishes exactly those bytes
+through the real `KafkaEventPublisher` to the real capability-scoped
+`text.word-count` command topic, consumes the message back with a raw
+Kafka consumer, and asserts the correlation_id (and workflow_id) in the
+bytes that actually reached the broker match, and that the message
+validates against the canonical `ExecuteTask` JSON Schema.
+
+One reliability bug found while writing this test, the same shape as the
+one already documented in the Inbox/outbox claim-fencing test above:
+initially the test drove a real `OutboxPublisherWorker.run_once()` call
+against the shared `task-commands` logical_channel, but `claim_next`
+correctly claimed and published an unrelated *older* backlog row left
+over from other tests instead of this test's own row, so the assertion
+correctly failed (no matching message ever appeared on the topic within
+the poll budget). Fixed by bypassing the shared claim scoping for this
+test -- it publishes the durable row it just committed directly, since
+claim/publish correctness itself is already proven by
+`tests/integration/test_outbox_claim_fencing.py`; this test's job is only
+the correlation_id's propagation into the real message bytes.
+
+Runs against the live topology: `79 passed, 2 skipped` (up from `78`).
+Full local suite unaffected: `450 passed`; `ruff check`/`ruff format
+--check`/`basedpyright` all clean.
