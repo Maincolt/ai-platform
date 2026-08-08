@@ -409,3 +409,31 @@ silently reaching a real provider call.
 
 This closes out ADR-0017 -- all five decisions are now both Accepted and
 implemented.
+
+## Phase 7 continuation: Inbox/outbox claim fencing against the real database
+
+`tests/integration/test_outbox_claim_fencing.py` (2 tests): the two
+Inbox/outbox rows `test_recovery.py`/`test_concurrency.py` do not
+directly exercise.
+
+- **Claim fencing**: two publisher processes racing `claim_next` for the
+  same eligible outbox row must have exactly one winner. A real
+  reliability bug was caught and fixed while writing this test, not just
+  in the implementation being tested: `claim_next` orders by
+  `created_at`/`message_id` with `FOR UPDATE SKIP LOCKED` (no blocking)
+  across the *whole* shared `logical_channel` -- on this shared dev
+  database, which had accumulated `NOT_ATTEMPTED` rows from every other
+  `commit_submission` call across this sprint's other test files (none of
+  which run a real `OutboxPublisherWorker` to drain them), two racers
+  could each cleanly claim a *different* pre-existing row without ever
+  contending for this test's own row, making the assertion pass without
+  actually testing the race. Fixed by giving each test invocation a
+  dedicated, UUID-suffixed `logical_channel`, so this test's single row
+  is the only eligible candidate and the race is real. Verified reliable
+  by running the file twice in a row (not a one-off pass).
+- **Duplicate/changed payload identity**: `orchestrator.outbox.message_id`
+  is a real `PRIMARY KEY` -- confirmed a second insert claiming the same
+  identity with different payload bytes is rejected by the database
+  itself (`UniqueViolation`), not merely discouraged by convention.
+
+Runs against the live topology: `69 passed, 2 skipped` (up from `67`).
