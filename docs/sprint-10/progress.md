@@ -474,3 +474,29 @@ directly exercise.
   itself (`UniqueViolation`), not merely discouraged by convention.
 
 Runs against the live topology: `78 passed, 2 skipped` (up from `76`).
+
+## Phase 7 continuation: Audit/observability -- scope conclusion
+
+Assessed Section 19's Audit/observability category against a real
+telemetry backend, the same treatment given to the other categories this
+sprint. Conclusion: **not extendable with a real `external_service`
+test in this codebase, because no real telemetry backend exists to
+integrate against.**
+
+`src/ai_platform/shared/observability.py` defines `OperationalSignalsPort`
+with exactly two implementations: `NoOpOperationalSignals` (the default,
+discards everything) and `RecordingOperationalSignals` (an in-process
+list-based recorder used only by tests to verify signal semantics). There
+is no Prometheus/OTel/StatsD exporter, no `src/`-side wiring of either
+implementation into `runtime/composition.py`, and only
+`runtime/publisher.py` calls the port at all. There is nothing running in
+this topology -- Compose, `docker-compose.yml`, or otherwise -- that a
+real-backend test could assert against; writing one would mean either (a)
+standing up a telemetry backend that doesn't exist anywhere else in this
+project's infrastructure, which is out of scope for a test-coverage audit,
+or (b) re-testing `RecordingOperationalSignals` against itself, which
+adds no real-service confidence beyond what `tests/unit/shared/test_operational_signals.py`
+already provides.
+
+This category is therefore already adequately covered at the unit level
+and is marked closed for Section 19 purposes without new test files.
