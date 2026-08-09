@@ -563,3 +563,89 @@ the correlation_id's propagation into the real message bytes.
 Runs against the live topology: `79 passed, 2 skipped` (up from `78`).
 Full local suite unaffected: `454 passed`; `ruff check`/`ruff format
 --check`/`basedpyright` all clean.
+
+## Workstream 4: Phase 7 Section 19 -- final status
+
+> This section summarizes the whole workstream, including the Contract
+> (`Uuid7IdentifierFactory`), Audit/observability (scope conclusion), and
+> Correlation Normalization (`test_correlation_propagation.py`) slices,
+> each of which landed as its own PR alongside this one -- see those PRs'
+> own progress.md entries above for their individual details.
+
+This closes out this sprint's pass through Sprint 7's deferred Section 19
+categories (`docs/sprint-7/plan.md` "Out of scope"). Summary of the whole
+workstream, this entry included:
+
+**Closed this sprint** (real-`external_service` tests against the live
+PostgreSQL/Kafka topology unless noted, each its own PR):
+
+- **Agent selection/readiness**: wire-contract coverage
+  (`tests/component/runtime/test_agent_readiness_wire_contract.py`, 7
+  tests, component-level) plus the live multi-agent readiness-routing fix
+  itself (per-binding `readiness_url`, corrected readiness-host bind),
+  proven with a real `202 DISPATCHED` `text.summarize` submission.
+- **Idempotency**: sequential/concurrent first-acceptance against the
+  real `accepted_requests` UNIQUE constraint
+  (`test_submission_idempotency.py`, 2 tests).
+- **Ownership/disclosure**: `resolve()`/`record_request_access()`/
+  `get_authorized()` safe-not-found/same-ID-two-scopes against the real
+  database (`test_accepted_request_ownership_and_replay.py`, 6 tests).
+- **State machine**: `workflow_history` round-trip/terminal-append/CHECK
+  constraint rejection against the real database
+  (`test_workflow_state_machine_persistence.py`, 3 tests).
+- **Inbox/outbox**: claim fencing and duplicate-message-identity
+  rejection against the real `FOR UPDATE SKIP LOCKED`/`PRIMARY KEY`
+  mechanisms (`test_outbox_claim_fencing.py`, 2 tests).
+- **Contract**: audited `tests/contract/` (24 tests) and the Problem
+  Details component test against the checklist; found and closed one
+  genuine gap, `Uuid7IdentifierFactory` (`tests/unit/runtime/test_ids.py`,
+  4 tests, pure unit -- no real service needed for a deterministic ID
+  generator).
+- **Correlation Normalization**: the table's "Propagation" column's claim
+  that a valid correlation_id reaches a real downstream command message,
+  proven at the real Kafka byte level
+  (`test_correlation_propagation.py`, 1 test).
+
+**Assessed and closed without new tests** (real-backend testing is not
+meaningful, not merely not-yet-done):
+
+- **Audit/observability**: no telemetry backend exists anywhere in this
+  codebase to test against -- only `NoOpOperationalSignals` and an
+  in-process `RecordingOperationalSignals` recorder, already covered at
+  the unit level. Writing an `external_service` test here would mean
+  standing up infrastructure that doesn't otherwise exist in this
+  project, or re-testing the recorder against itself.
+
+**Still genuinely open, not attempted this sprint**:
+
+- A dedicated pytest-automated full-container End-to-End harness
+  (`docs/sprint-7/plan.md`'s other deferred item). This is a
+  meaningfully different piece of work -- driving the actual `platform`/
+  `test-agent`/`summarize-agent` Compose services as black boxes over
+  HTTP, not exercising adapters/application services directly against
+  real backing services the way every `tests/integration/` file above
+  does -- and was not scoped into this sprint's workstream 4.
+- Security boundary and Recovery/crash window are not re-listed above
+  because Sprint 7 already automated them in full
+  (`test_postgres_role_isolation.py`, the 24-case Kafka ACL matrix,
+  `test_secret_redaction.py`, `test_audit_failure_rollback.py`,
+  `test_recovery.py`); this sprint only re-ran them against the
+  re-validated topology (workstream 1), it did not extend them.
+- Event Bus delivery was already covered by Sprint 7
+  (`test_event_bus_delivery.py`); not revisited beyond re-running it here.
+
+**Net for this workstream**: the live `external_service` suite grew from
+`65 passed, 2 skipped` (workstream 1's topology re-validation baseline,
+before any of this workstream's own additions) to `79 passed, 2 skipped`
+-- fourteen new tests across six categories (Idempotency 2, Ownership/
+disclosure 6, State machine 3, Inbox/outbox 2, Correlation Normalization
+1, matching this workstream's own idempotency-then-readiness-fix slice's
+`65 -> 67` plus everything listed above's `67 -> 79`), all live-verified,
+three with a genuine bug found and fixed along the way (a test-authoring
+bug in the state-machine test, a claim-scoping reliability bug in both
+the outbox-fencing and correlation-propagation tests). The full local suite
+grew from `450` to `454` (the four `Uuid7IdentifierFactory` unit tests;
+everything else in this workstream is `external_service`-only and does
+not add to the local-suite count). Every addition landed as its own PR,
+lint/type-check/test-verified before merge, per this sprint's established
+pattern.
