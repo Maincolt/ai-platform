@@ -109,11 +109,11 @@ podman compose --profile app up -d platform test-agent
 `compose/runtime/registry.json` is one Registry/declaration artifact shared
 by every process (the Orchestrator and every Agent deployment all point
 `AI_PLATFORM_REGISTRY_PATH`/`AI_PLATFORM_AGENT_DECLARATION_PATH` at the same
-file). As of Sprint 9 (ADR-0014/ADR-0015) it carries one binding per Agent
-class -- `text.word-count` (test-agent/test-agent-2) and `text.summarize`
-(summarize-agent) -- and each Agent process selects its own binding from the
-shared file by `agent_id`, not by file position or binding count
-(`load_agent_deployment_declaration` in
+file). As of ADR-0018 it carries one binding per Agent class -- `text.word-count`
+(test-agent/test-agent-2), `text.summarize` (summarize-agent), and
+`code.review` (review-agent) -- and each Agent process selects its own
+binding from the shared file by `agent_id`, not by file position or binding
+count (`load_agent_deployment_declaration` in
 `src/ai_platform/runtime/loading.py`).
 
 ### Sprint 9: `summarize-agent` and the AI Router
@@ -144,6 +144,28 @@ provider call (`PROVIDER_UNAVAILABLE`/authentication failure translated by
 the adapter, never a raw provider exception -- ADR-0014 Section 1). Replace
 both files with real keys (never commit them; `compose/secrets/` is
 git-ignored) to exercise a real completion.
+
+### ADR-0018: `review-agent` and the `code.review` capability
+
+`review-agent` runs the platform's third built-in Agent class, `code.review`
+(ADR-0018) -- the first candidate from the software-team-persona capability
+set, and the second to call the AI Router. It reuses the same generic Agent
+process entrypoint as `test-agent`/`summarize-agent`
+(`build_agent_process()` selects `ReviewAgent` from the loaded
+declaration's `capability_name`). Its command topic is capability-scoped
+the same way `text.summarize`'s is
+(`...task-commands.code-review.v1` + `.quarantine`), with its own
+`review-agent-producer`/`review-agent-consumer` principals and
+`ai-platform-review-agent-commands` consumer group.
+
+Per the repository owner's decision during this capability's deployment
+wiring, `review-agent` reuses `summarize-agent`'s exact placeholder AI
+Router setup: the same obviously-fake `ai_router_anthropic_api_key.txt`/
+`ai_router_openai_api_key.txt` secrets, and the same ADR-0017 Decision 3
+approved model list (`claude-haiku-4-5`/`gpt-5-mini`) -- see ADR-0018's
+Implementation Status section. `review-agent` therefore starts and reaches
+`READY`, but any real `code.review` submission fails at the provider call,
+exactly like `summarize-agent`.
 
 `test-agent` runs with `network_mode: "service:platform"` — it shares the
 platform container's network namespace rather than getting its own. This is

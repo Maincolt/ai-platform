@@ -42,12 +42,15 @@ _TASK_COMMANDS_WORD_COUNT = f"{_PREFIX}.task-commands.text-word-count.v1"
 _TASK_COMMANDS_WORD_COUNT_DLQ = f"{_TASK_COMMANDS_WORD_COUNT}.quarantine"
 _TASK_COMMANDS_SUMMARIZE = f"{_PREFIX}.task-commands.text-summarize.v1"
 _TASK_COMMANDS_SUMMARIZE_DLQ = f"{_TASK_COMMANDS_SUMMARIZE}.quarantine"
+_TASK_COMMANDS_REVIEW = f"{_PREFIX}.task-commands.code-review.v1"
+_TASK_COMMANDS_REVIEW_DLQ = f"{_TASK_COMMANDS_REVIEW}.quarantine"
 _TASK_OUTCOMES = f"{_PREFIX}.task-outcomes.v1"
 _TASK_OUTCOMES_DLQ = f"{_TASK_OUTCOMES}.quarantine"
 
 _ORCHESTRATOR_OUTCOME_GROUP = "ai-platform-orchestrator-outcomes"
 _AGENT_COMMAND_GROUP = "ai-platform-agent-commands"
 _SUMMARIZE_AGENT_COMMAND_GROUP = "ai-platform-summarize-agent-commands"
+_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-review-agent-commands"
 
 _PRODUCE_TIMEOUT_SECONDS = 10.0
 _POLL_TIMEOUT_SECONDS = 8.0
@@ -134,9 +137,11 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     # outcomes or either quarantine topic.
     _WriteCase("orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, True),
     _WriteCase("orchestrator-producer", _TASK_COMMANDS_SUMMARIZE, True),
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_REVIEW, True),
     _WriteCase("orchestrator-producer", _TASK_OUTCOMES, False),
     _WriteCase("orchestrator-producer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
     _WriteCase("orchestrator-producer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
+    _WriteCase("orchestrator-producer", _TASK_COMMANDS_REVIEW_DLQ, False),
     _WriteCase("orchestrator-producer", _TASK_OUTCOMES_DLQ, False),
     # orchestrator-consumer: allowed to write only the outcomes quarantine topic.
     _WriteCase("orchestrator-consumer", _TASK_OUTCOMES_DLQ, True),
@@ -170,6 +175,19 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     _WriteCase("summarize-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
     _WriteCase("summarize-agent-consumer", _TASK_COMMANDS_SUMMARIZE, False),
     _WriteCase("summarize-agent-consumer", _TASK_OUTCOMES, False),
+    # review-agent-producer: same shape as agent-producer, only task-outcomes.
+    _WriteCase("review-agent-producer", _TASK_OUTCOMES, True),
+    _WriteCase("review-agent-producer", _TASK_COMMANDS_REVIEW, False),
+    _WriteCase("review-agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("review-agent-producer", _TASK_COMMANDS_REVIEW_DLQ, False),
+    # review-agent-consumer: allowed to write only its own commands
+    # quarantine topic -- never another capability's (ADR-0014 Section 6's
+    # isolation guarantee, now proven for a third capability).
+    _WriteCase("review-agent-consumer", _TASK_COMMANDS_REVIEW_DLQ, True),
+    _WriteCase("review-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("review-agent-consumer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
+    _WriteCase("review-agent-consumer", _TASK_COMMANDS_REVIEW, False),
+    _WriteCase("review-agent-consumer", _TASK_OUTCOMES, False),
 )
 
 _READ_MATRIX: tuple[_ReadCase, ...] = (
@@ -205,12 +223,24 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         False,
     ),
     _ReadCase("summarize-agent-consumer", _TASK_OUTCOMES, _SUMMARIZE_AGENT_COMMAND_GROUP, False),
+    # review-agent-consumer: allowed on its own capability's topic/group,
+    # denied on both other capabilities' -- the isolation guarantee proven
+    # across all three capabilities now, not just the original two.
+    _ReadCase("review-agent-consumer", _TASK_COMMANDS_REVIEW, _REVIEW_AGENT_COMMAND_GROUP, True),
+    _ReadCase(
+        "review-agent-consumer", _TASK_COMMANDS_WORD_COUNT, _REVIEW_AGENT_COMMAND_GROUP, False
+    ),
+    _ReadCase(
+        "review-agent-consumer", _TASK_COMMANDS_SUMMARIZE, _REVIEW_AGENT_COMMAND_GROUP, False
+    ),
+    _ReadCase("review-agent-consumer", _TASK_OUTCOMES, _REVIEW_AGENT_COMMAND_GROUP, False),
     # The producer principals hold no Read/group grants at all.
     _ReadCase(
         "orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False
     ),
     _ReadCase("agent-producer", _TASK_OUTCOMES, _AGENT_COMMAND_GROUP, False),
     _ReadCase("summarize-agent-producer", _TASK_OUTCOMES, _SUMMARIZE_AGENT_COMMAND_GROUP, False),
+    _ReadCase("review-agent-producer", _TASK_OUTCOMES, _REVIEW_AGENT_COMMAND_GROUP, False),
 )
 
 

@@ -346,10 +346,12 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the six least-privilege application principals
-    provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four plus
-    the `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added
-    in Sprint 9 for capability-scoped `text-summarize` routing)."""
+    """confluent_kafka client configs for the eight least-privilege application principals
+    provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four, the
+    `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added in
+    Sprint 9 for capability-scoped `text-summarize` routing, and the
+    `review-agent-producer`/`review-agent-consumer` pair ADR-0018 added for
+    capability-scoped `code-review` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -368,5 +370,11 @@ def kafka_principal_client_configs(
         ),
         "summarize-agent-consumer": _kafka_principal_client_config(
             "summarize-agent-consumer", "kafka_summarize_agent_consumer_password.txt"
+        ),
+        "review-agent-producer": _kafka_principal_client_config(
+            "review-agent-producer", "kafka_review_agent_producer_password.txt"
+        ),
+        "review-agent-consumer": _kafka_principal_client_config(
+            "review-agent-consumer", "kafka_review_agent_consumer_password.txt"
         ),
     }

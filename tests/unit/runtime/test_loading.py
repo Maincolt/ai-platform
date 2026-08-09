@@ -99,6 +99,27 @@ def test_agent_declaration_must_match_builtin_capability_and_runtime_identity(
     assert loaded.command_contract_versions == ("1.0",)
 
 
+def test_agent_declaration_accepts_code_review_capability(tmp_path: Path) -> None:
+    """ADR-0018: `code.review` is a supported built-in capability, not just
+    `text.word-count`/`text.summarize`."""
+    document = _registry_document()
+    binding = cast(list[dict[str, object]], document["bindings"])[0]
+    binding["capability_name"] = "code.review"
+    artifact = tmp_path / "declaration.json"
+    artifact.write_text(json.dumps(document), encoding="utf-8")
+
+    revision, loaded = load_agent_deployment_declaration(
+        artifact,
+        environment="development",
+        agent_id=AgentId("018f23a7-6b4d-7c91-8a2e-123456789abc"),
+        implementation_identity="test-agent",
+        declaration_digest="sha256:declaration",
+    )
+
+    assert revision == "sprint-6"
+    assert loaded.capability_name == "code.review"
+
+
 def test_agent_declaration_mismatch_refuses_loading(tmp_path: Path) -> None:
     document = _registry_document()
     binding = cast(list[dict[str, object]], document["bindings"])[0]

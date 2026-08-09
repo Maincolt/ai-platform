@@ -40,6 +40,10 @@ from ai_platform.adapters.persistence import (
     PsycopgTransportRejectionTransaction,
 )
 from ai_platform.adapters.persistence.outbox import OutboxRecoveryPolicy
+from ai_platform.agents.review_agent.agent import ReviewAgent
+from ai_platform.agents.review_agent.capability import (
+    CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.agents.summarize_agent.agent import SummarizeAgent
 from ai_platform.agents.summarize_agent.capability import (
     CAPABILITY_NAME as SUMMARIZE_CAPABILITY_NAME,
@@ -653,6 +657,16 @@ def _build_executor(
             ai_router=_build_ai_router(config),
             max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
         )
+    if capability_name == REVIEW_CAPABILITY_NAME:
+        return ReviewAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
     raise RuntimeConfigurationError(f"UNSUPPORTED_AGENT_CAPABILITY:{capability_name}")
 
 
@@ -662,6 +676,15 @@ def _build_executor(
 # (edit this ADR or supersede it), not a silent config edit -- enforced
 # here in code specifically so an unreviewed model change cannot ship
 # silently through a Compose/environment-variable edit alone.
+#
+# ADR-0018 Decision 5 deliberately left code.review's own model approval
+# undecided at acceptance time. The repository owner has since decided
+# (during this deployment-wiring PR) that code.review reuses this exact
+# list rather than requiring a separately-approved one, since both
+# capabilities share the same cost/latency profile -- see ADR-0018's
+# Implementation Status section for that decision's record. A model wanted
+# for code.review specifically, and not on this list, still requires a
+# durable ADR change here, same as it would for text.summarize.
 _APPROVED_ANTHROPIC_MODELS = frozenset({"claude-haiku-4-5"})
 _APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
 
