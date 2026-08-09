@@ -51,6 +51,28 @@ class WorkflowSubmitResponse(BaseModel):
     failure: WorkflowFailureModel | None = None
 
 
+class AgentStatusModel(BaseModel):
+    """One Capability Registry binding plus its current readiness observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    capability: str
+    capability_version: str
+    implementation_identity: str
+    environment: str
+    enabled: bool
+    status: Literal["READY", "STALE", "UNKNOWN", "UNAVAILABLE", "DRAINING"]
+    fresh: bool
+    last_observed_at: str | None = None
+
+
+class AgentsListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agents: list[AgentStatusModel]
+
+
 class WorkflowReadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -132,6 +132,25 @@
         }
       }
     },
+    "/api/v1/agents": {
+      "get": {
+        "operationId": "agents.list",
+        "summary": "Read-only Capability Registry status: every declared Agent binding and its current readiness observation (agents.list).",
+        "responses": {
+          "200": {
+            "description": "Every declared Agent binding and its current readiness observation.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../../json-schema/v1/agents_list_response.schema.json" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "health.live",

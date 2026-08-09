@@ -27,7 +27,7 @@ from ai_platform.orchestrator.registry.availability import (
     AvailabilityPort,
 )
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
-from ai_platform.orchestrator.registry.snapshot import load_registry_snapshot
+from ai_platform.orchestrator.registry.snapshot import RegistrySnapshot, load_registry_snapshot
 from ai_platform.ports.persistence.transactions import AuthorizedWorkflowQueryPort
 from ai_platform.runtime.health import CoreReadinessPort, StaticReadiness
 from ai_platform.shared.identifiers import AgentId
@@ -76,6 +76,8 @@ class AppState:
     readiness: CoreReadinessPort
     registry_loaded: bool
     task_result_timeout: timedelta
+    registry_snapshot: RegistrySnapshot | None = None
+    availability_port: AvailabilityPort | None = None
 
 
 def default_test_agent_binding() -> CapabilityBinding:
@@ -110,9 +112,10 @@ def build_app_state(*, bindings: list[CapabilityBinding] | None = None) -> AppSt
     if bindings is None:
         bindings = [default_test_agent_binding()]
     snapshot = load_registry_snapshot(bindings, revision="local-development-rev-1")
+    availability_port = AlwaysReadyAvailabilityPort()
     candidate_selector = RegistryCandidateSelector(
         snapshot=snapshot,
-        availability_port=AlwaysReadyAvailabilityPort(),
+        availability_port=availability_port,
         selection_policy_version="1.0",
     )
 
@@ -143,4 +146,6 @@ def build_app_state(*, bindings: list[CapabilityBinding] | None = None) -> AppSt
         readiness=StaticReadiness(),
         registry_loaded=True,
         task_result_timeout=TASK_RESULT_TIMEOUT,
+        registry_snapshot=snapshot,
+        availability_port=availability_port,
     )

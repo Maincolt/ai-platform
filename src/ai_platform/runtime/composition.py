@@ -311,6 +311,8 @@ def build_platform_process(
         readiness=readiness,
         registry_loaded=registry_loaded,
         task_result_timeout=timedelta(seconds=config.task_result_timeout_seconds),
+        registry_snapshot=registry,
+        availability_port=availability if registry is not None else None,
     )
     configure_app_state(app_state)
 
