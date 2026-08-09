@@ -25,6 +25,8 @@ _EXPECTED_TOPICS = {
     "ai-platform.development.task-commands.text-word-count.v1.quarantine",
     "ai-platform.development.task-commands.text-summarize.v1",
     "ai-platform.development.task-commands.text-summarize.v1.quarantine",
+    "ai-platform.development.task-commands.code-review.v1",
+    "ai-platform.development.task-commands.code-review.v1.quarantine",
     "ai-platform.development.task-outcomes.v1",
     "ai-platform.development.task-outcomes.v1.quarantine",
 }

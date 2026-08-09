@@ -219,15 +219,49 @@ findings-list discriminated branch) and the `review_agent` domain module
 errors), with unit, component, and contract-level test coverage mirroring
 `summarize_agent`'s.
 
-**Not yet implemented** — tracked as follow-up engineering work in a
-separate PR, matching this repository's existing pattern of separating an
-ADR's domain/contract layer from its deployment wiring (e.g. ADR-0017
-Decisions 3 and 5): `runtime/composition.py` executor selection for
-`code.review`, the `review-agent` Compose service and its Kafka
-principals/topics/ACLs, and its Capability Registry binding. `code.review`
-cannot be submitted against the running platform until that follow-up
-lands. Real model selection and provider validation (Decision 5) remain a
-further, separate, deliberate step after that.
+**Deployment wiring landed in a follow-up PR**, live-verified against the
+real local topology: `runtime/composition.py` executor selection for
+`code.review` (reusing ADR-0017 Decision 3's exact approved Anthropic/
+OpenAI model list and the same checked-in, obviously-fake placeholder
+credentials `summarize-agent` already uses — the repository owner decided
+against opening a separate model-allowlist decision for a capability with
+the same cost/latency profile); a new `review-agent` Compose service
+mirroring `summarize-agent`'s exactly (own container, own
+`review-agent-producer`/`review-agent-consumer` Kafka principals, own
+capability-scoped `code-review` command topic + quarantine, own
+Capability Registry binding with its own `readiness_url`, per ADR-0017
+Decision 5's per-binding routing).
+
+One real gap found only by live deployment, not by any test:
+`runtime/loading.py`'s `_SUPPORTED_CAPABILITY_NAMES` was a hardcoded
+allowlist of exactly `text.word-count`/`text.summarize` — `review-agent`
+crashed at startup with `AGENT_DECLARATION_MISMATCH` until `code.review`
+was added to it. Fixed, with a dedicated unit test
+(`test_agent_declaration_accepts_code_review_capability`) so a future
+fourth capability doesn't repeat this.
+
+Live verification against the real topology (rebuilt image, real
+Postgres/Kafka, real Compose service): `review-agent` starts cleanly and
+reaches `READY`; `platform`'s own readiness-refresh logs show a real
+`200 OK` from `http://review-agent:8100/health/ready` (observed across
+two independent container starts); the full `external_service` suite
+grew from `79 passed, 2 skipped` to `94 passed, 2 skipped`, including a
+complete live ACL isolation matrix for `review-agent-producer`/
+`review-agent-consumer` across all three capabilities' topics (the same
+proof `test-agent`/`summarize-agent` already had). A real end-to-end
+submission (`POST /api/v1/workflows` with `code.review`) was attempted
+but not completed: this host's already-documented, pre-existing
+`PLATFORM_SHUTDOWN_INCOMPLETE` restart flakiness (see
+`docs/sprint-10/progress.md`) recurred independently of these changes —
+it happened on the very first `platform` restart triggered by this work,
+before `review-agent` existed at all — and repeated retries kept hitting
+the same window. Not a `code.review`-specific gap: `summarize-agent`'s
+own live `202 DISPATCHED` verification in Sprint 10 hit the identical
+caveat.
+
+Real model selection beyond the reused ADR-0017 Decision 3 list, and real
+Anthropic/OpenAI provider validation, remain a further, separate,
+deliberate step, same as `text.summarize`'s.
 
 ## Related Decisions
 

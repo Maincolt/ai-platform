@@ -73,13 +73,14 @@ def load_registry_artifact(path: Path, *, maximum_bytes: int = 262_144) -> Regis
         raise ArtifactLoadingError("REGISTRY_VALIDATION_FAILED") from None
 
 
-# ADR-0014 Section 6 / ADR-0015: registry.json now carries one binding per
-# built-in Agent class (text.word-count, text.summarize), not exactly one
-# binding overall. Every Agent deployment (test-agent, summarize-agent, ...)
-# points AI_PLATFORM_AGENT_DECLARATION_PATH at the same shared registry.json
-# and selects its own binding by (environment, agent_id, implementation_identity,
+# ADR-0014 Section 6 / ADR-0015 / ADR-0018: registry.json now carries one
+# binding per built-in Agent class (text.word-count, text.summarize,
+# code.review), not exactly one binding overall. Every Agent deployment
+# (test-agent, summarize-agent, review-agent, ...) points
+# AI_PLATFORM_AGENT_DECLARATION_PATH at the same shared registry.json and
+# selects its own binding by (environment, agent_id, implementation_identity,
 # deployment_declaration_digest) rather than by position/count.
-_SUPPORTED_CAPABILITY_NAMES = frozenset({"text.word-count", "text.summarize"})
+_SUPPORTED_CAPABILITY_NAMES = frozenset({"text.word-count", "text.summarize", "code.review"})
 
 
 def load_agent_deployment_declaration(

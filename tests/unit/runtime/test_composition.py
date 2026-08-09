@@ -20,6 +20,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai_platform.agents.review_agent.agent import ReviewAgent
+from ai_platform.agents.review_agent.capability import (
+    CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.agents.summarize_agent.agent import SummarizeAgent
 from ai_platform.agents.summarize_agent.capability import (
     CAPABILITY_NAME as SUMMARIZE_CAPABILITY_NAME,
@@ -307,6 +311,24 @@ def test_build_executor_selects_summarize_agent_for_summarize_capability(tmp_pat
         persistence=object(),  # type: ignore[arg-type]
     )
     assert isinstance(executor, SummarizeAgent)
+
+
+def test_build_executor_selects_review_agent_for_code_review_capability(tmp_path: Path) -> None:
+    config = _agent_config(
+        tmp_path,
+        ai_router_anthropic_api_key=SecretFileReference(
+            Path(_write_secret(tmp_path, "anthropic-key", "sk-test"))
+        ),
+        ai_router_anthropic_model="claude-haiku-4-5",
+        ai_router_max_output_tokens=512,
+    )
+    executor = _build_executor(
+        REVIEW_CAPABILITY_NAME,
+        config=config,
+        agent_id=AgentId(config.agent_id),
+        persistence=object(),  # type: ignore[arg-type]
+    )
+    assert isinstance(executor, ReviewAgent)
 
 
 def test_build_executor_fails_closed_for_unrecognized_capability(tmp_path: Path) -> None:
