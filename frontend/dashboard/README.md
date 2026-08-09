@@ -32,4 +32,30 @@ npm run build
 ```
 
 Outputs a static `dist/` bundle. Deployment (Azure static hosting,
-CI/CD) is not yet wired up — this first pass is local-dev only.
+CI/CD) is not yet wired up beyond the local container below.
+
+## Running in its own container
+
+`Dockerfile` is a multi-stage build: `npm run build`, then serve the
+static bundle from a minimal `nginx:1.27-alpine` image. `nginx.conf`
+reverse-proxies `/api/` and `/health/` to the real platform process, so
+the same relative-path `fetch()` calls this app uses in local dev work
+unchanged in the container — no separate "production API URL" to
+configure.
+
+This is wired into `infrastructure/compose/docker-compose.yml` as the
+`dashboard` service (see `infrastructure/README.md`'s "Agent status
+dashboard" section for why it shares `platform`'s network namespace
+rather than getting its own):
+
+```bash
+cd infrastructure/compose
+podman compose --profile app build dashboard
+podman compose --profile app up -d platform test-agent dashboard
+```
+
+Open `http://127.0.0.1:8080`. If the image was built before a `src/`
+change merged, rebuild `ai-platform:sprint6` itself first
+(`podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
+from the repository root) — `podman compose build dashboard` only
+rebuilds the dashboard's own image, not `platform`'s.

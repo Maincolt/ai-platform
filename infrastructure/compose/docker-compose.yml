@@ -156,6 +156,7 @@ services:
     ports:
       - "8000:8000"
       - "8100:8100"
+      - "8080:80"
 
   test-agent:
     image: ai-platform:sprint6
@@ -432,6 +433,23 @@ services:
       - ai_router_openai_api_key
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
+
+  # Shares platform's network namespace, the same way test-agent does
+  # (see that service's comment below): nginx proxies to platform's
+  # Workflow API at 127.0.0.1:8000, which is intentionally loopback-only
+  # (docs/operations/README.md Section 8) -- this reaches it without
+  # widening that exposure to the whole Compose network. Port 8080 is
+  # therefore published on platform itself, not here (network_mode:
+  # "service:platform" containers cannot declare their own ports:).
+  dashboard:
+    build:
+      context: ../../frontend/dashboard
+      dockerfile: Dockerfile
+    profiles: ["app"]
+    network_mode: "service:platform"
+    depends_on:
+      platform:
+        condition: service_started
 
 secrets:
   postgres_admin_password:

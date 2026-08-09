@@ -167,6 +167,40 @@ Implementation Status section. `review-agent` therefore starts and reaches
 `READY`, but any real `code.review` submission fails at the provider call,
 exactly like `summarize-agent`.
 
+### Agent status dashboard (`dashboard`)
+
+`dashboard` (`frontend/dashboard/`) is a Vue 3 + Vite single-page app,
+containerized as a multi-stage build: `npm run build` produces a static
+bundle, served by a minimal `nginx:1.27-alpine` image. It polls
+`GET /api/v1/agents` every 5 seconds and renders a live, color-coded card
+per declared Agent binding (Online/Stale/Unavailable/Unknown, derived from
+the same READY-and-fresh rule candidate selection itself uses). Read-only:
+it never submits work and never affects candidate selection.
+
+Like `test-agent`, `dashboard` runs with `network_mode: "service:platform"`
+rather than getting its own network namespace — deliberately, not for
+convenience. `AI_PLATFORM_API_HOST` is validated as a loopback literal
+(same rule referenced below) and this is an intentional, documented
+security posture (`docs/operations/README.md` Section 8: "loopback-only
+application exposure"), not something this dashboard should widen. Sharing
+platform's namespace lets nginx reverse-proxy `/api/`/`/health/` to
+`127.0.0.1:8000` — reaching the real Workflow API without exposing it to
+the wider Compose network the way `summarize-agent`'s
+`0.0.0.0`-bound readiness endpoint does. Because a `network_mode:
+"service:platform"` container cannot declare its own `ports:`, `8080:80`
+is published on the `platform` service block instead, the same way
+`8000`/`8100` already are.
+
+**A real deployment lesson hit while verifying this**: the running
+`ai-platform:sprint6` image can silently predate the source tree if it was
+last built before a merge that touched `src/` — `podman compose up` does
+not rebuild automatically. The dashboard's proxy correctly reached
+`platform`, but got a genuine `404` for `/api/v1/agents` until the image
+was rebuilt (`podman build -f infrastructure/Dockerfile -t
+ai-platform:sprint6 .`) to pick up that endpoint. Not a `dashboard`-specific
+gap — any change to `src/` needs an image rebuild before the next
+`compose up`, `podman compose build` alone does not imply this either.
+
 `test-agent` runs with `network_mode: "service:platform"` — it shares the
 platform container's network namespace rather than getting its own. This is
 required, not incidental: `AI_PLATFORM_API_HOST` and
