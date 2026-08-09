@@ -475,13 +475,102 @@ directly exercise.
 
 Runs against the live topology: `78 passed, 2 skipped` (up from `76`).
 
+## Phase 7 continuation: Contract category audit against Section 19
+
+Reviewed `tests/contract/` (5 files, 24 tests: JSON Schema validity,
+OpenAPI validity, AsyncAPI validity, examples-conform-to-schemas,
+`task_completed` result discrimination) plus
+`tests/component/api/test_workflow_api.py::test_submit_invalid_body_returns_400_problem_details`
+against Section 19's Contract category bullet list. Conclusion: this
+category is substantially covered, with one genuine gap found --
+`src/ai_platform/runtime/ids.py`'s `Uuid7IdentifierFactory` (the concrete
+implementation satisfying both the Orchestrator and Agent ID ports) had
+zero test coverage anywhere in the repo (`grep -rln
+"Uuid7IdentifierFactory" tests/` returned nothing).
+
+Added `tests/unit/runtime/test_ids.py` (4 tests, pure/local -- no real
+service needed for this one): `new_id()` returns a well-formed UUID
+string; it is genuinely version 7 (`uuid.UUID(value).version == 7`,
+correct RFC 4122 variant); 1000 successive calls are all distinct; and
+1000 successive calls sort in the same order they were generated --
+UUIDv7's defining time-ordered property, and Python 3.14's `uuid.uuid7()`
+holds it in practice, not just in principle.
+
+Full local suite: `454 passed` (4 new, up from `450`); `ruff check`/`ruff
+format --check`/`basedpyright` all clean.
+
+## Phase 7 continuation: Audit/observability -- scope conclusion
+
+Assessed Section 19's Audit/observability category against a real
+telemetry backend, the same treatment given to the other categories this
+sprint. Conclusion: **not extendable with a real `external_service`
+test in this codebase, because no real telemetry backend exists to
+integrate against.**
+
+`src/ai_platform/shared/observability.py` defines `OperationalSignalsPort`
+with exactly two implementations: `NoOpOperationalSignals` (the default,
+discards everything) and `RecordingOperationalSignals` (an in-process
+list-based recorder used only by tests to verify signal semantics). There
+is no Prometheus/OTel/StatsD exporter, no `src/`-side wiring of either
+implementation into `runtime/composition.py`, and only
+`runtime/publisher.py` calls the port at all. There is nothing running in
+this topology -- Compose, `docker-compose.yml`, or otherwise -- that a
+real-backend test could assert against; writing one would mean either (a)
+standing up a telemetry backend that doesn't exist anywhere else in this
+project's infrastructure, which is out of scope for a test-coverage audit,
+or (b) re-testing `RecordingOperationalSignals` against itself, which
+adds no real-service confidence beyond what `tests/unit/shared/test_operational_signals.py`
+already provides.
+
+This category is therefore already adequately covered at the unit level
+and is marked closed for Section 19 purposes without new test files.
+
+## Phase 7 continuation: Correlation Normalization -- real Kafka-message-level propagation
+
+`tests/unit/api/test_correlation.py` and
+`tests/component/api/test_workflow_api.py` already thoroughly prove the
+Correlation Normalization Scenarios table's validation/discard/generate
+rules and the HTTP response header (missing/valid/malformed/oversized/
+control-character header, replay, uniqueness); neither proves the
+"Propagation" column's claim that a valid correlation_id genuinely
+reaches a real downstream `ExecuteTask` command message, since both stop
+at the HTTP boundary or an in-memory/real-database commit.
+
+Added `tests/integration/test_correlation_propagation.py` (1 test): builds
+one real submission carrying a known correlation_id, commits it via
+`PsycopgOrchestratorPersistence.commit_submission` against the real
+database, reads back the *durable* outbox row's `payload_bytes` (not the
+in-memory dict the test already trusts), publishes exactly those bytes
+through the real `KafkaEventPublisher` to the real capability-scoped
+`text.word-count` command topic, consumes the message back with a raw
+Kafka consumer, and asserts the correlation_id (and workflow_id) in the
+bytes that actually reached the broker match, and that the message
+validates against the canonical `ExecuteTask` JSON Schema.
+
+One reliability bug found while writing this test, the same shape as the
+one already documented in the Inbox/outbox claim-fencing test above:
+initially the test drove a real `OutboxPublisherWorker.run_once()` call
+against the shared `task-commands` logical_channel, but `claim_next`
+correctly claimed and published an unrelated *older* backlog row left
+over from other tests instead of this test's own row, so the assertion
+correctly failed (no matching message ever appeared on the topic within
+the poll budget). Fixed by bypassing the shared claim scoping for this
+test -- it publishes the durable row it just committed directly, since
+claim/publish correctness itself is already proven by
+`tests/integration/test_outbox_claim_fencing.py`; this test's job is only
+the correlation_id's propagation into the real message bytes.
+
+Runs against the live topology: `79 passed, 2 skipped` (up from `78`).
+Full local suite unaffected: `454 passed`; `ruff check`/`ruff format
+--check`/`basedpyright` all clean.
+
 ## Workstream 4: Phase 7 Section 19 -- final status
 
 > This section summarizes the whole workstream, including the Contract
 > (`Uuid7IdentifierFactory`), Audit/observability (scope conclusion), and
 > Correlation Normalization (`test_correlation_propagation.py`) slices,
 > each of which landed as its own PR alongside this one -- see those PRs'
-> own progress.md entries for their individual details.
+> own progress.md entries above for their individual details.
 
 This closes out this sprint's pass through Sprint 7's deferred Section 19
 categories (`docs/sprint-7/plan.md` "Out of scope"). Summary of the whole
