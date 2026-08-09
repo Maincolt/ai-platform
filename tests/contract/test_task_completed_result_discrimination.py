@@ -3,8 +3,9 @@
 `task_completed.schema.json` validates `payload.result`'s internal shape via
 an `allOf`/`if`/`then` pair keyed on `payload.capability`: `text.word-count`
 requires `{"word_count": integer}`, `text.summarize` requires
-`{"summary": string}`, and each capability's result must not accidentally
-validate against the other's branch (ADR-0015 Testing Strategy).
+`{"summary": string}`, `code.review` requires `{"findings": [...]}`
+(ADR-0018), and each capability's result must not accidentally validate
+against another's branch (ADR-0015 Testing Strategy).
 """
 
 from __future__ import annotations
@@ -76,5 +77,58 @@ def test_summarize_result_does_not_accept_the_other_capabilitys_extra_field() ->
 
 def test_unrecognized_capability_is_rejected() -> None:
     message = _message(capability="text.unknown", result={"word_count": 9})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_code_review_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="code.review",
+        result={
+            "findings": [
+                {"file": "a.py", "line": 3, "summary": "Missing null check.", "severity": "medium"},
+                {"file": "b.py", "line": None, "summary": "No tests for this.", "severity": "low"},
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_code_review_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="code.review", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_code_review_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="code.review",
+        result={"findings": [{"file": "a.py", "line": 1, "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_code_review_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="code.review",
+        result={
+            "findings": [
+                {
+                    "file": "a.py",
+                    "line": 1,
+                    "summary": "x",
+                    "severity": "low",
+                    "confidence": 0.9,
+                }
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_code_review_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(capability="code.review", result={"findings": [], "summary": "extra"})
     with pytest.raises(ValidationError):
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]

@@ -82,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize"]
+          "enum": ["text.word-count", "text.summarize", "code.review"]
         },
         "capability_version": {
           "const": "1.0"
@@ -153,6 +153,40 @@
                 "required": ["summary"],
                 "properties": {
                   "summary": { "type": "string", "minLength": 1, "maxLength": 2000 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "code.review" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["findings"],
+                "properties": {
+                  "findings": {
+                    "type": "array",
+                    "description": "Advisory only (ADR-0018 Decision 1): never applied automatically.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["file", "line", "summary", "severity"],
+                      "properties": {
+                        "file": { "type": "string", "minLength": 1 },
+                        "line": { "type": ["integer", "null"], "minimum": 0 },
+                        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "severity": { "enum": ["low", "medium", "high"] }
+                      }
+                    }
+                  }
                 }
               }
             }

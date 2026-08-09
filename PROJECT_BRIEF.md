@@ -280,6 +280,16 @@ be introduced starting with the sprint that implements Phase 6
   provider validation pass, if and when the repository owner wants to
   pursue it — still not done, now unblocked now that the approved models
   are configured and enforced.
+- [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md):
+  a third capability, `code.review`, scoped as the first candidate for
+  turning software-team personas into real platform capabilities
+  (advisory-only, no autonomous actions). Its domain/contract layer
+  (`src/ai_platform/agents/review_agent/`, contract schema updates) has
+  landed with full unit/component/contract test coverage; it is **not
+  yet wired into the running platform** — `runtime/composition.py`
+  executor selection, the `review-agent` Compose service, and its
+  Capability Registry binding are the next PR. No real AI provider is
+  configured for it yet either way.
 
 ## 9. Security Rules
 
