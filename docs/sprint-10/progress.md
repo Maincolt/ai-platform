@@ -475,6 +475,30 @@ directly exercise.
 
 Runs against the live topology: `78 passed, 2 skipped` (up from `76`).
 
+## Phase 7 continuation: Contract category audit against Section 19
+
+Reviewed `tests/contract/` (5 files, 24 tests: JSON Schema validity,
+OpenAPI validity, AsyncAPI validity, examples-conform-to-schemas,
+`task_completed` result discrimination) plus
+`tests/component/api/test_workflow_api.py::test_submit_invalid_body_returns_400_problem_details`
+against Section 19's Contract category bullet list. Conclusion: this
+category is substantially covered, with one genuine gap found --
+`src/ai_platform/runtime/ids.py`'s `Uuid7IdentifierFactory` (the concrete
+implementation satisfying both the Orchestrator and Agent ID ports) had
+zero test coverage anywhere in the repo (`grep -rln
+"Uuid7IdentifierFactory" tests/` returned nothing).
+
+Added `tests/unit/runtime/test_ids.py` (4 tests, pure/local -- no real
+service needed for this one): `new_id()` returns a well-formed UUID
+string; it is genuinely version 7 (`uuid.UUID(value).version == 7`,
+correct RFC 4122 variant); 1000 successive calls are all distinct; and
+1000 successive calls sort in the same order they were generated --
+UUIDv7's defining time-ordered property, and Python 3.14's `uuid.uuid7()`
+holds it in practice, not just in principle.
+
+Full local suite: `454 passed` (4 new, up from `450`); `ruff check`/`ruff
+format --check`/`basedpyright` all clean.
+
 ## Phase 7 continuation: Audit/observability -- scope conclusion
 
 Assessed Section 19's Audit/observability category against a real
