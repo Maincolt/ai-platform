@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:api:agents-list-response:1.0",
+  "title": "Agents List Response",
+  "description": "Response body for GET /api/v1/agents (agents.list): every declared Capability Registry binding and its current readiness observation. Read-only -- never affects candidate selection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agents"],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agent_id",
+          "capability",
+          "capability_version",
+          "implementation_identity",
+          "environment",
+          "enabled",
+          "status",
+          "fresh"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Agent deployment's declared identity (not necessarily a UUID in every environment)."
+          },
+          "capability": {
+            "type": "string",
+            "minLength": 1
+          },
+          "capability_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "implementation_identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this binding is enabled in the Registry (a disabled binding can never be selected)."
+          },
+          "status": {
+            "enum": ["READY", "STALE", "UNKNOWN", "UNAVAILABLE", "DRAINING"],
+            "description": "The bounded readiness classification (ADR-0008 Section 5)."
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "True only for a READY observation still within its TTL window -- the same freshness rule candidate selection itself uses."
+          },
+          "last_observed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Null when this binding has never been observed yet."
+          }
+        }
+      }
+    }
+  }
+}

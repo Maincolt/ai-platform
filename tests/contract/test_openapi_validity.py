@@ -15,6 +15,7 @@ OPENAPI_FILE = OPENAPI_DIR / "workflow-api.openapi.json"
 EXPECTED_OPERATION_IDS = {
     "workflow.submit",
     "workflow.read",
+    "agents.list",
     "health.live",
     "health.ready",
 }

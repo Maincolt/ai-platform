@@ -1,0 +1,26 @@
+{
+  "agents": [
+    {
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-123456789abc",
+      "capability": "text.word-count",
+      "capability_version": "1.0",
+      "implementation_identity": "local-compose-test-agent",
+      "environment": "development",
+      "enabled": true,
+      "status": "READY",
+      "fresh": true,
+      "last_observed_at": "2026-08-09T18:00:00Z"
+    },
+    {
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-fedcba123456",
+      "capability": "code.review",
+      "capability_version": "1.0",
+      "implementation_identity": "local-compose-review-agent",
+      "environment": "development",
+      "enabled": true,
+      "status": "UNKNOWN",
+      "fresh": false,
+      "last_observed_at": null
+    }
+  ]
+}

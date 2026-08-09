@@ -19,6 +19,8 @@ from ai_platform.api.dependencies import AppState, build_app_state
 from ai_platform.api.fingerprint import compute_fingerprint
 from ai_platform.api.ids import Uuid7IdentifierFactory
 from ai_platform.api.models import (
+    AgentsListResponse,
+    AgentStatusModel,
     WorkflowFailureModel,
     WorkflowReadResponse,
     WorkflowResultModel,
@@ -30,7 +32,10 @@ from ai_platform.orchestrator.application.submission import (
     SubmissionRequest,
 )
 from ai_platform.orchestrator.domain.workflow import Workflow
+from ai_platform.orchestrator.registry.availability import is_fresh
 from ai_platform.shared.identifiers import CorrelationId, RequestId, WorkflowId
+
+_NEVER_OBSERVED = datetime.min.replace(tzinfo=UTC)
 
 CORRELATION_HEADER = "Correlation-Id"
 
@@ -265,6 +270,54 @@ async def read_workflow(
     return JSONResponse(
         status_code=200,
         content=response_body.model_dump(exclude_none=True),
+        headers={CORRELATION_HEADER: str(correlation_id)},
+    )
+
+
+@app.get("/api/v1/agents")
+async def list_agents(
+    request: Request,
+    state: Annotated[AppState, Depends(get_app_state)],
+) -> JSONResponse:
+    """Read-only Capability Registry status: every declared Agent binding
+    and its current readiness observation. Never affects candidate
+    selection -- it reads the same registry/availability state
+    `SubmissionOrchestrator` already uses, it does not compute its own."""
+    correlation_id = _effective_correlation_id(request)
+    now = datetime.now(UTC)
+    agents: list[AgentStatusModel] = []
+    if state.registry_snapshot is not None:
+        for binding in state.registry_snapshot.bindings:
+            observation = (
+                state.availability_port.observe(
+                    binding.agent_id, binding.capability_name, binding.capability_version
+                )
+                if state.availability_port is not None
+                else None
+            )
+            agents.append(
+                AgentStatusModel(
+                    agent_id=str(binding.agent_id),
+                    capability=binding.capability_name,
+                    capability_version=binding.capability_version,
+                    implementation_identity=binding.implementation_identity,
+                    environment=binding.environment,
+                    enabled=binding.enabled,
+                    status=(
+                        observation.classification.value if observation is not None else "UNKNOWN"
+                    ),
+                    fresh=is_fresh(observation, now=now) if observation is not None else False,
+                    last_observed_at=(
+                        observation.observed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        if observation is not None and observation.observed_at != _NEVER_OBSERVED
+                        else None
+                    ),
+                )
+            )
+    response_body = AgentsListResponse(agents=agents)
+    return JSONResponse(
+        status_code=200,
+        content=response_body.model_dump(),
         headers={CORRELATION_HEADER: str(correlation_id)},
     )
 
