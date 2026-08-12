@@ -51,6 +51,13 @@ services:
     hostname: kafka
     environment:
       KAFKA_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-9RIm8zoNSzqhz-gYo6F7MQ}"
+      # Advertised to clients as the EXTERNAL listener's reconnect address
+      # after the initial bootstrap -- must be reachable from wherever
+      # clients actually run, not just from this host. Defaults to
+      # "localhost" (correct only when the client runs on the same machine
+      # as the broker); the current Docker host is reached remotely, so it
+      # overrides this to its own LAN IP (see infrastructure/README.md).
+      KAFKA_EXTERNAL_ADVERTISED_HOST: "${KAFKA_EXTERNAL_ADVERTISED_HOST:-localhost}"
     secrets:
       - kafka_admin_password
       - kafka_orchestrator_producer_password

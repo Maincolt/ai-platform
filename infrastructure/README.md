@@ -64,9 +64,19 @@ be referenced remotely.
 ssh -i ~/.ssh/mac_docker gebruiker@192.168.1.123
 cd ~/ai-platform/infrastructure/compose
 bash scripts/generate-secrets.sh   # once, creates secrets/*.txt (git-ignored)
+export KAFKA_EXTERNAL_ADVERTISED_HOST=192.168.1.123   # see kafka/entrypoint.sh
 docker compose up -d postgres kafka
 docker compose up postgres-init kafka-init   # apply migrations, topics, ACLs
 ```
+
+**`KAFKA_EXTERNAL_ADVERTISED_HOST` matters for any client not running on the
+Docker host itself.** Kafka's `EXTERNAL` listener answers a client's initial
+bootstrap connection, then tells it where to reconnect for actual
+metadata/produce/consume traffic (`advertised.listeners`). Left at the
+default `localhost`, that reconnect address resolves to the *client's own
+machine*, not the Mac — bootstrap succeeds, then every real request times
+out. This was invisible before the host migration (client and broker were
+the same machine) and needs setting explicitly now.
 
 What each service does:
 

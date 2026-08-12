@@ -43,6 +43,10 @@ bash scripts/generate-secrets.sh
 bash scripts/generate-app-secrets.sh
 
 # 2. Bring up PostgreSQL and Kafka, apply migrations/roles/topics/ACLs
+# KAFKA_EXTERNAL_ADVERTISED_HOST must be the Docker host's own reachable
+# address, or Kafka clients running elsewhere will bootstrap successfully
+# and then time out on every real request (see infrastructure/README.md).
+export KAFKA_EXTERNAL_ADVERTISED_HOST=192.168.1.123
 docker compose up -d postgres kafka
 docker compose up postgres-init kafka-init
 
