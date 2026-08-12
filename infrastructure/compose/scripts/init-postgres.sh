@@ -69,7 +69,7 @@ declare -A SCHEMA_NAME=(
 
 # Component migrations are not all internally idempotent (some do a plain
 # ALTER TABLE ... RENAME/TYPE-change with no IF EXISTS guard, unlike the
-# CREATE-style 0001/0002). This step re-runs on every `podman compose up`
+# CREATE-style 0001/0002). This step re-runs on every `docker compose up`
 # that has platform/test-agent/summarize-agent as a dependency, not just on
 # a genuinely fresh database, so each migration is skipped once its
 # component's schema_version already meets or exceeds its target -- found

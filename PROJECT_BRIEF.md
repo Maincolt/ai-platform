@@ -213,11 +213,11 @@ be introduced starting with the sprint that implements Phase 6
 - Versioned PostgreSQL migrations plus credential-free least-privilege permission-role bootstrap for separate Orchestrator and Agent schemas, applied and verified against a real database.
 - A broker-neutral Event Bus port and `confluent-kafka` adapter with exact immutable bytes, keyed routing, manual acknowledgements, bounded publication certainty, durable quarantine, and offset reconciliation — validated against a real Apache Kafka broker, including assignment fencing across multiple Agent replicas.
 - Platform and Test Agent process composition with typed configuration, protected secret-file references, schema gates, independent startup, health/readiness, bounded workers, JSON logging, and graceful shutdown — run as real processes against real PostgreSQL/Kafka, including demonstrated crash recovery.
-- A Docker application image (`infrastructure/Dockerfile`), built and run locally via Podman.
+- A Docker application image (`infrastructure/Dockerfile`), built and run via Docker on a dedicated remote Docker host (a Mac on the LAN; see `infrastructure/README.md` Section 1) — this replaced an earlier local Windows/Podman/WSL2 setup, migrated 2026-08-12.
 - A local PostgreSQL + Apache Kafka Compose deployment topology (`infrastructure/compose/`) with pinned images, migrations/role bootstrap, topics, least-privilege ACLs, file-based secrets, and health-ordered startup.
 - [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md): Apache Kafka selected as the initial self-hosted broker instead of Redpanda, superseding only the broker-selection clauses of ADR-0005.
-- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
-- A documented, working dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) for a genuine Windows/WSL2/Podman host-port-forwarding reliability gap found and diagnosed during Sprint 7.
+- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `docker exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
+- A genuine Windows/WSL2/Podman host-port-forwarding reliability gap, found and diagnosed during Sprint 7, required a documented dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) to work around. That gap no longer exists: the topology moved to a dedicated Docker host (2026-08-12; see `infrastructure/README.md`), and the full `external_service` suite now runs as a single command.
 - [docs/operations/README.md](docs/operations/README.md): verified operational documentation (Phase 8) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every command independently re-run against the real local environment during Sprint 8. Completes Vertical Slice 01's eight-phase plan.
 - **A generic capability result model** ([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md)): `AgentOutcome.result_data`/`WorkflowResult.result_data` (capability-scoped `Mapping[str, object]`) replace the `word_count`-specific fields across wire contracts (discriminated `if`/`then` union in `task_completed.schema.json`), Agent/Orchestrator persistence (migrations `0003`, `0004`), and the public API (`WorkflowResultModel` is now a generic passthrough). `text.word-count` was re-pointed at this model with its full test suite re-run and no regression, before any new capability was built on top of it.
 - **An AI Router boundary** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Sections 1–3, `src/ai_platform/ports/ai_router/`, `src/ai_platform/adapters/ai_router/`): a synchronous, provider-neutral `AIRouterPort.complete()` contract, Anthropic and OpenAI adapters built on the official SDKs (no third-party abstraction library), a deterministic configuration-ordered `FallbackAIRouter`, and durable redacted per-call usage tracking (`agent.provider_call_usage`) kept as internal evidence, never surfaced on the public API.
@@ -315,13 +315,14 @@ demonstrated in `infrastructure/compose/` — see
 
 ## 11. How to Deploy
 
-A complete local deployment topology exists under
+A complete deployment topology exists under
 [infrastructure/](infrastructure/): versioned migrations, credential-free
-PostgreSQL permission roles, the application Docker image, and a Podman
+PostgreSQL permission roles, the application Docker image, and a Docker
 Compose topology (PostgreSQL + Apache Kafka + the platform/Test Agent
-processes) with least-privilege ACLs and file-based secrets. It is
-explicitly local-only (single broker, single database node, no TLS,
-loopback-only application exposure) — see
+processes) with least-privilege ACLs and file-based secrets, run on a
+dedicated Docker host (a Mac on the LAN) rather than any individual
+developer's machine. It is still explicitly non-production (single broker,
+single database node, no TLS, loopback-only application exposure) — see
 [infrastructure/README.md](infrastructure/README.md) for exact commands.
 Production deployment topology, backup, and disaster recovery remain future
 work.

@@ -87,8 +87,8 @@ services:
     restart: "no"
 
   # Application processes. Not started by a plain `up`; require
-  # `podman compose --profile app up -d` after the image is built
-  # (`podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
+  # `docker compose --profile app up -d` after the image is built
+  # (`docker build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
   # from the repository root) and after postgres-init/kafka-init have
   # completed successfully.
   platform:

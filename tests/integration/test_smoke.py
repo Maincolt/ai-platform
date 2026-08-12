@@ -53,6 +53,6 @@ def test_kafka_admin_can_list_adr0005_topics(kafka_admin_client: AdminClient) ->
     missing = _EXPECTED_TOPICS - topic_names
     assert not missing, (
         f"Expected ADR-0005/ADR-0014 topics missing from Kafka: {missing}. "
-        "Has 'podman compose up kafka-init' been run "
+        "Has 'docker compose up kafka-init' been run "
         "(see infrastructure/README.md)?"
     )

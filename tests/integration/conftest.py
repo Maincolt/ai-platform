@@ -1,24 +1,30 @@
 """Session-scoped scaffolding for external-service tests.
 
 Tests under `tests/integration/` are external-service tests as defined by
-`docs/testing/README.md`: they exercise the real, locally isolated
-PostgreSQL + Apache Kafka topology from `infrastructure/compose/` (see
-`infrastructure/README.md`), not fakes or in-process substitutes. They are
-opt-in via the `external_service` pytest marker (excluded by default through
-`addopts` in `pyproject.toml`).
+`docs/testing/README.md`: they exercise the real PostgreSQL + Apache Kafka
+topology from `infrastructure/compose/` (see `infrastructure/README.md`),
+not fakes or in-process substitutes. They are opt-in via the
+`external_service` pytest marker (excluded by default through `addopts` in
+`pyproject.toml`).
 
-This module never tears the topology down: it is the same shared local dev
-stack other Sprint 6/7 work depends on staying up, and Kafka's startup time
-makes repeated teardown/setup between test runs impractical. If the topology
-cannot be reached (Podman unavailable, secrets not generated, services not
-healthy in time), every test collected under this directory is skipped with
-an actionable reason rather than failing deep inside test bodies.
+The topology runs on a dedicated Docker host (a Mac at `192.168.1.123`, see
+`infrastructure/README.md`/`docs/operations/README.md` Section 1), not on
+whichever machine runs pytest. This module never brings the topology up or
+tears it down itself — it only polls the already-running services and skips
+with an actionable reason if they are unreachable within the timeout.
+Bring the topology up first (over SSH into the Docker host; see
+`docs/operations/README.md` Section 1) before running this suite.
+
+Reading `infrastructure/compose/secrets/*.txt` (for the admin/principal
+credentials below) requires those files to exist on whichever machine runs
+pytest. Either run pytest from an SSH session on the Docker host itself (the
+repo and its generated secrets both live there), or copy
+`infrastructure/compose/secrets/` down to your own checkout.
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -34,7 +40,10 @@ pytestmark = pytest.mark.external_service
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_DIR = REPO_ROOT / "infrastructure" / "compose"
 SECRETS_DIR = COMPOSE_DIR / "secrets"
-GENERATE_SECRETS_SCRIPT = COMPOSE_DIR / "scripts" / "generate-secrets.sh"
+
+# The Docker host this topology runs on (see docs/operations/README.md
+# Section 1) -- overridable for a different host/port layout.
+DOCKER_HOST_LAN_IP = "192.168.1.123"
 
 # Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`,
 # which is bumped alongside the latest applied
@@ -48,30 +57,25 @@ GENERATE_SECRETS_SCRIPT = COMPOSE_DIR / "scripts" / "generate-secrets.sh"
 EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
 EXPECTED_AGENT_SCHEMA_VERSION = 4
 
-# Overridable so this suite can run either from the host (default: the
-# published host ports) or from inside a container attached to the
+# Overridable so this suite can run either against the Docker host's
+# published ports (default) or from inside a container attached to the
 # `ai-platform-local_default` compose network (internal service names/ports
 # -- e.g. AI_PLATFORM_TEST_POSTGRES_HOST=postgres,
 # AI_PLATFORM_TEST_POSTGRES_PORT=5432,
-# AI_PLATFORM_TEST_KAFKA_BOOTSTRAP_SERVERS=kafka:9092). Running inside the
-# network is the more reliable option on hosts where the Windows/WSL2 host
-# port-forwarding path is flaky -- TCP connect can succeed while the actual
-# protocol handshake still hangs on some setups; see infrastructure/README.md.
-POSTGRES_HOST = os.environ.get("AI_PLATFORM_TEST_POSTGRES_HOST", "localhost")
+# AI_PLATFORM_TEST_KAFKA_BOOTSTRAP_SERVERS=kafka:9092), or against a
+# different host entirely. Defaults point at the current Docker host
+# (see infrastructure/README.md); when running pytest directly on that host
+# (over SSH), "localhost" also works and is often faster.
+POSTGRES_HOST = os.environ.get("AI_PLATFORM_TEST_POSTGRES_HOST", DOCKER_HOST_LAN_IP)
 POSTGRES_PORT = int(os.environ.get("AI_PLATFORM_TEST_POSTGRES_PORT", "5433"))
 POSTGRES_DATABASE = "ai_platform"
 
-# The EXTERNAL SASL_PLAINTEXT/SCRAM-SHA-256 listener published to the host --
-# see infrastructure/compose/kafka/entrypoint.sh. Tests running inside the
-# compose network instead use "kafka:9092".
+# The EXTERNAL SASL_PLAINTEXT/SCRAM-SHA-256 listener published by the Docker
+# host -- see infrastructure/compose/kafka/entrypoint.sh. Tests running
+# inside the compose network instead use "kafka:9092".
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
-    "AI_PLATFORM_TEST_KAFKA_BOOTSTRAP_SERVERS", "localhost:19093"
+    "AI_PLATFORM_TEST_KAFKA_BOOTSTRAP_SERVERS", f"{DOCKER_HOST_LAN_IP}:19093"
 )
-
-# When set, skip the podman-compose bring-up entirely and just poll the
-# already-running services directly -- for use inside a container that
-# cannot/should not manage its sibling containers via the podman CLI.
-_SKIP_COMPOSE_MANAGEMENT = bool(os.environ.get("AI_PLATFORM_TEST_SKIP_COMPOSE_UP"))
 
 READY_TIMEOUT_SECONDS = 120.0
 POLL_INTERVAL_SECONDS = 2.0
@@ -96,58 +100,6 @@ def _secrets_present() -> bool:
 
 def _read_secret(name: str) -> str:
     return (SECRETS_DIR / name).read_text(encoding="utf-8").strip()
-
-
-def _podman_available() -> bool:
-    try:
-        result = subprocess.run(
-            ["podman", "version"],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-    except OSError, subprocess.TimeoutExpired:
-        return False
-    return result.returncode == 0
-
-
-def _generate_secrets() -> tuple[bool, str | None]:
-    try:
-        result = subprocess.run(
-            ["bash", str(GENERATE_SECRETS_SCRIPT)],
-            cwd=str(COMPOSE_DIR),
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"failed to run generate-secrets.sh: {exc}"
-    if result.returncode != 0:
-        return False, (
-            f"generate-secrets.sh failed (exit {result.returncode}): {result.stderr.strip()[:500]}"
-        )
-    return True, None
-
-
-def _compose_up() -> tuple[bool, str | None]:
-    try:
-        result = subprocess.run(
-            ["podman", "compose", "up", "-d", "postgres", "kafka"],
-            cwd=str(COMPOSE_DIR),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"failed to run 'podman compose up -d postgres kafka': {exc}"
-    if result.returncode != 0:
-        return False, (
-            "'podman compose up -d postgres kafka' failed (exit "
-            f"{result.returncode}): {result.stderr.strip()[:500]}"
-        )
-    return True, None
 
 
 def _postgres_dsn() -> str:
@@ -197,51 +149,24 @@ def _wait_for_kafka(deadline: float) -> str | None:
 
 @pytest.fixture(scope="session")
 def external_services_status() -> ExternalServicesStatus:
-    """Ensure the real local PostgreSQL/Kafka topology is reachable.
+    """Check that the real PostgreSQL/Kafka topology on the Docker host is reachable.
 
-    Brings the topology up if it is not already running (generating secrets
-    first if necessary) but deliberately never tears it down: it is the
-    shared local dev stack, and other work depends on it staying up between
-    test runs.
-
-    When AI_PLATFORM_TEST_SKIP_COMPOSE_UP is set (running inside a container
-    attached to the compose network, which cannot/should not manage its
-    sibling containers), this skips straight to polling the already-running
-    services directly.
+    This never brings the topology up or tears it down itself -- it is the
+    shared dev stack running on a separate Docker host (see
+    infrastructure/README.md), managed independently of any single test run.
+    It only polls the already-running services and skips with an actionable
+    reason if they aren't reachable within the timeout.
     """
-    if not _SKIP_COMPOSE_MANAGEMENT:
-        if not _podman_available():
-            return ExternalServicesStatus(
-                ready=False,
-                reason=(
-                    "Podman is not available on PATH. Install/start Podman, then "
-                    "re-run 'uv run pytest -m external_service'."
-                ),
-            )
-
-        if not _secrets_present():
-            generated, error = _generate_secrets()
-            if not generated:
-                return ExternalServicesStatus(
-                    ready=False,
-                    reason=(
-                        "infrastructure/compose/secrets/ is missing required files and "
-                        f"automatic generation failed: {error}. Run "
-                        "'bash infrastructure/compose/scripts/generate-secrets.sh' "
-                        "manually."
-                    ),
-                )
-
-        started, error = _compose_up()
-        if not started:
-            return ExternalServicesStatus(
-                ready=False,
-                reason=(
-                    "Could not start the compose topology: "
-                    f"{error}. Run 'podman compose up -d postgres kafka' from "
-                    "infrastructure/compose/ manually and inspect the output."
-                ),
-            )
+    if not _secrets_present():
+        return ExternalServicesStatus(
+            ready=False,
+            reason=(
+                f"{SECRETS_DIR} is missing required files. If the topology is running "
+                "on the Docker host (see infrastructure/README.md), copy its "
+                "infrastructure/compose/secrets/ down to this checkout, or run pytest "
+                "from an SSH session on the Docker host itself."
+            ),
+        )
 
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
     postgres_error = _wait_for_postgres(deadline)

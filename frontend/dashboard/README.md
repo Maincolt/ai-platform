@@ -46,16 +46,20 @@ configure.
 This is wired into `infrastructure/compose/docker-compose.yml` as the
 `dashboard` service (see `infrastructure/README.md`'s "Agent status
 dashboard" section for why it shares `platform`'s network namespace
-rather than getting its own):
+rather than getting its own). The topology runs on a dedicated Docker host
+(a Mac at `192.168.1.123`, see `infrastructure/README.md` Section 1) —
+run these from an SSH session into it:
 
 ```bash
-cd infrastructure/compose
-podman compose --profile app build dashboard
-podman compose --profile app up -d platform test-agent dashboard
+ssh -i ~/.ssh/mac_docker gebruiker@192.168.1.123
+cd ~/ai-platform/infrastructure/compose
+docker compose --profile app build dashboard
+docker compose --profile app up -d platform test-agent dashboard
 ```
 
-Open `http://127.0.0.1:8080`. If the image was built before a `src/`
+Open `http://192.168.1.123:8080` (or `http://127.0.0.1:8080` if browsing
+from the Docker host itself). If the image was built before a `src/`
 change merged, rebuild `ai-platform:sprint6` itself first
-(`podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
-from the repository root) — `podman compose build dashboard` only
+(`docker build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
+from the repository root) — `docker compose build dashboard` only
 rebuilds the dashboard's own image, not `platform`'s.
