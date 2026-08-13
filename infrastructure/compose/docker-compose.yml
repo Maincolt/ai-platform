@@ -9,6 +9,7 @@ name: ai-platform-local
 services:
   postgres:
     image: postgres:17.5-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
@@ -49,6 +50,7 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     hostname: kafka
+    restart: unless-stopped
     environment:
       KAFKA_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-9RIm8zoNSzqhz-gYo6F7MQ}"
       # Advertised to clients as the EXTERNAL listener's reconnect address
@@ -101,6 +103,7 @@ services:
   platform:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -168,6 +171,13 @@ services:
   test-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    # Deliberately no restart policy: network_mode: "service:platform" below
+    # ties this container to platform's specific network namespace. Docker
+    # restarting *this* container would not fix a stale namespace reference
+    # (only removing and recreating it does -- see docs/operations/README.md
+    # Section 4), so an automatic restart here would just loop without ever
+    # resolving DNS again. After any platform restart/reboot, recreate this
+    # service explicitly: docker rm -f + `compose --profile app up -d test-agent`.
     command: ["ai-platform-test-agent"]
     network_mode: "service:platform"
     depends_on:
@@ -229,6 +239,7 @@ services:
   test-agent-2:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -291,6 +302,7 @@ services:
   summarize-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -366,6 +378,7 @@ services:
   review-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -453,6 +466,9 @@ services:
       context: ../../frontend/dashboard
       dockerfile: Dockerfile
     profiles: ["app"]
+    # No restart policy, same reasoning as test-agent above: this shares
+    # platform's network namespace via network_mode, so it needs recreating
+    # (not restarting) whenever platform restarts.
     network_mode: "service:platform"
     depends_on:
       platform:
