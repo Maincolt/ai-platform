@@ -1,11 +1,14 @@
 """Testable bounded process lifecycle independent of any ASGI server."""
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from enum import Enum
 from time import monotonic
 from typing import Protocol
+
+_logger = logging.getLogger(__name__)
 
 
 class AsyncResource(Protocol):
@@ -133,6 +136,15 @@ class ProcessLifecycle:
     def _service_completed(self, task: asyncio.Task[None]) -> None:
         if self._state is not LifecycleState.RUNNING:
             return
+        if not task.cancelled():
+            exception = task.exception()
+            if exception is not None:
+                _logger.warning(
+                    "Runtime service %r exited unexpectedly during RUNNING; "
+                    "triggering process shutdown",
+                    task.get_name(),
+                    exc_info=exception,
+                )
         self._exit_requested.set()
         if self._on_service_failure is not None:
             self._on_service_failure()
@@ -168,8 +180,18 @@ class ProcessLifecycle:
             try:
                 exception = task.exception()
             except asyncio.InvalidStateError:
+                _logger.warning(
+                    "Runtime service %r did not finish within the shutdown deadline",
+                    task.get_name(),
+                )
                 clean = False
             else:
+                if exception is not None:
+                    _logger.warning(
+                        "Runtime service %r ended with an exception",
+                        task.get_name(),
+                        exc_info=exception,
+                    )
                 clean = exception is None and clean
         self._tasks.clear()
         return clean
@@ -178,12 +200,19 @@ class ProcessLifecycle:
         try:
             await self._within_deadline(service.stop(), deadline)
         except BaseException:
+            _logger.warning(
+                "%s.stop() failed during shutdown", type(service).__name__, exc_info=True
+            )
             return False
         return True
 
     async def _close_service(self, service: ManagedService, deadline: float) -> bool:
         remaining = deadline - monotonic()
         if remaining <= 0:
+            _logger.warning(
+                "%s.close() skipped: shutdown deadline already elapsed",
+                type(service).__name__,
+            )
             return False
         try:
             return await asyncio.wait_for(
@@ -191,12 +220,18 @@ class ProcessLifecycle:
                 timeout=remaining,
             )
         except BaseException:
+            _logger.warning(
+                "%s.close() failed during shutdown", type(service).__name__, exc_info=True
+            )
             return False
 
     async def _close_resource(self, resource: AsyncResource, deadline: float) -> bool:
         try:
             await self._within_deadline(resource.close(), deadline)
         except BaseException:
+            _logger.warning(
+                "%s.close() failed during shutdown", type(resource).__name__, exc_info=True
+            )
             return False
         return True
 
