@@ -1,6 +1,7 @@
 """Focused tests for bounded process lifecycle coordination."""
 
 import asyncio
+import logging
 from collections.abc import Awaitable
 
 import pytest
@@ -104,6 +105,53 @@ def test_agent_readiness_is_set_after_start_and_draining_before_stop() -> None:
         assert snapshot.draining
 
     _run(exercise())
+
+
+class _CrashingService:
+    """A service whose run() fails only after startup has already succeeded.
+
+    Reproduces the production PLATFORM_SHUTDOWN_INCOMPLETE/AGENT_SHUTDOWN_
+    INCOMPLETE failure mode: a sibling service dies unexpectedly while
+    RUNNING (not during the startup check itself), which must both report
+    an unclean stop() *and* log the underlying exception -- previously the
+    exception was swallowed silently, making the crash undiagnosable.
+    """
+
+    async def run(self) -> None:
+        await asyncio.sleep(0.01)
+        raise RuntimeError("boom")
+
+    async def stop(self) -> None:
+        return None
+
+    async def close(self, *, timeout_seconds: float) -> bool:
+        return timeout_seconds > 0
+
+
+def test_unexpected_service_failure_is_reported_unclean_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    lifecycle = ProcessLifecycle(
+        resources=(),
+        services=(_CrashingService(),),
+        startup_timeout_seconds=1,
+        shutdown_timeout_seconds=1,
+    )
+
+    async def exercise() -> None:
+        await lifecycle.start()
+        assert lifecycle.state is LifecycleState.RUNNING
+        await lifecycle.wait_for_exit()
+        assert not await lifecycle.stop()
+
+    with caplog.at_level(logging.WARNING, logger="ai_platform.runtime.lifecycle"):
+        _run(exercise())
+
+    assert lifecycle.state is LifecycleState.FAILED
+    assert any(
+        record.exc_info is not None and "boom" in str(record.exc_info[1])
+        for record in caplog.records
+    )
 
 
 def test_startup_failure_unwinds_opened_resources_in_reverse_order() -> None:
