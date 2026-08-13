@@ -24,7 +24,9 @@ repo and its generated secrets both live there), or copy
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -36,6 +38,16 @@ import pytest
 from confluent_kafka.admin import AdminClient
 
 pytestmark = pytest.mark.external_service
+
+# psycopg's async mode cannot run under Windows' default ProactorEventLoop
+# (raises NotImplementedError on the pipe/socket types it needs); tests here
+# call `asyncio.run(...)` directly against AsyncPsycopgPool, so the policy
+# must be set once, before any of those calls, for the whole session.
+# WindowsSelectorEventLoopPolicy is deprecated (slated for removal in
+# Python 3.16); this project pins 3.14 (pyproject.toml), so revisit this
+# before any future upgrade past 3.15.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_DIR = REPO_ROOT / "infrastructure" / "compose"
