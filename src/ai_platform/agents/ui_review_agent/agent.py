@@ -113,6 +113,26 @@ def _build_review_prompt(capture: PageCapture) -> str:
     )
 
 
+def _strip_markdown_json_fence(text: str) -> str:
+    """Strip one wrapping ```json ... ``` (or plain ``` ... ```) code fence.
+
+    The prompt asks for ONLY a JSON array, but real providers sometimes
+    wrap it in a markdown fence anyway (observed live against a real
+    Anthropic model, not a hypothetical). This is a presentation-format
+    tolerance, not a laxer parse: the unwrapped content still goes through
+    the same strict `json.loads` and shape validation below, so malformed
+    fencing or malformed inner content is still rejected, never silently
+    repaired.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 2 or lines[-1].strip() != "```":
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
 def _parse_ui_findings(output_text: str) -> list[dict[str, object]] | None:
     """Parse and validate the provider's raw response into a findings list.
 
@@ -121,7 +141,7 @@ def _parse_ui_findings(output_text: str) -> list[dict[str, object]] | None:
     partial or best-effort result.
     """
     try:
-        parsed: object = json.loads(output_text)
+        parsed: object = json.loads(_strip_markdown_json_fence(output_text))
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, list):
