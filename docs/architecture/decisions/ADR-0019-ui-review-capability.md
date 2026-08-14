@@ -264,20 +264,32 @@ Also landed here, ahead of `code.review`'s own precedent (which deferred
 this to its follow-up PR): `runtime/loading.py`'s
 `_SUPPORTED_CAPABILITY_NAMES` and `runtime/composition.py`'s executor
 selection for `ui.review`, reusing ADR-0017 Decision 3's exact approved
-model list unchanged (Decision 3 above). Executor selection currently
-constructs `UiReviewAgent` with a placeholder `PageCapturePort`
-(`_UnavailablePageCapture`) that fails closed with `CaptureFailedError` on
-any real invocation — deliberately wired ahead of the real Playwright
-integration so the `_SUPPORTED_CAPABILITY_NAMES` gotcha ADR-0018 already
-hit once cannot recur here, while making unmistakably clear (a loud,
-diagnosable failure, not a silent no-op) that real capture doesn't exist
-yet.
+model list unchanged (Decision 3 above).
 
-**Not yet landed**: the real Playwright/Chromium capture implementation,
-the dedicated `ui-review-agent` Docker image, and deployment wiring
-(Compose service, Kafka principals/topics/ACLs, Registry binding,
-CONTRIBUTING.md's standing dashboard-registration convention) — tracked as
-follow-up PRs per the plan this ADR's Decision section describes.
+**Landed in the second PR**: the real `PlaywrightPageCapture`
+(`src/ai_platform/agents/ui_review_agent/capture.py`) — a fresh headless
+Chromium instance per call, `page.goto()` only, console messages captured
+via a bounded listener, the accessibility tree via Playwright's current
+`locator.aria_snapshot()` API (the older `page.accessibility.snapshot()`
+this ADR's Context section referenced no longer exists in Playwright
+1.62), and the origin re-validation Decision 4 requires: the *landed*
+URL's origin (after Playwright's own redirect-following) is checked
+against the requested URL's origin, and any mismatch is a capture failure,
+never a silent follow. `runtime/composition.py`'s executor selection now
+constructs the real implementation instead of the Phase 1 placeholder.
+Verified against a real installed Chromium (`uv run playwright install
+chromium`), not just fakes: a fixture page's title/console error/
+accessibility snapshot are all captured correctly, and a redirect-off-
+origin fixture is correctly rejected as a capture failure — both proven
+live, not inferred from the code alone (`tests/unit/agents/ui_review_agent/test_capture.py`,
+opt-in behind the new `browser` pytest marker, same pattern as
+`external_service`).
+
+**Not yet landed**: the dedicated `ui-review-agent` Docker image and
+deployment wiring (Compose service, Kafka principals/topics/ACLs, Registry
+binding, CONTRIBUTING.md's standing dashboard-registration convention) —
+tracked as a follow-up PR per the plan this ADR's Decision section
+describes.
 
 ## Related Decisions
 
