@@ -39,6 +39,18 @@ def test_origin_distinguishes_scheme_and_host() -> None:
     assert _origin("http://platform:80/") != _origin("http://evil.example.com/")
 
 
+def test_origin_normalizes_the_default_http_port() -> None:
+    """Regression: a real browser's landed `response.url` drops an explicit
+    default port (`http://platform:80` navigates and lands on
+    `http://platform/`) -- an unnormalized comparison treated that as a
+    redirect off-origin and rejected every successful navigation to a
+    default-port target, caught live against a real Chromium during
+    ADR-0019's deployment verification."""
+    assert _origin("http://platform:80/") == _origin("http://platform/")
+    assert _origin("https://platform:443/") == _origin("https://platform/")
+    assert _origin("http://platform:8080/") != _origin("http://platform/")
+
+
 def test_truncate_leaves_short_text_unchanged() -> None:
     assert _truncate("short", 100) == "short"
 

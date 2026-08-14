@@ -71,9 +71,18 @@ class PageCapturePort(Protocol):
         ...
 
 
-def _origin(url: str) -> tuple[str, str]:
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    """A scheme/host/port tuple with default ports normalized away, so
+    `http://platform:80` and `http://platform` (the shape a browser's own
+    landed `response.url` uses once it drops an explicit default port)
+    compare equal -- an unnormalized comparison would treat every
+    default-port navigation as if it had redirected off-origin."""
     parts = urlsplit(url)
-    return (parts.scheme, parts.netloc)
+    port = parts.port if parts.port is not None else _DEFAULT_PORTS.get(parts.scheme)
+    return (parts.scheme, parts.hostname or "", port)
 
 
 def _truncate(text: str, maximum_length: int) -> str:
