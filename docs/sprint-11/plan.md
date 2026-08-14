@@ -71,13 +71,26 @@ stated depth.
       `uv run basedpyright`, and `uv run pytest -q` all succeed; full
       unit/component/contract coverage for `ui_review_agent`, mirroring
       `review_agent`'s pattern.
-- [ ] Workstream 2: real Playwright capture implemented and unit-tested
-      against a fake; a real-browser smoke test run manually at least once.
-- [ ] Workstream 3: `ui-review-agent` starts cleanly on the real topology,
-      reaches `READY`, and appears on `GET /api/v1/agents`/the dashboard
-      with zero dashboard code changes; `test_kafka_acl_matrix.py` extended
-      and passing live; CONTRIBUTING.md's standing convention documented;
-      ADR-0019 moved to Accepted with the repository owner's approval.
+- [x] Workstream 2: real Playwright capture implemented and unit-tested
+      against a fake; live-verified against a real installed Chromium
+      (title/console/accessibility snapshot captured correctly, redirect-
+      off-origin rejected correctly). One bug found and fixed only by this
+      live run: `_origin()` didn't normalize default ports, rejecting every
+      successful default-port navigation as a false-positive redirect.
+- [x] Workstream 3: `ui-review-agent` starts cleanly on the real Mac Docker
+      host topology, reaches `READY`, and appears on `GET /api/v1/agents`
+      with zero dashboard/endpoint code changes; the full live
+      `test_kafka_acl_matrix.py` (73 cases) passes; CONTRIBUTING.md's
+      standing convention documented; a real workflow submission reached a
+      real terminal state (`FAILED`/`ALL_PROVIDERS_EXHAUSTED` — expected,
+      no real provider credentials in this environment, same as
+      `text.summarize`/`code.review`). One unrelated, pre-existing platform
+      bug was found and fixed along the way (`command_publisher` missing
+      `environment=`, the actual root cause of the multi-sprint
+      `PLATFORM_SHUTDOWN_INCOMPLETE` mystery — see PR #38, its own
+      standalone fix, and ADR-0019's Implementation Status for the full
+      account). ADR-0019 remains Proposed pending the repository owner's
+      explicit approval to mark it Accepted, per CONTRIBUTING.md.
 
 ## Out of scope
 
