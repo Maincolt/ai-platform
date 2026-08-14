@@ -50,6 +50,12 @@ from ai_platform.agents.summarize_agent.capability import (
 )
 from ai_platform.agents.test_agent.agent import TestAgent
 from ai_platform.agents.test_agent.capability import CAPABILITY_NAME as WORD_COUNT_CAPABILITY_NAME
+from ai_platform.agents.ui_review_agent.agent import UiReviewAgent
+from ai_platform.agents.ui_review_agent.capability import (
+    CAPABILITY_NAME as UI_REVIEW_CAPABILITY_NAME,
+)
+from ai_platform.agents.ui_review_agent.capture import PageCapture
+from ai_platform.agents.ui_review_agent.errors import CaptureFailedError
 from ai_platform.api.app import app as workflow_api_app
 from ai_platform.api.app import configure_app_state
 from ai_platform.api.context import LocalDevelopmentAuthorizationPolicy
@@ -670,7 +676,48 @@ def _build_executor(
             ai_router=_build_ai_router(config),
             max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
         )
+    if capability_name == UI_REVIEW_CAPABILITY_NAME:
+        return UiReviewAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
+            page_capture=_UnavailablePageCapture(),
+            allowed_review_target=_UI_REVIEW_ALLOWED_TARGET,
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
     raise RuntimeConfigurationError(f"UNSUPPORTED_AGENT_CAPABILITY:{capability_name}")
+
+
+class _UnavailablePageCapture:
+    """Placeholder `PageCapturePort` pending the real Playwright integration
+    (ADR-0019 Implementation Status, Phase 2). `ui.review` is deliberately
+    wired into executor selection and the Registry/Kafka topology ahead of
+    the real capture implementation, the same staged approach ADR-0018 used
+    for `code.review`'s domain layer landing before its deployment wiring
+    -- but unlike that precedent, this Agent cannot do anything useful yet
+    without a browser. Every call fails closed with `CaptureFailedError`
+    rather than silently succeeding or falling back to a fake capture, so a
+    real submission against a deployed `ui-review-agent` fails loudly and
+    diagnosably (`PAGE_CAPTURE_FAILED`) instead of appearing to work.
+    """
+
+    async def capture(self, url: str) -> PageCapture:
+        del url
+        raise CaptureFailedError("the Playwright capture integration is not yet implemented")
+
+
+# ADR-0019 Decision 4: `ui.review`'s review target is hardcoded, not read
+# from configuration -- there is deliberately no environment variable or
+# Registry field that can widen this. The dashboard shares `platform`'s
+# network namespace (`network_mode: "service:platform"` in
+# docker-compose.yml); its nginx listens on container port 80, so this is
+# the address another container reaches it at over the Compose network.
+# Changing the allowed target is a durable, reviewable ADR change, same
+# discipline as the model allowlist immediately below.
+_UI_REVIEW_ALLOWED_TARGET = "http://platform:80"
 
 
 # ADR-0017 Decision 3: the specific Claude/OpenAI models approved for
@@ -688,6 +735,12 @@ def _build_executor(
 # Implementation Status section for that decision's record. A model wanted
 # for code.review specifically, and not on this list, still requires a
 # durable ADR change here, same as it would for text.summarize.
+#
+# ADR-0019 Decision 3 makes the same call for ui.review up front (not left
+# open the way ADR-0018 initially left code.review's): it's a text-in/
+# structured-JSON-out task with the same cost/latency profile as
+# code.review's diff review, so it reuses this list unchanged rather than
+# opening a new model-approval question.
 _APPROVED_ANTHROPIC_MODELS = frozenset({"claude-haiku-4-5"})
 _APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
 

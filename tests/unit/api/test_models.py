@@ -6,10 +6,12 @@ from pydantic import ValidationError
 from ai_platform.api.models import WorkflowSubmitRequest
 
 
-@pytest.mark.parametrize("capability", ["text.word-count", "text.summarize", "code.review"])
+@pytest.mark.parametrize(
+    "capability", ["text.word-count", "text.summarize", "code.review", "ui.review"]
+)
 def test_submit_request_accepts_every_built_in_capability(capability: str) -> None:
-    """ADR-0018: `code.review` is a submittable capability, not just the
-    two that existed before it."""
+    """ADR-0018/ADR-0019: `code.review`/`ui.review` are submittable
+    capabilities, not just the two that existed before them."""
     request = WorkflowSubmitRequest.model_validate(
         {"text": "hello", "capability": capability, "capability_version": "1.0"}
     )

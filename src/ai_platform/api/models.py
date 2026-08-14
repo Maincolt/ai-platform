@@ -17,7 +17,7 @@ class WorkflowSubmitRequest(BaseModel):
 
     request_id: str | None = Field(default=None, pattern=_UUIDV7_PATTERN)
     text: str = Field(min_length=1, max_length=10000)
-    capability: Literal["text.word-count", "text.summarize", "code.review"]
+    capability: Literal["text.word-count", "text.summarize", "code.review", "ui.review"]
     capability_version: Literal["1.0"]
 
 

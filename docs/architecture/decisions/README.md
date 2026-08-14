@@ -25,6 +25,7 @@ technical and structural choices.
 | [ADR-0016](ADR-0016-provider-call-claim-reconciliation.md) | Provider Call Claim Reconciliation | Accepted |
 | [ADR-0017](ADR-0017-ai-router-follow-up-decisions.md) | AI Router Follow-Up Decisions and Multi-Agent Readiness Routing | Accepted |
 | [ADR-0018](ADR-0018-software-team-persona-capabilities.md) | Software-Team-Persona Capabilities — Scope and First Candidate | Accepted |
+| [ADR-0019](ADR-0019-ui-review-capability.md) | `ui.review` — a Playwright-Backed UI Review Capability | Proposed |
 
 ## Naming
 
