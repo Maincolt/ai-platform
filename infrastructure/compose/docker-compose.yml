@@ -9,6 +9,7 @@ name: ai-platform-local
 services:
   postgres:
     image: postgres:17.5-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
@@ -49,8 +50,16 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     hostname: kafka
+    restart: unless-stopped
     environment:
       KAFKA_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-9RIm8zoNSzqhz-gYo6F7MQ}"
+      # Advertised to clients as the EXTERNAL listener's reconnect address
+      # after the initial bootstrap -- must be reachable from wherever
+      # clients actually run, not just from this host. Defaults to
+      # "localhost" (correct only when the client runs on the same machine
+      # as the broker); the current Docker host is reached remotely, so it
+      # overrides this to its own LAN IP (see infrastructure/README.md).
+      KAFKA_EXTERNAL_ADVERTISED_HOST: "${KAFKA_EXTERNAL_ADVERTISED_HOST:-localhost}"
     secrets:
       - kafka_admin_password
       - kafka_orchestrator_producer_password
@@ -87,13 +96,14 @@ services:
     restart: "no"
 
   # Application processes. Not started by a plain `up`; require
-  # `podman compose --profile app up -d` after the image is built
-  # (`podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
+  # `docker compose --profile app up -d` after the image is built
+  # (`docker build -f infrastructure/Dockerfile -t ai-platform:sprint6 .`
   # from the repository root) and after postgres-init/kafka-init have
   # completed successfully.
   platform:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -156,10 +166,18 @@ services:
     ports:
       - "8000:8000"
       - "8100:8100"
+      - "8080:80"
 
   test-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    # Deliberately no restart policy: network_mode: "service:platform" below
+    # ties this container to platform's specific network namespace. Docker
+    # restarting *this* container would not fix a stale namespace reference
+    # (only removing and recreating it does -- see docs/operations/README.md
+    # Section 4), so an automatic restart here would just loop without ever
+    # resolving DNS again. After any platform restart/reboot, recreate this
+    # service explicitly: docker rm -f + `compose --profile app up -d test-agent`.
     command: ["ai-platform-test-agent"]
     network_mode: "service:platform"
     depends_on:
@@ -221,6 +239,7 @@ services:
   test-agent-2:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -283,6 +302,7 @@ services:
   summarize-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -358,6 +378,7 @@ services:
   review-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
+    restart: unless-stopped
     command: ["ai-platform-test-agent"]
     depends_on:
       platform:
@@ -432,6 +453,26 @@ services:
       - ai_router_openai_api_key
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
+
+  # Shares platform's network namespace, the same way test-agent does
+  # (see that service's comment below): nginx proxies to platform's
+  # Workflow API at 127.0.0.1:8000, which is intentionally loopback-only
+  # (docs/operations/README.md Section 8) -- this reaches it without
+  # widening that exposure to the whole Compose network. Port 8080 is
+  # therefore published on platform itself, not here (network_mode:
+  # "service:platform" containers cannot declare their own ports:).
+  dashboard:
+    build:
+      context: ../../frontend/dashboard
+      dockerfile: Dockerfile
+    profiles: ["app"]
+    # No restart policy, same reasoning as test-agent above: this shares
+    # platform's network namespace via network_mode, so it needs recreating
+    # (not restarting) whenever platform restarts.
+    network_mode: "service:platform"
+    depends_on:
+      platform:
+        condition: service_started
 
 secrets:
   postgres_admin_password:

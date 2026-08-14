@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — AI Platform
 
-> Last updated: 2026-08-06 | Sprint 9 | Status: Done
+> Last updated: 2026-08-13 | Sprint 10 done; post-Sprint-10 work landing as individual PRs (no sprint number assigned yet) | Status: In progress
 
 > **Note on terminology:** the roles in Section 6 are a *virtual contributor
 > team* used to plan and execute sprints in this repository. They are not the
@@ -193,6 +193,8 @@ be introduced starting with the sprint that implements Phase 6
 | 7 | Integration, Recovery, Security, and End-to-End Tests | ✅ Done (partial, scoped) | Vertical Slice 01 **Phase 7**, a deliberately chosen subset: an automated, opt-in `external_service` pytest suite (49 tests) covering Event Bus delivery, Concurrency, Security boundary, and Recovery/crash window against the real Sprint 6 topology — not the complete Section 19 matrix. See [docs/sprint-7/done.md](docs/sprint-7/done.md). |
 | 8 | Verified Operational Documentation | ✅ Done | Vertical Slice 01 **Phase 8**: [docs/operations/README.md](docs/operations/README.md) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every one independently re-run against the real local environment during this sprint. No production-readiness claim. Completes the eight-phase Vertical Slice 01 plan (with the Phase 7 scope caveat above carried forward). See [docs/sprint-8/done.md](docs/sprint-8/done.md). |
 | 9 | AI Router and the First AI-Backed Agent | ✅ Done (real-provider validation deferred) | First work beyond Vertical Slice 01: [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) (AI Router boundary, Anthropic/OpenAI provider adapters, deterministic fallback routing, durable redacted usage tracking, capability-scoped Kafka `task-commands` routing, the `text.summarize` v1.0 Agent with a durable pre-call claim model) and [ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md) (generalized `result_data` model replacing the `word_count`-specific shape across contracts, Agent/Orchestrator persistence, and the public API, proven not to regress `text.word-count`). 420 tests passing (up from 339); real Anthropic/OpenAI provider validation and real-topology re-validation of this sprint's own infrastructure changes are both explicitly deferred (no credentials in this environment; see [docs/sprint-9/done.md](docs/sprint-9/done.md)). |
+| 10 | Topology Re-validation, Operator Runbook, ADR-0014 Follow-Ups, Phase 7 Continuation | ✅ Done | Spanned multiple PRs rather than one feature branch (see [docs/sprint-10/plan.md](docs/sprint-10/plan.md) sequencing note): re-migrated the local topology to `main` and re-ran `external_service` against it; wrote the ADR-0016 operator runbook (`docs/operations/README.md` Section 5); resolved [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Section 8's remaining four open questions via [ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md) (model allowlist, retry-budget defaults, fallback ordering ratified, Orchestrator-invocation deliberately left out of scope) plus a readiness-routing bug found along the way; picked up most of Phase 7's deferred Section 19 categories (Agent selection/readiness, Idempotency, Ownership/disclosure, State machine, Inbox/outbox, Contract, Correlation Normalization — `external_service` suite grew 65→79 passed). Still open: a pytest-automated full-container End-to-End harness (not scoped into this sprint). No single `docs/sprint-10/done.md`; see [docs/sprint-10/progress.md](docs/sprint-10/progress.md) for the full account. |
+| — | Post-Sprint-10 (unsprinted, individual PRs) | 🔶 In progress | [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md) (Accepted): a twelve-role software-team persona set as Claude Code subagents (`.claude/agents/*.md`, PR #29 — a coordination mechanism, not a platform capability) plus the platform's third built-in Agent class, `code.review` v1.0, now fully wired into the running platform (domain/contract layer PR #28, `runtime/composition.py`/`review-agent` Compose service/Registry binding PR #31, public-API submission fix PR #32). `GET /api/v1/agents` (PR #33): a read-only Capability Registry status endpoint. A Vue.js agent status dashboard (`frontend/dashboard/`, containerized, consumes `GET /api/v1/agents`) is in progress on `feature/agent-status-dashboard-frontend` (PR #34, open). A platform/agent shutdown-diagnostics fix (PR #35, merged) addressed a previously-undiagnosable `PLATFORM_SHUTDOWN_INCOMPLETE`/`AGENT_SHUTDOWN_INCOMPLETE` crash (see that PR and `src/ai_platform/runtime/lifecycle.py`) that had been misattributed to host-specific flakiness since Sprint 10. None of this has a `docs/sprint-N/` folder yet — see this file's own edit history and the PRs above for the paper trail until one is opened. |
 
 ## 8. Current State
 
@@ -213,11 +215,11 @@ be introduced starting with the sprint that implements Phase 6
 - Versioned PostgreSQL migrations plus credential-free least-privilege permission-role bootstrap for separate Orchestrator and Agent schemas, applied and verified against a real database.
 - A broker-neutral Event Bus port and `confluent-kafka` adapter with exact immutable bytes, keyed routing, manual acknowledgements, bounded publication certainty, durable quarantine, and offset reconciliation — validated against a real Apache Kafka broker, including assignment fencing across multiple Agent replicas.
 - Platform and Test Agent process composition with typed configuration, protected secret-file references, schema gates, independent startup, health/readiness, bounded workers, JSON logging, and graceful shutdown — run as real processes against real PostgreSQL/Kafka, including demonstrated crash recovery.
-- A Docker application image (`infrastructure/Dockerfile`), built and run locally via Podman.
+- A Docker application image (`infrastructure/Dockerfile`), built and run via Docker on a dedicated remote Docker host (a Mac on the LAN; see `infrastructure/README.md` Section 1) — this replaced an earlier local Windows/Podman/WSL2 setup, migrated 2026-08-12.
 - A local PostgreSQL + Apache Kafka Compose deployment topology (`infrastructure/compose/`) with pinned images, migrations/role bootstrap, topics, least-privilege ACLs, file-based secrets, and health-ordered startup.
 - [ADR-0013](docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md): Apache Kafka selected as the initial self-hosted broker instead of Redpanda, superseding only the broker-selection clauses of ADR-0005.
-- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `podman exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
-- A documented, working dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) for a genuine Windows/WSL2/Podman host-port-forwarding reliability gap found and diagnosed during Sprint 7.
+- An automated, opt-in `external_service` pytest suite (`tests/integration/`, 49 tests) exercising the real PostgreSQL/Kafka topology for Event Bus delivery, Concurrency, Security boundary (PostgreSQL role isolation, a 24-case Kafka ACL matrix, secret redaction, audit-failure rollback), and Recovery/crash window (real container kill/restart via `docker exec`) — not the complete Section 19 matrix, but real-service coverage that previously existed only as one-off manual sessions.
+- A genuine Windows/WSL2/Podman host-port-forwarding reliability gap, found and diagnosed during Sprint 7, required a documented dual run path (`tests/integration/run-in-network.sh` plus direct host execution for `test_recovery.py`) to work around. That gap no longer exists: the topology moved to a dedicated Docker host (2026-08-12; see `infrastructure/README.md`), and the full `external_service` suite now runs as a single command.
 - [docs/operations/README.md](docs/operations/README.md): verified operational documentation (Phase 8) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every command independently re-run against the real local environment during Sprint 8. Completes Vertical Slice 01's eight-phase plan.
 - **A generic capability result model** ([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md)): `AgentOutcome.result_data`/`WorkflowResult.result_data` (capability-scoped `Mapping[str, object]`) replace the `word_count`-specific fields across wire contracts (discriminated `if`/`then` union in `task_completed.schema.json`), Agent/Orchestrator persistence (migrations `0003`, `0004`), and the public API (`WorkflowResultModel` is now a generic passthrough). `text.word-count` was re-pointed at this model with its full test suite re-run and no regression, before any new capability was built on top of it.
 - **An AI Router boundary** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Sections 1–3, `src/ai_platform/ports/ai_router/`, `src/ai_platform/adapters/ai_router/`): a synchronous, provider-neutral `AIRouterPort.complete()` contract, Anthropic and OpenAI adapters built on the official SDKs (no third-party abstraction library), a deterministic configuration-ordered `FallbackAIRouter`, and durable redacted per-call usage tracking (`agent.provider_call_usage`) kept as internal evidence, never surfaced on the public API.
@@ -236,7 +238,7 @@ be introduced starting with the sprint that implements Phase 6
 - Real-topology re-validation of Sprint 9's own infrastructure changes (schema migrations `0003`–`0007`, renamed/capability-scoped Kafka topics, the new `summarize-agent` service) — the topology already running on this host predates them.
 - ADR-0014's five recorded open questions (Section 8): the `PROVIDER_CALL_OUTCOME_UNKNOWN` reconciliation window and operator procedure, exact retry-budget numbers, the approved Claude/OpenAI model list, Orchestrator-level AI Router invocation, and same-provider-vs-cross-provider fallback ordering.
 
-**What's next (Sprint 10, in progress — see [docs/sprint-10/plan.md](docs/sprint-10/plan.md)):**
+**What's next (Sprint 10 is now done — see [docs/sprint-10/plan.md](docs/sprint-10/plan.md); items below are its final account plus what's landed since):**
 - All five of ADR-0014 Section 8's open questions are now resolved *and
   implemented*: [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
   resolved the reconciliation-window/operator-procedure question, and
@@ -280,16 +282,38 @@ be introduced starting with the sprint that implements Phase 6
   provider validation pass, if and when the repository owner wants to
   pursue it — still not done, now unblocked now that the approved models
   are configured and enforced.
-- [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md):
-  a third capability, `code.review`, scoped as the first candidate for
-  turning software-team personas into real platform capabilities
-  (advisory-only, no autonomous actions). Its domain/contract layer
-  (`src/ai_platform/agents/review_agent/`, contract schema updates) has
-  landed with full unit/component/contract test coverage; it is **not
-  yet wired into the running platform** — `runtime/composition.py`
-  executor selection, the `review-agent` Compose service, and its
-  Capability Registry binding are the next PR. No real AI provider is
-  configured for it yet either way.
+- [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md)'s
+  `code.review` capability is now fully wired into the running platform
+  (`runtime/composition.py` executor selection, the `review-agent`
+  Compose service, its Capability Registry binding, and a public-API fix
+  so submissions reach it) — see PRs #28/#31/#32. No real AI provider is
+  configured for it either way, same as `text.summarize`.
+- **`GET /api/v1/agents`** (PR #33): a read-only Capability Registry
+  status endpoint.
+- A **Vue.js agent status dashboard** (`frontend/dashboard/`,
+  containerized as a multi-stage build behind nginx, sharing `platform`'s
+  network namespace) consuming `GET /api/v1/agents` — built and
+  functional, open as PR #34 against `main`, not yet merged.
+- `ProcessLifecycle.stop()` (`src/ai_platform/runtime/lifecycle.py`) now
+  logs the underlying exception behind an unclean shutdown instead of
+  silently discarding it (PR #35) — the `PLATFORM_SHUTDOWN_INCOMPLETE`/
+  `AGENT_SHUTDOWN_INCOMPLETE` crash previously misattributed to
+  Windows/Podman host flakiness in Sprint 10 reproduced independently on
+  the current Mac Docker host, so the next occurrence is now
+  diagnosable from the container's own logs.
+- `postgres`/`kafka`/`platform`/`test-agent-2`/`summarize-agent`/
+  `review-agent` now restart automatically (`restart: unless-stopped`)
+  after a crash or Docker Desktop/host restart; `test-agent`/`dashboard`
+  deliberately do not (see the inline comment in
+  `infrastructure/compose/docker-compose.yml` — their shared
+  `network_mode: "service:platform"` means they need recreating, not
+  restarting, whenever `platform` restarts).
+- Genuinely open right now: reviewing and merging PR #34 (agent status
+  dashboard); the pytest-automated full-container End-to-End harness
+  (still not picked up by anyone); real Anthropic/OpenAI credentials
+  (still a repository-owner decision); and giving the post-Sprint-10 work
+  above a proper `docs/sprint-N/` home instead of living only in PR
+  descriptions and this section.
 
 ## 9. Security Rules
 
@@ -315,13 +339,14 @@ demonstrated in `infrastructure/compose/` — see
 
 ## 11. How to Deploy
 
-A complete local deployment topology exists under
+A complete deployment topology exists under
 [infrastructure/](infrastructure/): versioned migrations, credential-free
-PostgreSQL permission roles, the application Docker image, and a Podman
+PostgreSQL permission roles, the application Docker image, and a Docker
 Compose topology (PostgreSQL + Apache Kafka + the platform/Test Agent
-processes) with least-privilege ACLs and file-based secrets. It is
-explicitly local-only (single broker, single database node, no TLS,
-loopback-only application exposure) — see
+processes) with least-privilege ACLs and file-based secrets, run on a
+dedicated Docker host (a Mac on the LAN) rather than any individual
+developer's machine. It is still explicitly non-production (single broker,
+single database node, no TLS, loopback-only application exposure) — see
 [infrastructure/README.md](infrastructure/README.md) for exact commands.
 Production deployment topology, backup, and disaster recovery remain future
 work.

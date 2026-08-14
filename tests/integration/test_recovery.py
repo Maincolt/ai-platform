@@ -23,19 +23,21 @@ account with raw command/output evidence):
 
 These tests drive the real `platform`/`test-agent` application containers
 (image `ai-platform:sprint6`), not just the database/broker adapters. That
-means they operate entirely through `podman` subprocess calls rather than
-direct HTTP/DSN connections to host-published ports:
+means they operate entirely through `docker` subprocess calls rather than
+direct HTTP/DSN connections to host-published ports, and therefore must run
+directly on the Docker host itself (over SSH; see
+`docs/operations/README.md` Section 1) rather than from a developer's own
+machine:
 
 - The platform's HTTP API binds to `127.0.0.1` inside its own container
   only (an intentional, validated security property -- see
   `src/ai_platform/runtime/configuration.py`'s loopback enforcement), so it
-  is reached via `podman exec ... python3 -c "..."`, exactly as Sprint 6's
+  is reached via `docker exec ... python3 -c "..."`, exactly as Sprint 6's
   manual validation did.
-- On this host, direct PostgreSQL connections from Windows-native Python to
-  the published `localhost:5433` port are unreliable (TCP connects, but the
-  protocol handshake can hang -- see `tests/integration/README.md`), so
-  durable-state assertions use `podman exec` into the PostgreSQL container
-  with `psql` rather than `psycopg` over the host-forwarded port.
+- Durable-state assertions use `docker exec` into the PostgreSQL container
+  with `psql` rather than `psycopg` over the host-forwarded port, so they
+  work identically whether run on the Docker host directly or (before the
+  Sprint 6/7-era host migration) over an unreliable forwarded port.
 
 Because these tests kill and restart the shared `platform`/`test-agent`
 containers, they must not run concurrently with anything else exercising
@@ -67,9 +69,7 @@ def _skip_if_external_services_unavailable() -> None:  # pyright: ignore[reportU
 
     That fixture pre-checks direct psycopg/confluent_kafka connections to the
     host-published ports, which this module never uses (it drives everything
-    through `podman exec`, for the reasons in this module's docstring). Using
-    it here would make every test in this file skip on hosts where the
-    direct host-port path is flaky even though podman itself works fine.
+    through `docker exec`, for the reasons in this module's docstring).
     `_ensure_app_containers_running` below is this module's own, more
     relevant readiness check.
     """
@@ -98,8 +98,8 @@ def _run(
     return result
 
 
-def _podman_exec_python(container: str, script: str, *, timeout: float = 15.0) -> str:
-    result = _run(["podman", "exec", container, "python3", "-c", script], timeout=timeout)
+def _docker_exec_python(container: str, script: str, *, timeout: float = 15.0) -> str:
+    result = _run(["docker", "exec", container, "python3", "-c", script], timeout=timeout)
     return result.stdout
 
 
@@ -108,7 +108,7 @@ def _new_uuid7() -> str:
 
 
 def _submit_workflow(text: str) -> tuple[str, str]:
-    """Submit through the real platform API (via podman exec) and return
+    """Submit through the real platform API (via docker exec) and return
     (workflow_id, request_id)."""
     script = f"""
 import urllib.request, json
@@ -126,7 +126,7 @@ with urllib.request.urlopen(req, timeout=10) as resp:
     print(resp.status)
     print(resp.read().decode())
 """
-    output = _podman_exec_python(_PLATFORM_CONTAINER, script)
+    output = _docker_exec_python(_PLATFORM_CONTAINER, script)
     lines = output.strip().splitlines()
     status, body = lines[0], lines[1]
     assert status == "202", f"submission did not dispatch: {status} {body}"
@@ -142,14 +142,14 @@ with urllib.request.urlopen(
 ) as resp:
     print(resp.read().decode())
 """
-    output = _podman_exec_python(_PLATFORM_CONTAINER, script)
+    output = _docker_exec_python(_PLATFORM_CONTAINER, script)
     return json.loads(output.strip())
 
 
 def _wait_for_platform_ready(deadline: float) -> None:
     while time.monotonic() < deadline:
         try:
-            output = _podman_exec_python(
+            output = _docker_exec_python(
                 _PLATFORM_CONTAINER,
                 "import urllib.request\n"
                 "url = 'http://127.0.0.1:8000/health/ready'\n"
@@ -194,7 +194,7 @@ def _result_word_count(document: dict[str, object]) -> int:
 def _psql_scalar(query: str) -> str:
     result = _run(
         [
-            "podman",
+            "docker",
             "exec",
             _POSTGRES_CONTAINER,
             "bash",
@@ -207,10 +207,10 @@ def _psql_scalar(query: str) -> str:
     return result.stdout.strip()
 
 
-def _podman_available() -> bool:
+def _docker_available() -> bool:
     try:
-        result = subprocess.run(["podman", "version"], capture_output=True, timeout=10, check=False)
-    except OSError, subprocess.TimeoutExpired:
+        result = subprocess.run(["docker", "version"], capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 
@@ -220,35 +220,36 @@ def _ensure_app_containers_running() -> Iterator[None]:  # pyright: ignore[repor
     """Confirm the platform/test-agent application containers are present
     and ready before this module's tests run; restore them to a healthy
     state afterward regardless of what individual tests did to them."""
-    if not _podman_available():
+    if not _docker_available():
         pytest.skip(
-            "podman is not available in this environment. This module drives real "
+            "docker is not available in this environment. This module drives real "
             "containers directly (kill/restart/exec) and cannot run inside the "
             "container-network sandbox used by tests/integration/run-in-network.sh -- "
-            "run it directly on a host with the podman CLI instead."
+            "run it directly on the Docker host itself (over SSH; see "
+            "docs/operations/README.md Section 1) instead."
         )
     inspect = _run(
-        ["podman", "inspect", _PLATFORM_CONTAINER, "--format", "{{.State.Status}}"],
+        ["docker", "inspect", _PLATFORM_CONTAINER, "--format", "{{.State.Status}}"],
         check=False,
     )
     if inspect.returncode != 0 or inspect.stdout.strip() != "running":
         pytest.skip(
             f"{_PLATFORM_CONTAINER} is not running. Bring the application containers "
-            "up first: 'podman compose --profile app up -d platform test-agent' from "
+            "up first: 'docker compose --profile app up -d platform test-agent' from "
             f"{_COMPOSE_DIR}/ (see infrastructure/README.md)."
         )
     _wait_for_platform_ready(time.monotonic() + _READY_TIMEOUT_SECONDS)
     yield
     # Best-effort: leave both containers running and ready for whatever runs next.
-    _run(["podman", "start", _PLATFORM_CONTAINER], check=False)
+    _run(["docker", "start", _PLATFORM_CONTAINER], check=False)
     inspect = _run(
-        ["podman", "inspect", _TEST_AGENT_CONTAINER, "--format", "{{.State.Status}}"],
+        ["docker", "inspect", _TEST_AGENT_CONTAINER, "--format", "{{.State.Status}}"],
         check=False,
     )
     if inspect.returncode != 0 or inspect.stdout.strip() != "running":
-        _run(["podman", "rm", "-f", _TEST_AGENT_CONTAINER], check=False)
+        _run(["docker", "rm", "-f", _TEST_AGENT_CONTAINER], check=False)
         _run(
-            ["podman", "compose", "--profile", "app", "up", "-d", "test-agent"],
+            ["docker", "compose", "--profile", "app", "up", "-d", "test-agent"],
             cwd=_COMPOSE_DIR,
             check=False,
         )
@@ -265,7 +266,7 @@ def test_agent_killed_mid_flight_recovers_via_redelivery_with_no_duplicate() -> 
     # Race the kill against the Agent's own processing -- see
     # docs/sprint-6/progress.md for why this reliably lands before commit in
     # practice (poll/idle delays give a real, if narrow, window).
-    _run(["podman", "kill", _TEST_AGENT_CONTAINER], check=False)
+    _run(["docker", "kill", _TEST_AGENT_CONTAINER], check=False)
 
     state = _get_workflow_state(workflow_id)
     assert state["state"] == "DISPATCHED", (
@@ -273,7 +274,7 @@ def test_agent_killed_mid_flight_recovers_via_redelivery_with_no_duplicate() -> 
         f"the Agent; got {state}"
     )
 
-    _run(["podman", "start", _TEST_AGENT_CONTAINER])
+    _run(["docker", "start", _TEST_AGENT_CONTAINER])
 
     final = _wait_for_workflow_state(workflow_id, ("COMPLETED", "FAILED"), time.monotonic() + 45.0)
     assert final["state"] == "COMPLETED", f"workflow did not recover cleanly: {final}"
@@ -316,7 +317,7 @@ def test_platform_killed_after_dispatch_recovers_the_backlogged_outcome() -> Non
     """
     workflow_id, _ = _submit_workflow("platform crash recovery test with six")
 
-    _run(["podman", "kill", _PLATFORM_CONTAINER], check=False)
+    _run(["docker", "kill", _PLATFORM_CONTAINER], check=False)
 
     # Give the still-running Agent a moment to finish and publish its
     # outcome while the platform is down -- this is the scenario, not an
@@ -328,10 +329,10 @@ def test_platform_killed_after_dispatch_recovers_the_backlogged_outcome() -> Non
     # tied to the platform container's specific instantiation, not "whichever
     # container is currently named platform" -- see infrastructure/README.md).
     # test-agent must be recreated, not just restarted, every time platform is.
-    _run(["podman", "start", _PLATFORM_CONTAINER])
-    _run(["podman", "rm", "-f", _TEST_AGENT_CONTAINER], check=False)
+    _run(["docker", "start", _PLATFORM_CONTAINER])
+    _run(["docker", "rm", "-f", _TEST_AGENT_CONTAINER], check=False)
     _run(
-        ["podman", "compose", "--profile", "app", "up", "-d", "test-agent"],
+        ["docker", "compose", "--profile", "app", "up", "-d", "test-agent"],
         cwd=_COMPOSE_DIR,
     )
     _wait_for_platform_ready(time.monotonic() + _READY_TIMEOUT_SECONDS)

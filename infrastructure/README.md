@@ -40,8 +40,8 @@ application containers.
 
 ## Local Compose topology
 
-`compose/` provides a single-node, local-only PostgreSQL and Apache Kafka
-(KRaft) topology for Sprint 6 real-service validation. It is not a
+`compose/` provides a single-node PostgreSQL and Apache Kafka (KRaft)
+topology for Sprint 6 real-service validation. It is not a production
 deployment target and is never referenced from an application container
 image; it exists to prove the concrete adapters in
 `src/ai_platform/adapters/` against real services.
@@ -50,12 +50,33 @@ The broker is Apache Kafka rather than Redpanda — see
 [ADR-0013](../docs/architecture/decisions/ADR-0013-initial-broker-selection-apache-kafka.md)
 for why this differs from ADR-0005's preferred initial broker.
 
+**Runs on a dedicated Docker host, not the developer's own machine.** The
+topology runs on Docker Desktop on a Mac at `192.168.1.123` (LAN), reached
+over SSH — see [docs/operations/README.md](../docs/operations/README.md)
+Section 1 for the connection details and why (the local Windows/Podman/WSL2
+setup this used to run on had unreliable container-port forwarding). Every
+`docker ...` command below is run from an SSH session into that host, from
+the repo checked out there — Docker's bind mounts resolve on whichever
+machine runs the daemon, so the repo must exist on the Mac itself, not just
+be referenced remotely.
+
 ```bash
-cd infrastructure/compose
+ssh -i ~/.ssh/mac_docker gebruiker@192.168.1.123
+cd ~/ai-platform/infrastructure/compose
 bash scripts/generate-secrets.sh   # once, creates secrets/*.txt (git-ignored)
-podman compose up -d postgres kafka
-podman compose up postgres-init kafka-init   # apply migrations, topics, ACLs
+export KAFKA_EXTERNAL_ADVERTISED_HOST=192.168.1.123   # see kafka/entrypoint.sh
+docker compose up -d postgres kafka
+docker compose up postgres-init kafka-init   # apply migrations, topics, ACLs
 ```
+
+**`KAFKA_EXTERNAL_ADVERTISED_HOST` matters for any client not running on the
+Docker host itself.** Kafka's `EXTERNAL` listener answers a client's initial
+bootstrap connection, then tells it where to reconnect for actual
+metadata/produce/consume traffic (`advertised.listeners`). Left at the
+default `localhost`, that reconnect address resolves to the *client's own
+machine*, not the Mac — bootstrap succeeds, then every real request times
+out. This was invisible before the host migration (client and broker were
+the same machine) and needs setting explicitly now.
 
 What each service does:
 
@@ -97,13 +118,14 @@ regenerate with `scripts/generate-secrets.sh`, never commit them).
 `compose/docker-compose.yml` also defines `platform` and `test-agent`
 services, gated behind the `app` Compose profile so a plain `up` never starts
 them. Build the image first, generate the additional application secrets,
-then start both processes:
+then start both processes (all from the SSH session into the Docker host,
+repo root at `~/ai-platform`):
 
 ```bash
-podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .   # from repo root
+docker build -f infrastructure/Dockerfile -t ai-platform:sprint6 .   # from repo root
 cd infrastructure/compose
 bash scripts/generate-app-secrets.sh   # DSNs + shared readiness credential
-podman compose --profile app up -d platform test-agent
+docker compose --profile app up -d platform test-agent
 ```
 
 `compose/runtime/registry.json` is one Registry/declaration artifact shared
@@ -167,6 +189,44 @@ Implementation Status section. `review-agent` therefore starts and reaches
 `READY`, but any real `code.review` submission fails at the provider call,
 exactly like `summarize-agent`.
 
+### Agent status dashboard (`dashboard`)
+
+`dashboard` (`frontend/dashboard/`) is a Vue 3 + Vite single-page app,
+containerized as a multi-stage build: `npm run build` produces a static
+bundle, served by a minimal `nginx:1.27-alpine` image. It polls
+`GET /api/v1/agents` every 5 seconds and renders a live, color-coded card
+per declared Agent binding (Online/Stale/Unavailable/Unknown, derived from
+the same READY-and-fresh rule candidate selection itself uses). Read-only:
+it never submits work and never affects candidate selection.
+
+Like `test-agent`, `dashboard` runs with `network_mode: "service:platform"`
+rather than getting its own network namespace — deliberately, not for
+convenience. `AI_PLATFORM_API_HOST` is validated as a loopback literal
+(same rule referenced below) and this is an intentional, documented
+security posture (`docs/operations/README.md` Section 8: "loopback-only
+application exposure"), not something this dashboard should widen. Sharing
+platform's namespace lets nginx reverse-proxy `/api/`/`/health/` to
+`127.0.0.1:8000` — reaching the real Workflow API without exposing it to
+the wider Compose network the way `summarize-agent`'s
+`0.0.0.0`-bound readiness endpoint does. Because a `network_mode:
+"service:platform"` container cannot declare its own `ports:`, `8080:80`
+is published on the `platform` service block instead, the same way
+`8000`/`8100` already are.
+
+**A real deployment lesson hit while verifying this**: the running
+`ai-platform:sprint6` image can silently predate the source tree if it was
+last built before a merge that touched `src/` — `docker compose up` does
+not rebuild automatically. The dashboard's proxy correctly reached
+`platform`, but got a genuine `404` for `/api/v1/agents` until the image
+was rebuilt (`docker build -f infrastructure/Dockerfile -t
+ai-platform:sprint6 .`) to pick up that endpoint. Not a `dashboard`-specific
+gap — any change to `src/` needs an image rebuild before the next
+`compose up`, `docker compose build` alone does not imply this either. This
+also means the Mac's copy of the repo needs to be re-synced (`git archive
+HEAD | ssh ... "tar -x -C ~/ai-platform"`, or a plain `git pull` once the
+Mac has Xcode Command Line Tools installed) before rebuilding, since the
+image build reads from the Mac's own checkout.
+
 `test-agent` runs with `network_mode: "service:platform"` — it shares the
 platform container's network namespace rather than getting its own. This is
 required, not incidental: `AI_PLATFORM_API_HOST` and
@@ -203,22 +263,30 @@ for the full account). One operational gotcha from that exercise:
 **restarting `platform` breaks `test-agent`'s networking.** Because
 `test-agent` uses `network_mode: "service:platform"`, it is bound to the
 platform container's original network namespace, not to "whichever
-container is currently named platform" — even `podman start` on the same,
+container is currently named platform" — even `docker start` on the same,
 un-removed container breaks it (`librdkafka` then fails DNS resolution for
 `kafka:9092`). After restarting `platform` for any reason, recreate
 `test-agent` too:
 
 ```bash
-podman rm -f ai-platform-local-test-agent-1
-podman compose --profile app up -d test-agent
+docker rm -f ai-platform-local-test-agent-1
+docker compose --profile app up -d test-agent
 ```
 
-The `platform`/`test-agent` containers were tested via `podman exec` calls
-to `127.0.0.1` inside the container, not via the host-published `8000`/`8100`
-ports. On this host's Podman network backend (`netavark`), host port
-publishing NATs to the container's bridge interface, not its loopback — so
-a listener bound strictly to `127.0.0.1` (as this loopback-only-by-design
-configuration requires) is unreachable from outside the container's network
-namespace by construction. This is consistent with the security posture in
-ADR-0005 Section 17 ("loopback-limited exposure... explicitly
-non-production"), not a defect to fix.
+The `platform`/`test-agent` containers were originally tested via `podman
+exec` calls to `127.0.0.1` inside the container rather than via the
+host-published `8000`/`8100` ports, because the local Windows/Podman
+network backend (`netavark`) NATed host port publishing to the container's
+bridge interface, not its loopback — so a listener bound strictly to
+`127.0.0.1` (as this loopback-only-by-design configuration requires) was
+unreachable from outside the container's network namespace by construction.
+That constraint is unchanged on the current Docker Desktop for Mac host —
+`8000`/`8100` are still not host-reachable, by the same loopback-binding
+logic, regardless of host OS or container engine — so `docker exec` (not
+the published ports) is still the right way to reach them. This is
+consistent with the security posture in ADR-0005 Section 17
+("loopback-limited exposure... explicitly non-production"), not a defect to
+fix. What *did* change with the host migration is `postgres`/`kafka`/the
+dashboard's `8080`: those bind to real interfaces and are now reachable
+directly at `192.168.1.123:PORT` from any machine on the LAN, which was not
+reliable under the old Windows/Podman/WSL2 `gvproxy` forwarding path.

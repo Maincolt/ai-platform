@@ -1,12 +1,12 @@
 # Operations — Local Deployment
 
-> Scope: the local `infrastructure/compose/` deployment only (Podman-managed
+> Scope: the `infrastructure/compose/` deployment only (Docker-managed
 > PostgreSQL 17 + Apache Kafka 3.9 + the `platform`/`test-agent`
 > application containers). **This document makes no production-readiness
 > claim.** Every command below has been independently re-run against a
-> real local environment during Sprint 8 (see
-> [docs/sprint-8/done.md](../sprint-8/done.md)) — nothing here is
-> aspirational or copied without re-verification.
+> real environment (Sprint 8, see [docs/sprint-8/done.md](../sprint-8/done.md);
+> re-verified 2026-08-12 on the current Docker host, see Section 1) —
+> nothing here is aspirational or copied without re-verification.
 >
 > For the full topology design (roles, ACLs, secrets, why each piece is
 > shaped the way it is), see [infrastructure/README.md](../../infrastructure/README.md).
@@ -15,9 +15,23 @@
 
 ## 1. Setup
 
-From a clean checkout, on a host with Podman installed:
+**The topology runs on a dedicated Docker host, not the developer's own
+machine**: a Mac (Docker Desktop) on the LAN at `192.168.1.123`, macOS
+user `gebruiker`, reached over SSH with a dedicated key. This replaced an
+earlier local Windows/Podman/WSL2 setup whose container-port forwarding
+(`gvproxy`) was unreliable — see [Section 7](#7-troubleshooting) for what
+that looked like and why it's no longer the operating model.
 
 ```bash
+# 0. Connect to the Docker host; run everything below from this session
+ssh -i ~/.ssh/mac_docker gebruiker@192.168.1.123
+cd ~/ai-platform
+
+# Non-interactive SSH sessions on macOS don't source .zprofile, so `docker`
+# isn't on PATH by default -- export it once per session (or prefix every
+# command):
+export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:$PATH"
+
 # 1. Generate local secrets (once; both are safe to re-run.
 #    generate-secrets.sh skips any file that already exists.
 #    generate-app-secrets.sh always rewrites the derived DSN files, but
@@ -29,35 +43,41 @@ bash scripts/generate-secrets.sh
 bash scripts/generate-app-secrets.sh
 
 # 2. Bring up PostgreSQL and Kafka, apply migrations/roles/topics/ACLs
-podman compose up -d postgres kafka
-podman compose up postgres-init kafka-init
+# KAFKA_EXTERNAL_ADVERTISED_HOST must be the Docker host's own reachable
+# address, or Kafka clients running elsewhere will bootstrap successfully
+# and then time out on every real request (see infrastructure/README.md).
+export KAFKA_EXTERNAL_ADVERTISED_HOST=192.168.1.123
+docker compose up -d postgres kafka
+docker compose up postgres-init kafka-init
 
 # 3. Build the application image (from the repository root)
 cd ../..
-podman build -f infrastructure/Dockerfile -t ai-platform:sprint6 .
+docker build -f infrastructure/Dockerfile -t ai-platform:sprint6 .
 
 # 4. Start the platform and Test Agent
 cd infrastructure/compose
-podman compose --profile app up -d platform test-agent
+docker compose --profile app up -d platform test-agent
 ```
 
 `postgres-init`/`kafka-init` are one-shot jobs (`restart: "no"`) — they
 exit after running; that is expected, not a failure. Re-running step 2 is
 safe (migrations and topic/ACL creation are idempotent).
 
-**Known gotcha on Windows/WSL2 + Podman**: bringing the topology up and
-verifying it are two different things on some hosts — see [Section
-7](#7-troubleshooting).
+The repo must exist on the Docker host itself (bind mounts resolve against
+the daemon's filesystem, not the client's) — sync it with
+`git archive HEAD | ssh -i ~/.ssh/mac_docker gebruiker@192.168.1.123 "tar -x -C ~/ai-platform"`
+from the developer machine after any commit, until the Mac has Xcode
+Command Line Tools installed for native `git pull`.
 
 ## 2. Health
 
 The platform and Test Agent expose readiness endpoints, but — by design
 (loopback-only exposure, see [Section 8](#8-security-limitations)) — they
-are not reachable from the host. Check them via `podman exec`:
+are not reachable from the host. Check them via `docker exec`:
 
 ```bash
 # Platform readiness (aggregates database, event bus, registry, runtime checks)
-podman exec ai-platform-local-platform-1 python3 -c "
+docker exec ai-platform-local-platform-1 python3 -c "
 import urllib.request
 with urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5) as r:
     print(r.status, r.read().decode())
@@ -65,7 +85,7 @@ with urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5) as 
 # Expect: 200 {"status":"ready"}
 
 # Platform liveness (always succeeds once the process is up)
-podman exec ai-platform-local-platform-1 python3 -c "
+docker exec ai-platform-local-platform-1 python3 -c "
 import urllib.request
 with urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5) as r:
     print(r.status, r.read().decode())
@@ -76,9 +96,9 @@ with urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5) as r
 Container-level health for PostgreSQL and Kafka:
 
 ```bash
-podman ps --format "{{.Names}} {{.Status}}"
+docker ps --format "{{.Names}} {{.Status}}"
 # postgres and kafka should show "(healthy)"; platform/test-agent show
-# "Up ..." only -- they have no podman-level HEALTHCHECK, so readiness
+# "Up ..." only -- they have no docker-level HEALTHCHECK, so readiness
 # must be checked via the endpoints above.
 ```
 
@@ -86,7 +106,7 @@ Kafka consumer group health (useful for confirming the Test Agent is
 actually attached and not lagging):
 
 ```bash
-podman exec ai-platform-local-kafka-1 bash -c '
+docker exec ai-platform-local-kafka-1 bash -c '
 admin_pw=$(cat /run/secrets/kafka_admin_password)
 cat > /tmp/admin-client.properties <<EOF
 security.protocol=SASL_PLAINTEXT
@@ -106,10 +126,10 @@ deterministic word counter, not an AI/LLM capability (see
 [README.md](../../README.md) for what "Agent" means architecturally; the
 AI Router and additional Agent types are not built yet). Because the API
 binds to loopback only inside its own container, submit and read requests
-via `podman exec`, exactly as validation did in Sprints 6–7:
+via `docker exec`, exactly as validation did in Sprints 6–7:
 
 ```bash
-podman exec ai-platform-local-platform-1 python3 -c "
+docker exec ai-platform-local-platform-1 python3 -c "
 import urllib.request, json, uuid
 
 def uuid7():
@@ -139,7 +159,7 @@ Expect `202` with a JSON body containing `workflow_id` and
 from the response above):
 
 ```bash
-podman exec ai-platform-local-platform-1 python3 -c "
+docker exec ai-platform-local-platform-1 python3 -c "
 import urllib.request
 wf_id = 'PASTE-WORKFLOW-ID-HERE'
 with urllib.request.urlopen(
@@ -168,10 +188,10 @@ equivalent for an operator.
 ### Test Agent crash
 
 ```bash
-podman kill ai-platform-local-test-agent-1
+docker kill ai-platform-local-test-agent-1
 # A workflow submitted just before this point stays DISPATCHED while the
 # Agent is down -- it is not lost.
-podman start ai-platform-local-test-agent-1
+docker start ai-platform-local-test-agent-1
 # Uncommitted Kafka work is redelivered once the Agent reconnects; the
 # workflow reaches COMPLETED with no duplicate receipt/outcome.
 ```
@@ -179,24 +199,24 @@ podman start ai-platform-local-test-agent-1
 ### Platform crash
 
 ```bash
-podman kill ai-platform-local-platform-1
+docker kill ai-platform-local-platform-1
 # The Agent keeps working independently and publishes its outcome even
 # while the platform is down.
-podman start ai-platform-local-platform-1
+docker start ai-platform-local-platform-1
 ```
 
 **Then you must recreate `test-agent`, not just leave it running** — this
 is the single most important operational gotcha in this whole document.
 `test-agent` uses `network_mode: "service:platform"`, which binds it to
 the *specific platform container instance* it started next to. Restarting
-`platform` — even `podman start` on the same, un-removed container —
+`platform` — even `docker start` on the same, un-removed container —
 breaks `test-agent`'s network namespace reference; `librdkafka` inside it
 then fails DNS resolution for `kafka:9092` until it is recreated:
 
 ```bash
-podman rm -f ai-platform-local-test-agent-1
+docker rm -f ai-platform-local-test-agent-1
 cd infrastructure/compose
-podman compose --profile app up -d test-agent
+docker compose --profile app up -d test-agent
 ```
 
 After a platform crash, whether the recovering platform consumes the
@@ -246,7 +266,7 @@ the `orchestrator` and `agent` schemas in the same database, so it does
 not need cross-service correlation):
 
 ```bash
-podman exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
 SELECT
     ta.task_attempt_id,
     ta.capability_name,
@@ -284,7 +304,7 @@ killed before `maximum_processing_attempts` was reached). Check the
 `summarize-agent`'s transport rejections:
 
 ```bash
-podman exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform -c "
 SELECT rejection_id, safe_failure_code, quarantine_state, recorded_at
 FROM agent.transport_rejections
 ORDER BY recorded_at DESC
@@ -301,7 +321,7 @@ from Step 1, read the actual quarantined message from the
 and decode its envelope:
 
 ```bash
-podman exec ai-platform-local-kafka-1 bash -c '
+docker exec ai-platform-local-kafka-1 bash -c '
 admin_pw=$(cat /run/secrets/kafka_admin_password)
 cat > /tmp/admin-client.properties <<EOF
 security.protocol=SASL_PLAINTEXT
@@ -348,8 +368,8 @@ volumes):
 
 ```bash
 cd infrastructure/compose
-podman compose --profile app stop platform test-agent
-podman compose stop postgres kafka
+docker compose --profile app stop platform test-agent
+docker compose stop postgres kafka
 ```
 
 Full teardown (removes containers **and data volumes** — irreversible for
@@ -357,8 +377,8 @@ anything not durably needed):
 
 ```bash
 cd infrastructure/compose
-podman compose --profile app down
-podman compose down -v
+docker compose --profile app down
+docker compose down -v
 ```
 
 Remove the generated local secrets (they regenerate on the next
@@ -372,37 +392,32 @@ rm -rf infrastructure/compose/secrets
 
 ## 7. Troubleshooting
 
-### Windows/WSL2/Podman: containers healthy but unreachable from the host
+### Historical: Windows/WSL2/Podman host-forwarding unreliability (resolved by migration)
 
-**Symptom**: `podman ps` shows `postgres`/`kafka` as `(healthy)`, but any
-tool connecting to `localhost:5433`/`localhost:19093` from the host times
-out or hangs.
+Through Sprint 10, this topology ran on the developer's own Windows machine
+via Podman Desktop's WSL2 integration. `docker ps`-equivalent (`podman ps`)
+would show `postgres`/`kafka` as `(healthy)`, but any tool connecting to
+`localhost:5433`/`localhost:19093` from the host would time out or hang.
+Diagnosed in detail during Sprint 7 (`docs/sprint-7/progress.md`) as
+layered: stale `nftables` NAT rules inside the Podman machine, the Windows
+WSL2 Hyper-V Firewall silently dropping forwarded container ports, and —
+even after both fixes — inconsistent protocol-handshake-level failures on
+direct connections that were never fully root-caused. A deeper investigation
+on 2026-08-09 (while containerizing the dashboard) traced the remaining
+failures to Podman Desktop's `gvproxy` vsock tunnel itself being broken —
+every published port (`8000`, `8080`, `8100`, not just the dashboard) was
+affected, with no manual `netsh portproxy` workaround possible once
+`gvproxy` was down.
 
-This was diagnosed in detail during Sprint 7 (`docs/sprint-7/progress.md`)
-as layered:
-
-1. Stale/duplicate `nftables` NAT rules inside the Podman machine from
-   earlier container recreations, sometimes routing to a defunct
-   container IP. Fixed by fully removing and recreating the containers
-   and network (`podman compose down` then `up` again) so netavark
-   regenerates clean rules.
-2. The Windows WSL2 Hyper-V Firewall silently dropping forwarded container
-   ports even when everything inside the WSL VM is correct. Fixed on this
-   host with `netsh interface portproxy` plus an explicit
-   `netsh advfirewall firewall add rule` allow rule for the affected
-   ports.
-3. Even after both fixes, direct connections from Windows-native
-   processes can still be **inconsistent**: a bare TCP connect can
-   succeed while the actual protocol handshake hangs. This is not fully
-   understood and does not have a further fix documented here.
-
-**Working around it**: for automated tests,
-`tests/integration/run-in-network.sh` runs the test process from inside a
-throwaway container on the compose network instead of through the host,
-sidestepping the host-forwarding path entirely — see
-[tests/integration/README.md](../../tests/integration/README.md). For
-manual operator commands, this document uses `podman exec` throughout
-instead of connecting to host-published ports, for the same reason.
+**Resolution**: rather than continue chasing this, the topology was moved
+2026-08-12 to a dedicated Docker host — a Mac running Docker Desktop at
+`192.168.1.123` (see Section 1). Docker Desktop for Mac binds published
+ports to real host network interfaces; this class of failure has not
+recurred. `run-in-network.sh` (running tests from inside a throwaway
+container on the compose network, sidestepping host-forwarding entirely)
+and this document's use of `docker exec` for the loopback-only endpoints
+predate the migration but remain correct on the new host too — see
+[tests/integration/README.md](../../tests/integration/README.md).
 
 ### `test-agent` can't reach Kafka after a platform restart
 
@@ -411,7 +426,7 @@ Temporary failure in name resolution` after `platform` was restarted.
 
 This is the `network_mode: "service:platform"` gotcha described in
 [Section 4](#4-recovery--demonstrated-crash-scenarios). Recreate
-`test-agent` (`podman rm -f` + `podman compose --profile app up -d
+`test-agent` (`docker rm -f` + `docker compose --profile app up -d
 test-agent`); a plain restart will not fix it.
 
 ### New workflow submissions return `503`
@@ -506,24 +521,22 @@ uv run basedpyright
 uv run pytest -q
 ```
 
-Real-service validation (requires the topology from Section 1; see
-[tests/integration/README.md](../../tests/integration/README.md) for the
-two-command split this host's networking requires). On Git Bash on
-Windows, `run-in-network.sh`'s `podman run -v` volume mount is silently
-mangled by MSYS path conversion unless `MSYS_NO_PATHCONV=1` is set first:
+Real-service validation (requires the topology from Section 1 up and
+reachable; see [tests/integration/README.md](../../tests/integration/README.md)).
+Run directly, from an SSH session on the Docker host or from a developer
+machine with `infrastructure/compose/secrets/` copied down — a single
+command now covers the full suite, including `test_recovery.py` (this used
+to require a two-command split to work around Windows/WSL2/Podman
+host-forwarding flakiness; see Section 7's historical note):
 
 ```bash
-export MSYS_NO_PATHCONV=1  # Git Bash on Windows only; harmless elsewhere
-bash tests/integration/run-in-network.sh -v
-uv run pytest -m external_service tests/integration/test_recovery.py -v
+uv run pytest -m external_service tests/integration/ -v
 ```
 
-Expect `65 passed, 2 skipped` from the first command (the 2 skips are
-`test_recovery.py`, which cannot run inside that throwaway container — see
-below) and `2 passed` from the second. `test_recovery.py` kills and
-restarts the real `platform`/`test-agent` containers as part of the test
-itself; the two tests race narrow, genuinely timing-dependent windows (the
-same races described in [Section 4](#4-recovery--demonstrated-crash-scenarios)),
-so an occasional failure from a too-fast or too-slow crash window on a
-given run is a known, accepted flake in this suite, not a sign the
-environment is broken — rerun once if either test fails.
+`test_recovery.py` kills and restarts the real `platform`/`test-agent`
+containers as part of the test itself; its two tests race narrow, genuinely
+timing-dependent windows (the same races described in
+[Section 4](#4-recovery--demonstrated-crash-scenarios)), so an occasional
+failure from a too-fast or too-slow crash window on a given run is a known,
+accepted flake in this suite, not a sign the environment is broken — rerun
+once if either test fails.
