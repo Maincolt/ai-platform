@@ -441,6 +441,46 @@ def test_build_platform_process_wires_producer_and_consumer_credentials_separate
     }
 
 
+def test_build_platform_process_command_publisher_is_given_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _no_kafka: None, _no_schema_loading: None
+) -> None:
+    """Regression test: the Orchestrator's command_publisher was constructed
+    without `environment=`, so `KafkaEventPublisher._resolve_topic` always
+    raised `CAPABILITY_ROUTING_REQUIRES_ENVIRONMENT` for every
+    capability-scoped command publish (ADR-0014 Section 6) -- unhandled by
+    `publish()`'s exception handling, crashing the whole runtime service and
+    surfacing only as an undiagnosable `PLATFORM_SHUTDOWN_INCOMPLETE` after
+    the lifecycle diagnostics fix (see lifecycle.py) finally made the
+    underlying exception visible. This was a real, deterministic bug hit on
+    ui.review's first live workflow submission, not the host-specific
+    flakiness it had been mistaken for across several earlier sprints."""
+    registry = RegistrySnapshot(revision="r1", bindings=())
+
+    def fake_load_registry(_path: Path, *, maximum_bytes: int = 0) -> RegistrySnapshot:
+        return registry
+
+    monkeypatch.setattr(composition, "load_registry_artifact", fake_load_registry)
+
+    captured_kwargs: list[dict[str, object]] = []
+    real_publisher_cls = composition.KafkaEventPublisher
+
+    def _capturing_publisher(**kwargs: object) -> object:
+        captured_kwargs.append(kwargs)
+        return real_publisher_cls(**kwargs)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(composition, "KafkaEventPublisher", _capturing_publisher)
+    config = PlatformRuntimeConfig.from_environment(_platform_env(tmp_path))
+
+    build_platform_process(config, server_factory=_fake_server_factory)
+
+    command_publisher_kwargs = next(
+        kwargs
+        for kwargs in captured_kwargs
+        if "command-publisher" in str(kwargs.get("client_id", ""))
+    )
+    assert command_publisher_kwargs.get("environment") == config.environment
+
+
 def test_build_platform_process_deadline_reconciler_uses_configured_batch_size(
     tmp_path: Path, _no_kafka: None, _no_schema_loading: None
 ) -> None:
