@@ -263,6 +263,15 @@ Real model selection beyond the reused ADR-0017 Decision 3 list, and real
 Anthropic/OpenAI provider validation, remain a further, separate,
 deliberate step, same as `text.summarize`'s.
 
+**Update (Sprint 11, post-`ui.review`):** real Anthropic credentials are
+now configured and `code.review` has been live-verified with a genuine
+model completion — a real submission correctly flagged a planted
+hardcoded password and SQL injection in a test diff. One real parsing bug
+was found by this live run and fixed: the model wrapped its findings JSON
+in a markdown code fence despite the prompt saying not to, which
+`_parse_findings` didn't tolerate (see ADR-0019's Implementation Status
+and PR #40 for the fix, shared by both `code.review` and `ui.review`).
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape and Section 20 side-effect review requirement this ADR applies

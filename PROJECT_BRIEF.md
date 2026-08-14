@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — AI Platform
 
-> Last updated: 2026-08-13 | Sprint 10 done; post-Sprint-10 work landing as individual PRs (no sprint number assigned yet) | Status: In progress
+> Last updated: 2026-08-14 | Sprint 11 done (`ui.review`); real Anthropic/OpenAI credentials now configured and live-validated for all three AI-backed capabilities | Status: In progress
 
 > **Note on terminology:** the roles in Section 6 are a *virtual contributor
 > team* used to plan and execute sprints in this repository. They are not the
@@ -13,16 +13,20 @@
 
 AI Platform is a foundation for coordinating specialized AI agents through
 modular boundaries and event-driven communication (see
-[README.md](README.md)). Fifteen Accepted ADRs govern the platform.
+[README.md](README.md)). Nineteen Accepted ADRs govern the platform.
 Vertical Slice 01's eight-phase deterministic proof of architecture
-(`text.word-count`) completed at Sprint 8. Sprint 9 is the first work
-beyond it: a real, provider-backed second capability (`text.summarize`,
+(`text.word-count`) completed at Sprint 8. Sprint 9 added the first
+provider-backed capability (`text.summarize`,
 [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md))
 behind a new AI Router boundary, and the generic capability result model
 ([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md))
-it depends on. Real-provider (Anthropic/OpenAI) credentials are not
-available in this environment — `text.summarize` is validated against
-fakes only; see [docs/sprint-9/done.md](docs/sprint-9/done.md).
+it depends on. Two more advisory, AI-backed capabilities followed the same
+shape: `code.review` ([ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md))
+and `ui.review` ([ADR-0019](docs/architecture/decisions/ADR-0019-ui-review-capability.md),
+Sprint 11, Playwright-backed). **Real Anthropic (primary) and OpenAI
+(fallback) credentials are now configured** and all three AI-backed
+capabilities have been live-verified end to end against them — a real
+model completion, not a placeholder failure; see Section 8.
 
 ## 2. Platform Concept
 
@@ -155,12 +159,13 @@ src/
 | Contributor guidance | [AGENTS.md](AGENTS.md) | Repository-wide philosophy, standards, ADR process |
 | Contribution workflow | [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR workflow, ADR process, testing/review expectations |
 | Platform architecture | [docs/architecture/README.md](docs/architecture/README.md) | Logical components, contracts, boundaries |
-| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 15 Accepted ADRs (0001–0015), governing all implementation |
+| ADRs | [docs/architecture/decisions/](docs/architecture/decisions/) | 19 Accepted ADRs (0001–0019), governing all implementation |
 | First implementation plan | [docs/implementation/vertical-slice-01.md](docs/implementation/vertical-slice-01.md) | 8-phase plan for the first deterministic workflow |
 | Test strategy | [docs/testing/README.md](docs/testing/README.md) | Local vs. external-service test levels |
-| Platform agents (architecture) | [agents/](agents/) | Placeholder — populated after Phase 3+ (Orchestrator/Registry/Test Agent) |
+| Agent capability implementations | [src/ai_platform/agents/](src/ai_platform/agents/) | `test_agent/` (`text.word-count`), `summarize_agent/` (`text.summarize`), `review_agent/` (`code.review`), `ui_review_agent/` (`ui.review`) — each a self-contained deployable per ADR-0007 |
 | Skills (platform capabilities) | [skills/](skills/) | Placeholder — reusable Agent capabilities |
-| Infrastructure | [infrastructure/](infrastructure/) | Sprint 6 image, migrations, PostgreSQL role definitions, and the full local Compose deployment topology (`compose/`) |
+| Infrastructure | [infrastructure/](infrastructure/) | Application image(s) (including the dedicated `ui-review-agent/` Chromium image), migrations, PostgreSQL role definitions, and the full local Compose deployment topology (`compose/`) |
+| Agent status dashboard | [frontend/dashboard/](frontend/dashboard/) | Vue.js SPA consuming `GET /api/v1/agents`, containerized behind nginx sharing `platform`'s network namespace |
 | Scripts | [scripts/](scripts/) | Placeholder — dev/validation/deploy utilities |
 | Tests | [tests/](tests/) | Unit, contract, and component suites; real-service integration/E2E suites remain Phase 7 |
 | Sprint docs | `docs/sprint-N/` | Plans, progress, done, and consilium notes per sprint |
@@ -194,13 +199,15 @@ be introduced starting with the sprint that implements Phase 6
 | 8 | Verified Operational Documentation | ✅ Done | Vertical Slice 01 **Phase 8**: [docs/operations/README.md](docs/operations/README.md) — setup, health, query, recovery, troubleshooting, shutdown/cleanup, contract-generation status, security limitations, and validation commands, every one independently re-run against the real local environment during this sprint. No production-readiness claim. Completes the eight-phase Vertical Slice 01 plan (with the Phase 7 scope caveat above carried forward). See [docs/sprint-8/done.md](docs/sprint-8/done.md). |
 | 9 | AI Router and the First AI-Backed Agent | ✅ Done (real-provider validation deferred) | First work beyond Vertical Slice 01: [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) (AI Router boundary, Anthropic/OpenAI provider adapters, deterministic fallback routing, durable redacted usage tracking, capability-scoped Kafka `task-commands` routing, the `text.summarize` v1.0 Agent with a durable pre-call claim model) and [ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md) (generalized `result_data` model replacing the `word_count`-specific shape across contracts, Agent/Orchestrator persistence, and the public API, proven not to regress `text.word-count`). 420 tests passing (up from 339); real Anthropic/OpenAI provider validation and real-topology re-validation of this sprint's own infrastructure changes are both explicitly deferred (no credentials in this environment; see [docs/sprint-9/done.md](docs/sprint-9/done.md)). |
 | 10 | Topology Re-validation, Operator Runbook, ADR-0014 Follow-Ups, Phase 7 Continuation | ✅ Done | Spanned multiple PRs rather than one feature branch (see [docs/sprint-10/plan.md](docs/sprint-10/plan.md) sequencing note): re-migrated the local topology to `main` and re-ran `external_service` against it; wrote the ADR-0016 operator runbook (`docs/operations/README.md` Section 5); resolved [ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Section 8's remaining four open questions via [ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md) (model allowlist, retry-budget defaults, fallback ordering ratified, Orchestrator-invocation deliberately left out of scope) plus a readiness-routing bug found along the way; picked up most of Phase 7's deferred Section 19 categories (Agent selection/readiness, Idempotency, Ownership/disclosure, State machine, Inbox/outbox, Contract, Correlation Normalization — `external_service` suite grew 65→79 passed). Still open: a pytest-automated full-container End-to-End harness (not scoped into this sprint). No single `docs/sprint-10/done.md`; see [docs/sprint-10/progress.md](docs/sprint-10/progress.md) for the full account. |
-| — | Post-Sprint-10 (unsprinted, individual PRs) | 🔶 In progress | [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md) (Accepted): a twelve-role software-team persona set as Claude Code subagents (`.claude/agents/*.md`, PR #29 — a coordination mechanism, not a platform capability) plus the platform's third built-in Agent class, `code.review` v1.0, now fully wired into the running platform (domain/contract layer PR #28, `runtime/composition.py`/`review-agent` Compose service/Registry binding PR #31, public-API submission fix PR #32). `GET /api/v1/agents` (PR #33): a read-only Capability Registry status endpoint. A Vue.js agent status dashboard (`frontend/dashboard/`, containerized, consumes `GET /api/v1/agents`) is in progress on `feature/agent-status-dashboard-frontend` (PR #34, open). A platform/agent shutdown-diagnostics fix (PR #35, merged) addressed a previously-undiagnosable `PLATFORM_SHUTDOWN_INCOMPLETE`/`AGENT_SHUTDOWN_INCOMPLETE` crash (see that PR and `src/ai_platform/runtime/lifecycle.py`) that had been misattributed to host-specific flakiness since Sprint 10. None of this has a `docs/sprint-N/` folder yet — see this file's own edit history and the PRs above for the paper trail until one is opened. |
+| — | Post-Sprint-10 (unsprinted, individual PRs) | ✅ Done | [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md) (Accepted): a twelve-role software-team persona set as Claude Code subagents (`.claude/agents/*.md`, PR #29 — a coordination mechanism, not a platform capability) plus the platform's third built-in Agent class, `code.review` v1.0, fully wired into the running platform (domain/contract layer PR #28, `runtime/composition.py`/`review-agent` Compose service/Registry binding PR #31, public-API submission fix PR #32). `GET /api/v1/agents` (PR #33): a read-only Capability Registry status endpoint. A Vue.js agent status dashboard (`frontend/dashboard/`, containerized, consumes `GET /api/v1/agents`) — PR #34, merged. A platform/agent shutdown-diagnostics fix (PR #35, merged) addressed a previously-undiagnosable `PLATFORM_SHUTDOWN_INCOMPLETE`/`AGENT_SHUTDOWN_INCOMPLETE` crash that had been misattributed to host-specific flakiness since Sprint 10 — its actual root cause was found and fixed in Sprint 11 (see below). |
+| 11 | `ui.review` — a Playwright-Backed UI Review Capability | ✅ Done | [ADR-0019](docs/architecture/decisions/ADR-0019-ui-review-capability.md) (Accepted): the platform's fourth capability and third AI-backed one, reviewing the platform's own dashboard for UI/UX/accessibility/console-error problems via a deterministic Playwright/Chromium capture step feeding one AI Router call — stays inside the existing single-shot AI Router contract, no new tool-calling architecture. Three PRs (#36 domain/contract layer, #37 real Playwright integration — later consolidated into #39 after a GitHub stacked-PR-after-squash-merge quirk auto-closed it, #39 deployment wiring), all live-verified on the real Mac Docker host: `ui-review-agent` reaches `READY`, appears on `GET /api/v1/agents`/the dashboard with zero frontend changes, the full 73-case live Kafka ACL matrix passes. Two genuine bugs found only by live deployment, both fixed: (1) `runtime/composition.py`'s Orchestrator `command_publisher` was never given `environment=`, crashing on *any* capability-scoped publish — the actual root cause of the multi-sprint `PLATFORM_SHUTDOWN_INCOMPLETE` mystery (PR #38, standalone since platform-wide not `ui.review`-specific); (2) `ui.review`'s own redirect-safety check didn't normalize default ports, rejecting every successful navigation (fixed in #39 with a regression test). See `docs/sprint-11/plan.md` for the full account. |
+| — | Post-Sprint-11: real AI provider validation | ✅ Done | Real Anthropic (primary) and OpenAI (fallback) API keys configured in `infrastructure/compose/secrets/` (git-ignored). All three AI-backed capabilities live-verified with genuine model completions: `text.summarize` (real summary), `code.review` (correctly flagged a hardcoded password + SQL injection in a test diff), `ui.review` (real Chromium capture of the live dashboard + genuine accessibility findings). One real bug found live and fixed (PR #40, merged): `code.review`/`ui.review` both rejected genuine Claude responses wrapped in a ` ```json ` markdown fence despite the prompt saying not to — `_strip_markdown_json_fence()` now tolerates the wrapping without loosening the underlying strict parse. |
 
 ## 8. Current State
 
 **What works:**
 - Repository-wide contributor guidance ([AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md)).
-- Complete platform architecture description and 13 Accepted ADRs.
+- Complete platform architecture description and 19 Accepted ADRs.
 - A fully specified, ADR-aligned implementation plan for the first vertical slice.
 - Root tooling metadata (`pyproject.toml`, `uv.lock`) and the `src/ai_platform/` package skeleton (ADR-0003), validated locally with `uv sync`, Ruff, BasedPyright (strict), and pytest.
 - Canonical contracts under `contracts/`: JSON Schema (Draft 2020-12), OpenAPI 3.1.1, and AsyncAPI 3.0.0 for the Workflow API and task-commands/task-outcomes messages, including the ADR-0012 correlation contract and 12 examples.
@@ -224,7 +231,13 @@ be introduced starting with the sprint that implements Phase 6
 - **A generic capability result model** ([ADR-0015](docs/architecture/decisions/ADR-0015-generic-capability-result-model.md)): `AgentOutcome.result_data`/`WorkflowResult.result_data` (capability-scoped `Mapping[str, object]`) replace the `word_count`-specific fields across wire contracts (discriminated `if`/`then` union in `task_completed.schema.json`), Agent/Orchestrator persistence (migrations `0003`, `0004`), and the public API (`WorkflowResultModel` is now a generic passthrough). `text.word-count` was re-pointed at this model with its full test suite re-run and no regression, before any new capability was built on top of it.
 - **An AI Router boundary** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Sections 1–3, `src/ai_platform/ports/ai_router/`, `src/ai_platform/adapters/ai_router/`): a synchronous, provider-neutral `AIRouterPort.complete()` contract, Anthropic and OpenAI adapters built on the official SDKs (no third-party abstraction library), a deterministic configuration-ordered `FallbackAIRouter`, and durable redacted per-call usage tracking (`agent.provider_call_usage`) kept as internal evidence, never surfaced on the public API.
 - **Capability-scoped Kafka `task-commands` routing** ([ADR-0014](docs/architecture/decisions/ADR-0014-ai-router-and-first-ai-backed-agent.md) Section 6), resolving the routing-model review ADR-0005 Section 5 flagged for a second Agent class: `task-commands` stays one logical channel, but its physical topic is now computed per capability (`command_topic_binding_for_capability`), so a second Agent class's consumer group never receives the first class's commands.
-- **`text.summarize` v1.0** (`src/ai_platform/agents/summarize_agent/`), the platform's second built-in Agent and the first to call a real external AI provider. Its lifecycle adds a durable pre-call claim (`AgentOutcomeTransactionPort.claim_provider_call`) before invoking the AI Router, per ADR-0014 Section 5's execution-model requirements for a non-deterministic, provider-backed side effect (distinct from `text.word-count`'s safe-to-recompute model). A redelivery that finds its own unresolved claim resolves conservatively to a `PROVIDER_CALL_OUTCOME_UNKNOWN` failure rather than re-calling the provider or blocking — a deliberate scoping choice pending ADR-0014 Section 8 Q1's still-open reconciliation-window/operator-procedure design. Wired into `runtime/composition.py` (executor selection by capability name, failing closed on anything else), the Registry, and a new `summarize-agent` Compose service with its own Kafka principals and capability-scoped topic. Validated against fake `AIRouterPort`/persistence doubles only — no real provider credentials exist in this environment (checked-in placeholder secret files are obviously fake), and this sprint's own infrastructure changes (new migrations, renamed Kafka topics) have not yet been re-validated against the already-running local topology, which predates them. See [docs/sprint-9/done.md](docs/sprint-9/done.md).
+- **`text.summarize` v1.0** (`src/ai_platform/agents/summarize_agent/`), the platform's second built-in Agent and the first to call a real external AI provider. Its lifecycle adds a durable pre-call claim (`AgentOutcomeTransactionPort.claim_provider_call`) before invoking the AI Router, per ADR-0014 Section 5's execution-model requirements for a non-deterministic, provider-backed side effect (distinct from `text.word-count`'s safe-to-recompute model). A redelivery that finds its own unresolved claim resolves conservatively to a `PROVIDER_CALL_OUTCOME_UNKNOWN` failure rather than re-calling the provider or blocking (ADR-0016). Wired into `runtime/composition.py`, the Registry, and a `summarize-agent` Compose service with its own Kafka principals and capability-scoped topic.
+- **`code.review` v1.0** (`src/ai_platform/agents/review_agent/`, [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md)), the platform's third capability: a diff/patch in, a structured advisory findings list out (file, line, summary, severity), never applied automatically. Same durable-claim lifecycle and AI Router machinery as `text.summarize`, its own `review-agent` Compose service/Kafka principals/Registry binding.
+- **`ui.review` v1.0** (`src/ai_platform/agents/ui_review_agent/`, [ADR-0019](docs/architecture/decisions/ADR-0019-ui-review-capability.md), Sprint 11), the platform's fourth capability and third AI-backed one: a deterministic, read-only Playwright/Chromium capture of a hardcoded review target (the platform's own dashboard — no configuration path widens this, an intentional SSRF-conscious design choice) feeds exactly one AI Router call, same single-shot shape as `code.review`. Ships as its own deployable with a **dedicated Docker image** (`infrastructure/ui-review-agent/Dockerfile`) so Chromium's footprint stays isolated to just this service.
+- **Real Anthropic (primary) and OpenAI (fallback) AI provider credentials are now configured** (`infrastructure/compose/secrets/`, git-ignored) and all three AI-backed capabilities are live-verified with genuine model completions — real Anthropic (Claude Haiku 4.5) round-trips for `text.summarize`/`code.review`/`ui.review` all confirmed working end to end, including a real-model `code.review` catching a planted hardcoded password + SQL injection, and a real-model `ui.review` catching genuine accessibility issues on the live dashboard. The OpenAI fallback path itself has not yet been exercised (Anthropic has never failed in testing).
+- **`GET /api/v1/agents`** (`src/ai_platform/api/app.py`): a read-only, fully generic Capability Registry status endpoint — renders whatever bindings exist in `registry.json`, no per-capability code. A new capability appears here automatically once it registers a Compose service + Registry binding (a standing convention documented in `CONTRIBUTING.md`).
+- **A Vue.js agent status dashboard** (`frontend/dashboard/`), containerized behind nginx sharing `platform`'s network namespace, consuming `GET /api/v1/agents` — equally generic, zero capability-specific code, live and reachable at the Mac Docker host's published port.
+- The root cause of the multi-sprint `PLATFORM_SHUTDOWN_INCOMPLETE`/`AGENT_SHUTDOWN_INCOMPLETE` flakiness (previously misattributed to Windows/Podman host issues, then vague "pre-existing host instability") is found and fixed: `runtime/composition.py`'s Orchestrator `command_publisher` was never given `environment=`, so it crashed on *any* capability-scoped Kafka publish. Diagnostic logging (`shared/logging`'s `JsonLogFormatter`, previously silently dropping the exception it was supposed to log) is what finally surfaced it.
 
 **What doesn't work yet:**
 - No contract code-generation tooling (explicitly deferred since Phase 2, still open).
@@ -234,86 +247,18 @@ be introduced starting with the sprint that implements Phase 6
 - The Compose topology is explicitly local-only: single broker, single database node, no TLS, application ports not reachable from the host by design (loopback-only).
 - A dedicated pytest-automated full-container End-to-End harness (driving `platform`/`test-agent`/`summarize-agent` as black boxes over HTTP, not exercising adapters/application services directly the way `tests/integration/` does) — the one Section 19 item Sprint 10 did not pick up; see "What's next" below.
 - On this development host specifically, direct connections from Windows-native Python to the topology's host-published ports remain unreliable at the protocol-handshake level even after fixing the underlying WSL2/firewall configuration issues; the documented workaround (`run-in-network.sh`) is a permanent, working capability, not merely a stopgap, but the root cause of the remaining handshake-level flakiness is not fully understood.
-- Real Anthropic/OpenAI provider calls: no credentials exist in this environment; a real `text.summarize` submission through the live Compose topology would reach the provider call and fail there, not at startup.
-- Real-topology re-validation of Sprint 9's own infrastructure changes (schema migrations `0003`–`0007`, renamed/capability-scoped Kafka topics, the new `summarize-agent` service) — the topology already running on this host predates them.
-- ADR-0014's five recorded open questions (Section 8): the `PROVIDER_CALL_OUTCOME_UNKNOWN` reconciliation window and operator procedure, exact retry-budget numbers, the approved Claude/OpenAI model list, Orchestrator-level AI Router invocation, and same-provider-vs-cross-provider fallback ordering.
+- Two stale Windows/Podman-migration references remain: `tests/integration/conftest.py`'s auto-bring-up fixture (`_podman_available`/`_compose_up`) still shells out to `podman`, which doesn't exist on the current Docker host — the `AI_PLATFORM_TEST_SKIP_COMPOSE_UP=1` escape hatch works around it, but the fixture itself hasn't been updated. A handful of comments elsewhere were already fixed in passing (`docker-compose.yml`, `docs/operations/README.md`).
+- The OpenAI fallback provider has real credentials configured but has never actually been exercised end-to-end (Anthropic has never failed in testing) — the config path is proven at startup (router construction succeeds), not the live fallback behavior itself.
+- ADR-0014's Section 8 open questions are all resolved (see ADR-0016/ADR-0017 below) except Orchestrator-level AI Router invocation, which was deliberately ratified as staying out of scope rather than left open.
 
-**What's next (Sprint 10 is now done — see [docs/sprint-10/plan.md](docs/sprint-10/plan.md); items below are its final account plus what's landed since):**
-- All five of ADR-0014 Section 8's open questions are now resolved *and
-  implemented*: [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
-  resolved the reconciliation-window/operator-procedure question, and
-  [ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md)
-  resolved the remaining four (Orchestrator-invocation stays out of
-  scope, fallback ordering ratified as already-correct, a model allowlist
-  formalized and enforced at startup, retry-budget defaults raised) plus
-  a fifth, ADR-0014-caused gap found along the way: `summarize-agent`'s
-  readiness was never observed by the platform (one fixed readiness URL
-  could only reach one Agent process) — now fixed with per-binding
-  readiness URLs and a corrected readiness-host bind, both live-verified
-  (a real `text.summarize` submission now reaches `202 DISPATCHED`
-  instead of a permanent `503`; `summarize-agent` starts cleanly with the
-  approved model configured, fails closed on the old placeholder model).
-  See `docs/sprint-10/progress.md` for the full live-verification account,
-  including an unrelated pre-existing host-flakiness caveat around
-  observing the dispatched workflow's own later completion.
-- The local Compose topology has been brought up to date with Sprint 9's
-  migrations/Kafka topic changes and the `external_service` suite re-run
-  against it (67 passed, 2 skipped — see
-  [docs/sprint-10/progress.md](docs/sprint-10/progress.md)).
-- An ADR-0016 operator runbook now exists
-  (`docs/operations/README.md` Section 5), verified against real
-  live-produced evidence, not written from the code alone.
-- Phase 7's Section 19 matrix continuation is largely complete: Agent
-  selection/readiness (wire-contract coverage plus the live
-  readiness-routing fix), Idempotency, Ownership/disclosure, State
-  machine, Inbox/outbox claim fencing, Contract (one genuine gap found
-  and closed — `Uuid7IdentifierFactory` had no test coverage anywhere),
-  and Correlation Normalization's real Kafka-message-level propagation
-  guarantee are all now proven against the real PostgreSQL/Kafka
-  topology (the live `external_service` suite grew from 65 to 79 passed,
-  2 skipped). Audit/observability was assessed and closed without new
-  tests — no telemetry backend exists anywhere in this codebase to test
-  against. Still genuinely open: a dedicated pytest-automated
-  full-container End-to-End harness driving the real Compose services as
-  black boxes over HTTP — a materially different piece of work from
-  everything above, not scoped into this sprint. See
-  `docs/sprint-10/progress.md` for the full workstream account.
-- Obtain real Anthropic/OpenAI credentials for a genuine end-to-end
-  provider validation pass, if and when the repository owner wants to
-  pursue it — still not done, now unblocked now that the approved models
-  are configured and enforced.
-- [ADR-0018](docs/architecture/decisions/ADR-0018-software-team-persona-capabilities.md)'s
-  `code.review` capability is now fully wired into the running platform
-  (`runtime/composition.py` executor selection, the `review-agent`
-  Compose service, its Capability Registry binding, and a public-API fix
-  so submissions reach it) — see PRs #28/#31/#32. No real AI provider is
-  configured for it either way, same as `text.summarize`.
-- **`GET /api/v1/agents`** (PR #33): a read-only Capability Registry
-  status endpoint.
-- A **Vue.js agent status dashboard** (`frontend/dashboard/`,
-  containerized as a multi-stage build behind nginx, sharing `platform`'s
-  network namespace) consuming `GET /api/v1/agents` — built and
-  functional, open as PR #34 against `main`, not yet merged.
-- `ProcessLifecycle.stop()` (`src/ai_platform/runtime/lifecycle.py`) now
-  logs the underlying exception behind an unclean shutdown instead of
-  silently discarding it (PR #35) — the `PLATFORM_SHUTDOWN_INCOMPLETE`/
-  `AGENT_SHUTDOWN_INCOMPLETE` crash previously misattributed to
-  Windows/Podman host flakiness in Sprint 10 reproduced independently on
-  the current Mac Docker host, so the next occurrence is now
-  diagnosable from the container's own logs.
-- `postgres`/`kafka`/`platform`/`test-agent-2`/`summarize-agent`/
-  `review-agent` now restart automatically (`restart: unless-stopped`)
-  after a crash or Docker Desktop/host restart; `test-agent`/`dashboard`
-  deliberately do not (see the inline comment in
-  `infrastructure/compose/docker-compose.yml` — their shared
-  `network_mode: "service:platform"` means they need recreating, not
-  restarting, whenever `platform` restarts).
-- Genuinely open right now: reviewing and merging PR #34 (agent status
-  dashboard); the pytest-automated full-container End-to-End harness
-  (still not picked up by anyone); real Anthropic/OpenAI credentials
-  (still a repository-owner decision); and giving the post-Sprint-10 work
-  above a proper `docs/sprint-N/` home instead of living only in PR
-  descriptions and this section.
+**What's next:**
+- The pytest-automated full-container End-to-End harness (driving `platform`/agents as black boxes over HTTP) — deferred since Sprint 7, still not picked up by anyone across five sprints since.
+- `tests/integration/conftest.py`'s leftover Podman auto-bring-up fixture (above) — low-priority cleanup, not blocking anything since the skip-compose-up escape hatch works.
+- Exercising the OpenAI fallback path for real (would need a way to make the Anthropic call fail deliberately, or simply wait for it to happen naturally).
+- A fifth platform capability, if wanted: ADR-0018 Decision 2 already assessed Solution Architect, Technical Architect, Data Analyst as fitting the same bounded-advisory shape `code.review`/`ui.review` use, with no new architecture required.
+- A read-write Azure infrastructure capability was discussed and explicitly deferred: it's a categorically different risk class (destructive/irreversible real-cloud actions) that needs a SECURITY.md-required human-approval-gate mechanism this codebase doesn't have yet, plus likely genuine agentic tool-calling (a real architecture gap, not just new capability code) — not undertaken without that groundwork first.
+
+For the full history of how the platform got here: [ADR-0016](docs/architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)/[ADR-0017](docs/architecture/decisions/ADR-0017-ai-router-follow-up-decisions.md) resolved ADR-0014 Section 8; [docs/sprint-10/progress.md](docs/sprint-10/progress.md) has Sprint 10's full workstream account (Phase 7 Section 19 continuation, the operator runbook, the readiness-routing fix); [docs/sprint-11/plan.md](docs/sprint-11/plan.md) has `ui.review`'s.
 
 ## 9. Security Rules
 
