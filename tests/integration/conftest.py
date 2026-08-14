@@ -283,12 +283,14 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the eight least-privilege application principals
+    """confluent_kafka client configs for the ten least-privilege application principals
     provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four, the
     `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added in
-    Sprint 9 for capability-scoped `text-summarize` routing, and the
+    Sprint 9 for capability-scoped `text-summarize` routing, the
     `review-agent-producer`/`review-agent-consumer` pair ADR-0018 added for
-    capability-scoped `code-review` routing)."""
+    capability-scoped `code-review` routing, and the
+    `ui-review-agent-producer`/`ui-review-agent-consumer` pair ADR-0019 added for
+    capability-scoped `ui-review` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -313,5 +315,11 @@ def kafka_principal_client_configs(
         ),
         "review-agent-consumer": _kafka_principal_client_config(
             "review-agent-consumer", "kafka_review_agent_consumer_password.txt"
+        ),
+        "ui-review-agent-producer": _kafka_principal_client_config(
+            "ui-review-agent-producer", "kafka_ui_review_agent_producer_password.txt"
+        ),
+        "ui-review-agent-consumer": _kafka_principal_client_config(
+            "ui-review-agent-consumer", "kafka_ui_review_agent_consumer_password.txt"
         ),
     }
