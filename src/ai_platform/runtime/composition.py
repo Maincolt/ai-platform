@@ -274,6 +274,7 @@ def build_platform_process(
         client_id=f"{config.orchestrator_instance_id}-command-publisher",
         topic_mapping=topics,
         security=producer_security,
+        environment=config.environment,
     )
     command_publisher_worker = OutboxPublisherWorker(
         outbox=cast(OutboxTransactionPort, outbox),

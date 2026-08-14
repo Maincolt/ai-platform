@@ -46,6 +46,8 @@ class JsonLogFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        if record.exc_info is not None:
+            document["exception"] = self.formatException(record.exc_info)
         for field_name in _SAFE_EXTRA_FIELDS:
             value = getattr(record, field_name, None)
             if isinstance(value, str) and value:
