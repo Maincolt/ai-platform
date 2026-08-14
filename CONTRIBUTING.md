@@ -62,6 +62,20 @@ Documentation must:
 Verify local Markdown links and keep documentation concise enough to remain
 maintainable.
 
+### Every new Agent capability must register on the Capability Registry
+
+`GET /api/v1/agents` and the Vue agent status dashboard (`frontend/dashboard/`)
+are both fully generic: they render whatever bindings exist in
+`infrastructure/compose/runtime/registry.json`, with no per-capability code
+in either the endpoint or the frontend. This means a new Agent capability
+appears on the dashboard automatically, with zero frontend or endpoint
+changes, *as long as* its deployment wiring is actually done -- a new
+Compose service plus a new Registry binding for it (see `review-agent`'s or
+`ui-review-agent`'s wiring in `docker-compose.yml`/`registry.json` as the
+template). Treat both as part of "done" for a new capability, not an
+optional follow-up: skipping them means the capability runs, but silently
+never shows up anywhere an operator would look for it.
+
 ## Architecture Decision Records
 
 Create a Proposed ADR for a significant, cross-cutting, difficult-to-reverse,

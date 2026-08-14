@@ -44,6 +44,8 @@ _TASK_COMMANDS_SUMMARIZE = f"{_PREFIX}.task-commands.text-summarize.v1"
 _TASK_COMMANDS_SUMMARIZE_DLQ = f"{_TASK_COMMANDS_SUMMARIZE}.quarantine"
 _TASK_COMMANDS_REVIEW = f"{_PREFIX}.task-commands.code-review.v1"
 _TASK_COMMANDS_REVIEW_DLQ = f"{_TASK_COMMANDS_REVIEW}.quarantine"
+_TASK_COMMANDS_UI_REVIEW = f"{_PREFIX}.task-commands.ui-review.v1"
+_TASK_COMMANDS_UI_REVIEW_DLQ = f"{_TASK_COMMANDS_UI_REVIEW}.quarantine"
 _TASK_OUTCOMES = f"{_PREFIX}.task-outcomes.v1"
 _TASK_OUTCOMES_DLQ = f"{_TASK_OUTCOMES}.quarantine"
 
@@ -51,6 +53,7 @@ _ORCHESTRATOR_OUTCOME_GROUP = "ai-platform-orchestrator-outcomes"
 _AGENT_COMMAND_GROUP = "ai-platform-agent-commands"
 _SUMMARIZE_AGENT_COMMAND_GROUP = "ai-platform-summarize-agent-commands"
 _REVIEW_AGENT_COMMAND_GROUP = "ai-platform-review-agent-commands"
+_UI_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-ui-review-agent-commands"
 
 _PRODUCE_TIMEOUT_SECONDS = 10.0
 _POLL_TIMEOUT_SECONDS = 8.0
@@ -188,6 +191,19 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     _WriteCase("review-agent-consumer", _TASK_COMMANDS_SUMMARIZE_DLQ, False),
     _WriteCase("review-agent-consumer", _TASK_COMMANDS_REVIEW, False),
     _WriteCase("review-agent-consumer", _TASK_OUTCOMES, False),
+    # ui-review-agent-producer: same shape as agent-producer, only task-outcomes.
+    _WriteCase("ui-review-agent-producer", _TASK_OUTCOMES, True),
+    _WriteCase("ui-review-agent-producer", _TASK_COMMANDS_UI_REVIEW, False),
+    _WriteCase("ui-review-agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("ui-review-agent-producer", _TASK_COMMANDS_UI_REVIEW_DLQ, False),
+    # ui-review-agent-consumer: allowed to write only its own commands
+    # quarantine topic -- never another capability's (ADR-0014 Section 6's
+    # isolation guarantee, now proven for a fourth capability).
+    _WriteCase("ui-review-agent-consumer", _TASK_COMMANDS_UI_REVIEW_DLQ, True),
+    _WriteCase("ui-review-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("ui-review-agent-consumer", _TASK_COMMANDS_REVIEW_DLQ, False),
+    _WriteCase("ui-review-agent-consumer", _TASK_COMMANDS_UI_REVIEW, False),
+    _WriteCase("ui-review-agent-consumer", _TASK_OUTCOMES, False),
 )
 
 _READ_MATRIX: tuple[_ReadCase, ...] = (
@@ -234,6 +250,25 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         "review-agent-consumer", _TASK_COMMANDS_SUMMARIZE, _REVIEW_AGENT_COMMAND_GROUP, False
     ),
     _ReadCase("review-agent-consumer", _TASK_OUTCOMES, _REVIEW_AGENT_COMMAND_GROUP, False),
+    # ui-review-agent-consumer: allowed on its own capability's topic/group,
+    # denied on the other three -- the isolation guarantee proven across
+    # all four capabilities now.
+    _ReadCase(
+        "ui-review-agent-consumer", _TASK_COMMANDS_UI_REVIEW, _UI_REVIEW_AGENT_COMMAND_GROUP, True
+    ),
+    _ReadCase(
+        "ui-review-agent-consumer",
+        _TASK_COMMANDS_WORD_COUNT,
+        _UI_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "ui-review-agent-consumer", _TASK_COMMANDS_SUMMARIZE, _UI_REVIEW_AGENT_COMMAND_GROUP, False
+    ),
+    _ReadCase(
+        "ui-review-agent-consumer", _TASK_COMMANDS_REVIEW, _UI_REVIEW_AGENT_COMMAND_GROUP, False
+    ),
+    _ReadCase("ui-review-agent-consumer", _TASK_OUTCOMES, _UI_REVIEW_AGENT_COMMAND_GROUP, False),
     # The producer principals hold no Read/group grants at all.
     _ReadCase(
         "orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False
@@ -241,6 +276,7 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
     _ReadCase("agent-producer", _TASK_OUTCOMES, _AGENT_COMMAND_GROUP, False),
     _ReadCase("summarize-agent-producer", _TASK_OUTCOMES, _SUMMARIZE_AGENT_COMMAND_GROUP, False),
     _ReadCase("review-agent-producer", _TASK_OUTCOMES, _REVIEW_AGENT_COMMAND_GROUP, False),
+    _ReadCase("ui-review-agent-producer", _TASK_OUTCOMES, _UI_REVIEW_AGENT_COMMAND_GROUP, False),
 )
 
 

@@ -1,6 +1,6 @@
 # ADR-0019: `ui.review` — a Playwright-Backed UI Review Capability
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-14
 - **Supersedes:** None
 - **Superseded by:** None
@@ -264,20 +264,94 @@ Also landed here, ahead of `code.review`'s own precedent (which deferred
 this to its follow-up PR): `runtime/loading.py`'s
 `_SUPPORTED_CAPABILITY_NAMES` and `runtime/composition.py`'s executor
 selection for `ui.review`, reusing ADR-0017 Decision 3's exact approved
-model list unchanged (Decision 3 above). Executor selection currently
-constructs `UiReviewAgent` with a placeholder `PageCapturePort`
-(`_UnavailablePageCapture`) that fails closed with `CaptureFailedError` on
-any real invocation — deliberately wired ahead of the real Playwright
-integration so the `_SUPPORTED_CAPABILITY_NAMES` gotcha ADR-0018 already
-hit once cannot recur here, while making unmistakably clear (a loud,
-diagnosable failure, not a silent no-op) that real capture doesn't exist
-yet.
+model list unchanged (Decision 3 above).
 
-**Not yet landed**: the real Playwright/Chromium capture implementation,
-the dedicated `ui-review-agent` Docker image, and deployment wiring
-(Compose service, Kafka principals/topics/ACLs, Registry binding,
-CONTRIBUTING.md's standing dashboard-registration convention) — tracked as
-follow-up PRs per the plan this ADR's Decision section describes.
+**Landed in the second PR**: the real `PlaywrightPageCapture`
+(`src/ai_platform/agents/ui_review_agent/capture.py`) — a fresh headless
+Chromium instance per call, `page.goto()` only, console messages captured
+via a bounded listener, the accessibility tree via Playwright's current
+`locator.aria_snapshot()` API (the older `page.accessibility.snapshot()`
+this ADR's Context section referenced no longer exists in Playwright
+1.62), and the origin re-validation Decision 4 requires: the *landed*
+URL's origin (after Playwright's own redirect-following) is checked
+against the requested URL's origin, and any mismatch is a capture failure,
+never a silent follow. `runtime/composition.py`'s executor selection now
+constructs the real implementation instead of the Phase 1 placeholder.
+Verified against a real installed Chromium (`uv run playwright install
+chromium`), not just fakes: a fixture page's title/console error/
+accessibility snapshot are all captured correctly, and a redirect-off-
+origin fixture is correctly rejected as a capture failure — both proven
+live, not inferred from the code alone (`tests/unit/agents/ui_review_agent/test_capture.py`,
+opt-in behind the new `browser` pytest marker, same pattern as
+`external_service`).
+
+**Landed in the third PR**, deployment wiring, live-verified against the
+real Mac Docker host topology (rebuilt images, real Postgres/Kafka, real
+Compose services): the dedicated `ui-review-agent` Docker image
+(`infrastructure/ui-review-agent/Dockerfile`, Chromium installed via
+`playwright install --with-deps chromium` on `python:3.14-slim-trixie`,
+no compatibility issues on Debian trixie); the `ui-review-agent` Compose
+service, its own Kafka principals/capability-scoped topic pair/ACLs, and
+its Capability Registry binding; the CONTRIBUTING.md standing convention.
+
+`ui-review-agent` starts cleanly and reaches `READY`; `platform`'s own
+readiness-refresh logs show a real `200 OK` from
+`http://ui-review-agent:8100/health/ready`; `GET /api/v1/agents` lists it
+as `READY`/`fresh` alongside the other three capabilities with zero
+dashboard or endpoint code changes, confirming the CONTRIBUTING.md
+convention actually works as designed. The full live Kafka ACL isolation
+matrix (`tests/integration/test_kafka_acl_matrix.py`, all 73 cases
+including the 15 new `ui-review-agent-producer`/`-consumer` ones) passed
+against the real broker.
+
+A real `POST /api/v1/workflows` submission with `ui.review` reached a real
+terminal state: `FAILED`/`ALL_PROVIDERS_EXHAUSTED` — the entire pipeline
+(submission → dispatch → Kafka delivery → target validation → real
+Playwright/Chromium capture of the real dashboard page → durable
+provider-call claim → AI Router call attempted) worked end to end and
+only failed at the provider call itself, since no real Anthropic/OpenAI
+credentials exist in this environment — the same terminal-state shape
+`text.summarize`/`code.review` reach for the identical reason.
+
+**Two genuine bugs were found only by this live deployment, neither of
+them by any test beforehand**:
+
+1. A pre-existing, unrelated platform bug, not specific to `ui.review`:
+   `runtime/composition.py`'s Orchestrator `command_publisher` was never
+   given `environment=`, so publishing *any* capability-scoped command
+   (i.e. every real command since ADR-0014 Section 6) unconditionally
+   raised `EventBusOperationError`, uncaught, crashing the whole `platform`
+   process. This is the actual root cause of the `PLATFORM_SHUTDOWN_
+   INCOMPLETE` flakiness previously misattributed to Windows/Podman host
+   issues (Sprint 10) and later to unspecified "pre-existing host
+   instability" (this ADR's own earlier drafts, and ADR-0018) — it just
+   happened to reproduce on `ui.review`'s first-ever submission, on this
+   Mac host, with PR #35's shutdown-diagnostics fix already in place to
+   finally catch it. Root-caused and fixed to the `JsonLogFormatter` that
+   was itself silently dropping the diagnostic `exc_info` PR #35 added
+   (see PR #38, landed independently of this ADR since it is a
+   platform-wide fix, not a `ui.review`-specific one).
+2. `capture.py`'s `_origin()` compared raw, unnormalized `(scheme, netloc)`
+   tuples: a real browser's landed `response.url` drops an explicit
+   default port (`http://platform:80` navigates and lands on
+   `http://platform/`), so the redirect-safety check (Decision 4) treated
+   every successful default-port navigation as a redirect off-origin and
+   rejected it. Fixed to normalize to `(scheme, hostname, effective_port)`
+   with the scheme's default port filled in when none is explicit; a
+   fixture-based unit test (`test_origin_normalizes_the_default_http_port`)
+   now covers exactly this case.
+
+Also found and fixed along the way (an operational gap, not a code bug):
+`kafka/entrypoint.sh` seeds SCRAM credentials only at initial KRaft
+formatting, which is a no-op against this host's already-provisioned
+`kafka-data` volume — the new `ui-review-agent-producer`/`-consumer`
+`--add-scram` lines had no effect until added dynamically via
+`kafka-configs.sh` against the live broker. Documented as a standing
+operational procedure in `docs/operations/README.md` Section 4.
+
+Real model selection beyond the reused ADR-0017 Decision 3 list, and real
+Anthropic/OpenAI provider validation, remain a further, separate,
+deliberate step, same as `text.summarize`'s/`code.review`'s.
 
 ## Related Decisions
 

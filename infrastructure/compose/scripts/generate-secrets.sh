@@ -42,6 +42,8 @@ write_if_absent "kafka_summarize_agent_producer_password.txt"
 write_if_absent "kafka_summarize_agent_consumer_password.txt"
 write_if_absent "kafka_review_agent_producer_password.txt"
 write_if_absent "kafka_review_agent_consumer_password.txt"
+write_if_absent "kafka_ui_review_agent_producer_password.txt"
+write_if_absent "kafka_ui_review_agent_consumer_password.txt"
 
 echo "Secrets are in ${SECRETS_DIR} (git-ignored)."
 echo "Note: ai_router_anthropic_api_key.txt / ai_router_openai_api_key.txt are"

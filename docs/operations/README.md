@@ -227,6 +227,38 @@ safely recorded rather than corrupting the terminal state, is a correct
 outcome. See `docs/sprint-6/progress.md` and
 `docs/sprint-7/progress.md` for the full account.
 
+### Adding a new Kafka principal to an already-provisioned broker
+
+`kafka/entrypoint.sh` seeds every principal's SCRAM credentials via
+`kafka-storage.sh format --add-scram`, but that command only runs against
+an *unformatted* KRaft log directory — `--ignore-formatted` makes it a
+no-op on every subsequent container start, which is exactly what you want
+for the principals that already existed when the volume was first
+formatted. It is **not** what you want the first time you add a brand new
+principal (e.g. a new capability's `-producer`/`-consumer` pair) to a host
+whose `kafka-data` volume already exists: adding the new `--add-scram`
+line to `entrypoint.sh` and restarting the `kafka` container has no
+effect, and the new Agent fails to start with a `SASL authentication
+error: ... invalid credentials`, easy to misread as a wrong-password bug
+in the new secret file rather than a broker-side gap (found live during
+ADR-0019's `ui-review-agent` deployment).
+
+Fix it by adding the credential dynamically instead, against the live
+broker, using the existing `admin` principal:
+
+```bash
+docker exec ai-platform-local-kafka-1 /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server kafka:9092 --command-config /tmp/admin-client.properties \
+  --alter --add-config 'SCRAM-SHA-256=[password=<the new principal's password>]' \
+  --entity-type users --entity-name <the new principal's username>
+```
+
+(`/tmp/admin-client.properties` already exists inside the `kafka` container
+from `entrypoint.sh`'s own setup — regenerate it first if the container was
+recreated since.) This only matters for a host with pre-existing data; a
+genuinely fresh `kafka-data` volume seeds every principal, including brand
+new ones, correctly on its first format.
+
 ## 5. Provider-call outcome reconciliation (ADR-0016)
 
 [ADR-0016](../architecture/decisions/ADR-0016-provider-call-claim-reconciliation.md)
