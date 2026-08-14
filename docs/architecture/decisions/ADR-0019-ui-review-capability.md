@@ -1,6 +1,6 @@
 # ADR-0019: `ui.review` — a Playwright-Backed UI Review Capability
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-14
 - **Supersedes:** None
 - **Superseded by:** None

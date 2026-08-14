@@ -89,8 +89,8 @@ stated depth.
       `environment=`, the actual root cause of the multi-sprint
       `PLATFORM_SHUTDOWN_INCOMPLETE` mystery — see PR #38, its own
       standalone fix, and ADR-0019's Implementation Status for the full
-      account). ADR-0019 remains Proposed pending the repository owner's
-      explicit approval to mark it Accepted, per CONTRIBUTING.md.
+      account). ADR-0019 is Accepted, per the repository owner's explicit
+      approval (CONTRIBUTING.md).
 
 ## Out of scope
 
