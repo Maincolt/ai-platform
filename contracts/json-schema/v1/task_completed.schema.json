@@ -82,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review"]
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review"]
         },
         "capability_version": {
           "const": "1.0"
@@ -182,6 +182,39 @@
                       "properties": {
                         "file": { "type": "string", "minLength": 1 },
                         "line": { "type": ["integer", "null"], "minimum": 0 },
+                        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "severity": { "enum": ["low", "medium", "high"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "ui.review" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["findings"],
+                "properties": {
+                  "findings": {
+                    "type": "array",
+                    "description": "Advisory only (ADR-0019 Decision 2): never applied automatically.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["area", "summary", "severity"],
+                      "properties": {
+                        "area": { "type": "string", "minLength": 1, "maxLength": 200 },
                         "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
                         "severity": { "enum": ["low", "medium", "high"] }
                       }

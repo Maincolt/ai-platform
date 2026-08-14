@@ -132,3 +132,65 @@ def test_code_review_result_does_not_accept_the_summarize_capabilitys_field() ->
     message = _message(capability="code.review", result={"findings": [], "summary": "extra"})
     with pytest.raises(ValidationError):
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="ui.review",
+        result={
+            "findings": [
+                {"area": "header navigation", "summary": "Missing alt text.", "severity": "low"},
+                {"area": "console", "summary": "Uncaught TypeError.", "severity": "high"},
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="ui.review", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_finding_with_a_code_review_file_line_key_is_rejected() -> None:
+    """`ui.review`'s findings shape has no `file`/`line` concept -- it must
+    not accidentally validate against `code.review`'s branch."""
+    message = _message(
+        capability="ui.review",
+        result={
+            "findings": [
+                {"file": "a.py", "line": 1, "summary": "x", "severity": "low"},
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="ui.review",
+        result={"findings": [{"area": "console", "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="ui.review",
+        result={
+            "findings": [
+                {"area": "console", "summary": "x", "severity": "low", "confidence": 0.9},
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ui_review_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(capability="ui.review", result={"findings": [], "summary": "extra"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]

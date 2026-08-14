@@ -80,7 +80,7 @@
           "format": "date-time"
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review"]
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review"]
         },
         "capability_version": {
           "const": "1.0"

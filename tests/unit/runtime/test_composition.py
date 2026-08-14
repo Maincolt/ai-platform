@@ -30,6 +30,10 @@ from ai_platform.agents.summarize_agent.capability import (
 )
 from ai_platform.agents.test_agent.agent import TestAgent
 from ai_platform.agents.test_agent.capability import CAPABILITY_NAME as WORD_COUNT_CAPABILITY_NAME
+from ai_platform.agents.ui_review_agent.agent import UiReviewAgent
+from ai_platform.agents.ui_review_agent.capability import (
+    CAPABILITY_NAME as UI_REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import RegistrySnapshot
 from ai_platform.ports.event_bus import LogicalChannel
@@ -329,6 +333,24 @@ def test_build_executor_selects_review_agent_for_code_review_capability(tmp_path
         persistence=object(),  # type: ignore[arg-type]
     )
     assert isinstance(executor, ReviewAgent)
+
+
+def test_build_executor_selects_ui_review_agent_for_ui_review_capability(tmp_path: Path) -> None:
+    config = _agent_config(
+        tmp_path,
+        ai_router_anthropic_api_key=SecretFileReference(
+            Path(_write_secret(tmp_path, "anthropic-key", "sk-test"))
+        ),
+        ai_router_anthropic_model="claude-haiku-4-5",
+        ai_router_max_output_tokens=512,
+    )
+    executor = _build_executor(
+        UI_REVIEW_CAPABILITY_NAME,
+        config=config,
+        agent_id=AgentId(config.agent_id),
+        persistence=object(),  # type: ignore[arg-type]
+    )
+    assert isinstance(executor, UiReviewAgent)
 
 
 def test_build_executor_fails_closed_for_unrecognized_capability(tmp_path: Path) -> None:

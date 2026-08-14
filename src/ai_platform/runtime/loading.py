@@ -80,7 +80,9 @@ def load_registry_artifact(path: Path, *, maximum_bytes: int = 262_144) -> Regis
 # AI_PLATFORM_AGENT_DECLARATION_PATH at the same shared registry.json and
 # selects its own binding by (environment, agent_id, implementation_identity,
 # deployment_declaration_digest) rather than by position/count.
-_SUPPORTED_CAPABILITY_NAMES = frozenset({"text.word-count", "text.summarize", "code.review"})
+_SUPPORTED_CAPABILITY_NAMES = frozenset(
+    {"text.word-count", "text.summarize", "code.review", "ui.review"}
+)
 
 
 def load_agent_deployment_declaration(

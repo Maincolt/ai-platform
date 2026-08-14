@@ -84,10 +84,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 10000,
-          "description": "The input text/content submitted for the selected capability (plain text for text.word-count/text.summarize; a diff/patch for code.review)."
+          "description": "The input text/content submitted for the selected capability (plain text for text.word-count/text.summarize; a diff/patch for code.review; the hardcoded allowed review target URL for ui.review, ADR-0019 Decision 4)."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review"],
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review"],
           "description": "ADR-0015: an explicit, reviewable list, not an open string -- an unrecognized capability value fails validation immediately."
         },
         "capability_version": {
