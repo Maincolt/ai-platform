@@ -20,6 +20,31 @@ def test_empty_array_is_a_valid_empty_findings_list() -> None:
     assert _parse_findings("[]") == []
 
 
+def test_response_wrapped_in_a_json_markdown_fence_still_parses() -> None:
+    """Regression: a real Anthropic model wrapped its response in a
+    ```json ... ``` fence despite the prompt asking for ONLY a JSON array
+    -- observed live, not a hypothetical. Fence-stripping is a
+    presentation-format tolerance, not a laxer parse; malformed content
+    inside the fence must still be rejected (see the next two tests)."""
+    raw = "```json\n" + _findings_json([]) + "\n```"
+    assert _parse_findings(raw) == []
+
+
+def test_response_wrapped_in_a_plain_markdown_fence_still_parses() -> None:
+    raw = "```\n" + _findings_json([]) + "\n```"
+    assert _parse_findings(raw) == []
+
+
+def test_malformed_content_inside_a_markdown_fence_is_still_rejected() -> None:
+    raw = "```json\nnot valid json\n```"
+    assert _parse_findings(raw) is None
+
+
+def test_an_unclosed_markdown_fence_is_not_stripped_and_fails_to_parse() -> None:
+    raw = "```json\n" + _findings_json([])
+    assert _parse_findings(raw) is None
+
+
 def test_well_formed_findings_parse_correctly() -> None:
     raw = _findings_json(
         [
