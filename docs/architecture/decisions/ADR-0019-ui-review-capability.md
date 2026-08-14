@@ -353,6 +353,20 @@ Real model selection beyond the reused ADR-0017 Decision 3 list, and real
 Anthropic/OpenAI provider validation, remain a further, separate,
 deliberate step, same as `text.summarize`'s/`code.review`'s.
 
+**Update: real provider validation complete.** Real Anthropic (primary)
+and OpenAI (fallback) credentials are now configured. A real submission
+against the live dashboard reached a genuine model completion with
+correct, useful accessibility findings (heading hierarchy, missing
+`aria-live` regions, truncated identifiers with no accessible full
+value). One real bug found by this live run, fixed in PR #40: the raw
+response was wrapped in a ` ```json ` markdown fence despite the prompt's
+explicit instruction not to, which `_parse_ui_findings` didn't tolerate —
+`_strip_markdown_json_fence()` now strips exactly one wrapping fence
+before the existing strict `json.loads`/shape validation runs unchanged
+(malformed fencing or malformed inner content is still rejected, never
+silently repaired). The OpenAI fallback path itself has not been
+exercised live — Anthropic has never failed in testing.
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape and Section 20 side-effect review requirement this ADR applies
