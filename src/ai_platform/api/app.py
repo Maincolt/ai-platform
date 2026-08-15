@@ -357,6 +357,7 @@ async def list_agents(
     `SubmissionOrchestrator` already uses, it does not compute its own."""
     correlation_id = _effective_correlation_id(request)
     now = datetime.now(UTC)
+    in_flight_counts = await state.in_flight_query.count_in_flight_by_agent()
     agents: list[AgentStatusModel] = []
     if state.registry_snapshot is not None:
         for binding in state.registry_snapshot.bindings:
@@ -384,6 +385,7 @@ async def list_agents(
                         if observation is not None and observation.observed_at != _NEVER_OBSERVED
                         else None
                     ),
+                    in_flight_count=in_flight_counts.get(binding.agent_id, 0),
                 )
             )
     response_body = AgentsListResponse(agents=agents)

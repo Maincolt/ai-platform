@@ -62,6 +62,7 @@ from ai_platform.ports.persistence.transactions import (
 )
 from ai_platform.ports.persistence.workflow import WorkflowRepositoryPort
 from ai_platform.shared.identifiers import (
+    AgentId,
     MessageId,
     OwnerSubjectId,
     TaskAttemptId,
@@ -338,6 +339,20 @@ class InMemoryOrchestratorPersistence:
                 )
             entries.sort(key=lambda entry: entry.submitted_at, reverse=True)
             return entries[:limit]
+
+    async def count_in_flight_by_agent(self) -> dict[AgentId, int]:
+        async with self._lock:
+            counts: dict[AgentId, int] = {}
+            for attempt in self.task_attempts.values():
+                task = self.tasks.get(attempt.task_id)
+                if task is None:
+                    continue
+                workflow = self.workflows.get(task.workflow_id)
+                if workflow is None or workflow.state is not WorkflowState.DISPATCHED:
+                    continue
+                agent_id = attempt.selection.agent_id
+                counts[agent_id] = counts.get(agent_id, 0) + 1
+            return counts
 
     async def record_request_access(self, record: AcceptedRequestAccessAuditRecord) -> None:
         async with self._lock:

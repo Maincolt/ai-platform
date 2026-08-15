@@ -74,6 +74,7 @@ class AgentStatusModel(BaseModel):
     status: Literal["READY", "STALE", "UNKNOWN", "UNAVAILABLE", "DRAINING"]
     fresh: bool
     last_observed_at: str | None = None
+    in_flight_count: int = 0
 
 
 class AgentsListResponse(BaseModel):

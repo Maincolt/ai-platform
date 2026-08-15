@@ -20,7 +20,8 @@
           "environment",
           "enabled",
           "status",
-          "fresh"
+          "fresh",
+          "in_flight_count"
         ],
         "properties": {
           "agent_id": {
@@ -60,6 +61,11 @@
             "type": ["string", "null"],
             "format": "date-time",
             "description": "Null when this binding has never been observed yet."
+          },
+          "in_flight_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many task attempts are currently DISPATCHED (claimed, no terminal outcome recorded yet) for this Agent deployment -- read fresh on every request, never cached. Zero means idle, not unknown."
           }
         }
       }

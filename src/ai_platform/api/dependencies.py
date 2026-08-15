@@ -30,6 +30,7 @@ from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import RegistrySnapshot, load_registry_snapshot
 from ai_platform.ports.persistence.transactions import (
     AuthorizedWorkflowQueryPort,
+    InFlightWorkloadQueryPort,
     SubmissionHistoryQueryPort,
 )
 from ai_platform.runtime.health import CoreReadinessPort, StaticReadiness
@@ -74,6 +75,7 @@ class AppState:
     agent_persistence: object | None
     workflow_access_query: AuthorizedWorkflowQueryPort
     submission_history_query: SubmissionHistoryQueryPort
+    in_flight_query: InFlightWorkloadQueryPort
     security_policy: LocalDevelopmentAuthorizationPolicy
     submission_orchestrator: SubmissionOrchestrator
     terminal_event_processor: TerminalEventProcessor
@@ -145,6 +147,7 @@ def build_app_state(*, bindings: list[CapabilityBinding] | None = None) -> AppSt
         agent_persistence=agent_persistence,
         workflow_access_query=orchestrator_persistence,
         submission_history_query=orchestrator_persistence,
+        in_flight_query=orchestrator_persistence,
         security_policy=LocalDevelopmentAuthorizationPolicy(),
         submission_orchestrator=submission_orchestrator,
         terminal_event_processor=terminal_event_processor,
