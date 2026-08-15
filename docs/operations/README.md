@@ -176,6 +176,37 @@ above). Workflow reads succeed regardless of Test Agent readiness — only
 *new submissions* are gated on Agent readiness (see
 `src/ai_platform/orchestrator/application/submission.py`).
 
+### Team-based assignment routing (ADR-0023)
+
+`assignment.route` reads a free-text assignment and recommends which of
+the team's six real content-review capabilities should look at it — but
+it never dispatches anything itself (see ADR-0023 Decision 1/5: it is an
+ordinary bounded-advisory capability with no access to the Orchestrator
+or Workflow API). `infrastructure/compose/scripts/submit-assignment.py`
+is the caller-side script that does the actual fan-out: it submits the
+assignment to `assignment.route`, reads the recommendation list, submits
+the same text to every recommended capability, polls each to a terminal
+state, and prints a combined report. Every step it performs is an
+ordinary Workflow API call an operator could make by hand — the script
+only automates the sequence, matching this document's other manual
+verification scripts:
+
+```bash
+docker cp infrastructure/compose/scripts/submit-assignment.py \
+    ai-platform-local-platform-1:/tmp/submit-assignment.py
+docker exec ai-platform-local-platform-1 python3 /tmp/submit-assignment.py \
+    "Proposed schema: CREATE TABLE notifications (...); new endpoint POST \
+    /api/v1/notifications sends synchronously, no retry. Also want a \
+    weekly usage report: notification count, latency, AI provider cost."
+```
+
+Expect a `Routing decision: COMPLETED` line, then one `=== <capability>
+===` section per recommended capability with its own rationale and
+result — verified live to correctly split a mixed schema-design-and-
+reporting assignment into `technical.review` (schema/API concerns) and
+`data.analysis` (usage-report concerns), each returning genuine,
+distinct findings.
+
 ## 4. Recovery — demonstrated crash scenarios
 
 Both scenarios below were proven in Sprints 6–7, including running the
