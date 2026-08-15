@@ -48,6 +48,8 @@ _TASK_COMMANDS_UI_REVIEW = f"{_PREFIX}.task-commands.ui-review.v1"
 _TASK_COMMANDS_UI_REVIEW_DLQ = f"{_TASK_COMMANDS_UI_REVIEW}.quarantine"
 _TASK_COMMANDS_ARCHITECTURE_REVIEW = f"{_PREFIX}.task-commands.architecture-review.v1"
 _TASK_COMMANDS_ARCHITECTURE_REVIEW_DLQ = f"{_TASK_COMMANDS_ARCHITECTURE_REVIEW}.quarantine"
+_TASK_COMMANDS_DATA_ANALYSIS = f"{_PREFIX}.task-commands.data-analysis.v1"
+_TASK_COMMANDS_DATA_ANALYSIS_DLQ = f"{_TASK_COMMANDS_DATA_ANALYSIS}.quarantine"
 _TASK_OUTCOMES = f"{_PREFIX}.task-outcomes.v1"
 _TASK_OUTCOMES_DLQ = f"{_TASK_OUTCOMES}.quarantine"
 
@@ -57,6 +59,7 @@ _SUMMARIZE_AGENT_COMMAND_GROUP = "ai-platform-summarize-agent-commands"
 _REVIEW_AGENT_COMMAND_GROUP = "ai-platform-review-agent-commands"
 _UI_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-ui-review-agent-commands"
 _ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-architecture-review-agent-commands"
+_DATA_ANALYSIS_AGENT_COMMAND_GROUP = "ai-platform-data-analysis-agent-commands"
 
 _PRODUCE_TIMEOUT_SECONDS = 10.0
 _POLL_TIMEOUT_SECONDS = 8.0
@@ -220,6 +223,19 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     _WriteCase("architecture-review-agent-consumer", _TASK_COMMANDS_UI_REVIEW_DLQ, False),
     _WriteCase("architecture-review-agent-consumer", _TASK_COMMANDS_ARCHITECTURE_REVIEW, False),
     _WriteCase("architecture-review-agent-consumer", _TASK_OUTCOMES, False),
+    # data-analysis-agent-producer: same shape as agent-producer, only task-outcomes.
+    _WriteCase("data-analysis-agent-producer", _TASK_OUTCOMES, True),
+    _WriteCase("data-analysis-agent-producer", _TASK_COMMANDS_DATA_ANALYSIS, False),
+    _WriteCase("data-analysis-agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("data-analysis-agent-producer", _TASK_COMMANDS_DATA_ANALYSIS_DLQ, False),
+    # data-analysis-agent-consumer: allowed to write only its own commands
+    # quarantine topic -- never another capability's (ADR-0014 Section 6's
+    # isolation guarantee, now proven for a sixth capability).
+    _WriteCase("data-analysis-agent-consumer", _TASK_COMMANDS_DATA_ANALYSIS_DLQ, True),
+    _WriteCase("data-analysis-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("data-analysis-agent-consumer", _TASK_COMMANDS_ARCHITECTURE_REVIEW_DLQ, False),
+    _WriteCase("data-analysis-agent-consumer", _TASK_COMMANDS_DATA_ANALYSIS, False),
+    _WriteCase("data-analysis-agent-consumer", _TASK_OUTCOMES, False),
 )
 
 _READ_MATRIX: tuple[_ReadCase, ...] = (
@@ -324,6 +340,51 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         _ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP,
         False,
     ),
+    # data-analysis-agent-consumer: allowed on its own capability's
+    # topic/group, denied on the other five -- the isolation guarantee
+    # proven across all six capabilities now.
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_DATA_ANALYSIS,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        True,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_WORD_COUNT,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_SUMMARIZE,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_REVIEW,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_UI_REVIEW,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_COMMANDS_ARCHITECTURE_REVIEW,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-consumer",
+        _TASK_OUTCOMES,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
+        False,
+    ),
     # The producer principals hold no Read/group grants at all.
     _ReadCase(
         "orchestrator-producer", _TASK_COMMANDS_WORD_COUNT, _ORCHESTRATOR_OUTCOME_GROUP, False
@@ -336,6 +397,12 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         "architecture-review-agent-producer",
         _TASK_OUTCOMES,
         _ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "data-analysis-agent-producer",
+        _TASK_OUTCOMES,
+        _DATA_ANALYSIS_AGENT_COMMAND_GROUP,
         False,
     ),
 )

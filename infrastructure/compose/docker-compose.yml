@@ -644,6 +644,84 @@ services:
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
 
+  # ADR-0021: data.analysis, the platform's sixth capability. Built from
+  # the shared ai-platform:sprint6 image, same as architecture-review-agent.
+  data-analysis-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-test-agent"]
+    depends_on:
+      platform:
+        condition: service_started
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_KAFKA_SECURITY_PROTOCOL: LOCAL_DEVELOPMENT_SASL_PLAINTEXT
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "5"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AI_PLATFORM_TASK_COMMANDS_TOPIC: ai-platform.development.task-commands.data-analysis.v1
+      AI_PLATFORM_TASK_COMMANDS_QUARANTINE_TOPIC: ai-platform.development.task-commands.data-analysis.v1.quarantine
+      AI_PLATFORM_TASK_OUTCOMES_TOPIC: ai-platform.development.task-outcomes.v1
+      AI_PLATFORM_TASK_OUTCOMES_QUARANTINE_TOPIC: ai-platform.development.task-outcomes.v1.quarantine
+      AI_PLATFORM_CONTRACT_SCHEMA_DIRECTORY: /app/contracts/json-schema/v1
+      AI_PLATFORM_PUBLISH_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_CONSUMER_POLL_TIMEOUT_SECONDS: "1"
+      AI_PLATFORM_CONSUMER_RETRY_DELAY_SECONDS: "2"
+      AI_PLATFORM_CONSUMER_MAXIMUM_PROCESSING_ATTEMPTS: "5"
+      AI_PLATFORM_WORKER_IDLE_DELAY_SECONDS: "0.5"
+      AI_PLATFORM_OUTBOX_CLAIM_TTL_SECONDS: "30"
+      AI_PLATFORM_OUTBOX_MAXIMUM_PUBLICATION_ATTEMPTS: "5"
+      AI_PLATFORM_QUARANTINE_RECONCILIATION_LIMIT: "50"
+      AI_PLATFORM_QUARANTINE_QUERY_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_KAFKA_PRODUCER_USERNAME: data-analysis-agent-producer
+      AI_PLATFORM_AGENT_KAFKA_PRODUCER_PASSWORD_FILE: /run/secrets/kafka_data_analysis_agent_producer_password
+      AI_PLATFORM_AGENT_KAFKA_CONSUMER_USERNAME: data-analysis-agent-consumer
+      AI_PLATFORM_AGENT_KAFKA_CONSUMER_PASSWORD_FILE: /run/secrets/kafka_data_analysis_agent_consumer_password
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-da7a04a15000"
+      # 0.0.0.0, not loopback (ADR-0017 Decision 5): data-analysis-agent
+      # does not share platform's network namespace, so a loopback bind
+      # would only ever be reachable from inside this container -- never
+      # from platform, which needs to query it over the Compose network at
+      # data-analysis-agent:8100 (see registry.json).
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_AGENT_MAXIMUM_CONCURRENCY: "4"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-data-analysis-agent
+      AI_PLATFORM_AGENT_DECLARATION_DIGEST: "sha256:local-compose-data-analysis-declaration"
+      AI_PLATFORM_AGENT_DECLARATION_PATH: /app/runtime-config/registry.json
+      AI_PLATFORM_AGENT_PUBLISHER_INSTANCE_ID: "6e7f8091-a2b3-7ec4-9d5e-5f6070819293"
+      AI_PLATFORM_AGENT_COMMAND_CONSUMER_GROUP_ID: ai-platform-data-analysis-agent-commands
+      AI_PLATFORM_AGENT_COMMAND_LOGICAL_SUBSCRIPTION_ID: data-analysis-agent-commands
+      # AI Router (ADR-0014). ADR-0021 Decision 3 reuses ADR-0017 Decision
+      # 3's exact approved model list unchanged. Real Anthropic (primary)
+      # and OpenAI (fallback) credentials are configured in this
+      # environment -- data-analysis-agent uses the same real credentials.
+      # Models must still be on the ADR-0017 Decision 3 approved list
+      # (runtime/composition.py's _APPROVED_ANTHROPIC_MODELS/
+      # _APPROVED_OPENAI_MODELS) -- data-analysis-agent fails closed at
+      # startup on any other value.
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+    secrets:
+      - dsn_agent
+      - kafka_data_analysis_agent_producer_password
+      - kafka_data_analysis_agent_consumer_password
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+    volumes:
+      - ./runtime/registry.json:/app/runtime-config/registry.json:ro
+
 secrets:
   postgres_admin_password:
     file: ./secrets/postgres_admin_password.txt
@@ -681,6 +759,10 @@ secrets:
     file: ./secrets/kafka_architecture_review_agent_producer_password.txt
   kafka_architecture_review_agent_consumer_password:
     file: ./secrets/kafka_architecture_review_agent_consumer_password.txt
+  kafka_data_analysis_agent_producer_password:
+    file: ./secrets/kafka_data_analysis_agent_producer_password.txt
+  kafka_data_analysis_agent_consumer_password:
+    file: ./secrets/kafka_data_analysis_agent_consumer_password.txt
   dsn_orchestrator:
     file: ./secrets/dsn_orchestrator.txt
   dsn_agent:
