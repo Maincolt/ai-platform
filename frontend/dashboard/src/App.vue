@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { fetchAgents } from "./api.js";
 import AgentCard from "./AgentCard.vue";
 import AssignmentForm from "./AssignmentForm.vue";
+import HistoryList from "./HistoryList.vue";
 
 const REFRESH_INTERVAL_MS = 5000;
 
@@ -80,6 +81,14 @@ onUnmounted(() => {
       >
         Submit assignment
       </button>
+      <button
+        type="button"
+        class="tab-button"
+        :class="{ 'tab-button--active': activeTab === 'history' }"
+        @click="activeTab = 'history'"
+      >
+        History
+      </button>
     </nav>
 
     <template v-if="activeTab === 'agents'">
@@ -97,7 +106,8 @@ onUnmounted(() => {
       </div>
     </template>
 
-    <AssignmentForm v-else />
+    <AssignmentForm v-else-if="activeTab === 'assignment'" />
+    <HistoryList v-else />
   </main>
 </template>
 

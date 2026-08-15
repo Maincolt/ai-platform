@@ -66,3 +66,24 @@ export async function pollWorkflowToTerminal(
   }
   throw new Error(`workflow ${workflowId} did not reach a terminal state in time`);
 }
+
+/**
+ * Fetch a page of submission history (GET /api/v1/workflows, ADR-0024).
+ * Newest first. Pass `before` (an entry's own `submitted_at`, or a
+ * previous response's `next_before`) to page further back.
+ */
+export async function fetchWorkflowHistory({ capability, limit = 20, before } = {}) {
+  const params = new URLSearchParams();
+  if (capability) params.set("capability", capability);
+  if (limit) params.set("limit", String(limit));
+  if (before) params.set("before", before);
+
+  const response = await fetch(`/api/v1/workflows?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(body.detail ?? `GET /api/v1/workflows failed: HTTP ${response.status}`);
+  }
+  return body;
+}
