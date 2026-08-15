@@ -677,6 +677,10 @@ secrets:
     file: ./secrets/kafka_ui_review_agent_producer_password.txt
   kafka_ui_review_agent_consumer_password:
     file: ./secrets/kafka_ui_review_agent_consumer_password.txt
+  kafka_architecture_review_agent_producer_password:
+    file: ./secrets/kafka_architecture_review_agent_producer_password.txt
+  kafka_architecture_review_agent_consumer_password:
+    file: ./secrets/kafka_architecture_review_agent_consumer_password.txt
   dsn_orchestrator:
     file: ./secrets/dsn_orchestrator.txt
   dsn_agent:
