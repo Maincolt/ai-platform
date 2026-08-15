@@ -1,5 +1,5 @@
 {
-  "revision": "local-compose-5",
+  "revision": "local-compose-6",
   "bindings": [
     {
       "capability_name": "text.word-count",
@@ -60,6 +60,21 @@
       "environment": "development",
       "enabled": true,
       "readiness_url": "http://ui-review-agent:8100/health/ready"
+    },
+    {
+      "capability_name": "architecture.review",
+      "capability_version": "1.0",
+      "command_contract_name": "ExecuteTask",
+      "command_contract_versions": ["1.0"],
+      "event_contract_names": ["TaskCompleted", "TaskFailed"],
+      "event_contract_versions": ["1.0", "1.0"],
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-a12ec7ec7000",
+      "implementation_identity": "local-compose-architecture-review-agent",
+      "implementation_version": "1.0",
+      "deployment_declaration_digest": "sha256:local-compose-architecture-review-declaration",
+      "environment": "development",
+      "enabled": true,
+      "readiness_url": "http://architecture-review-agent:8100/health/ready"
     }
   ]
 }
