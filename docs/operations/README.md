@@ -227,6 +227,41 @@ safely recorded rather than corrupting the terminal state, is a correct
 outcome. See `docs/sprint-6/progress.md` and
 `docs/sprint-7/progress.md` for the full account.
 
+### A new capability's Registry binding leaves every *other* Agent `UNAVAILABLE`
+
+**Symptom**: after adding a new capability (a new `registry.json` binding
+plus its revision bump) and recreating only the new Agent's container
+(plus `test-agent`/`dashboard` for the netns gotcha above), `GET
+/api/v1/agents` shows the *new* capability and `text.word-count` (backed
+by the freshly recreated `test-agent`) as `READY`, but every
+already-running Agent from a previous deployment (e.g.
+`summarize-agent`/`review-agent`/`ui-review-agent`) as `UNAVAILABLE` —
+found live during `architecture.review`'s deployment (ADR-0020), which
+added a fifth binding and bumped the revision from `local-compose-5` to
+`local-compose-6`.
+
+**Cause**: each Agent snapshots `registry.json`'s `revision` once, at its
+own process startup (`runtime/composition.py`'s
+`load_agent_deployment_declaration`), and reports it in its
+`/health/ready` payload's `declaration_revision` field.
+`AgentReadinessClient.refresh` (`runtime/readiness.py`) requires that
+field to equal `platform`'s *own* current `registry.revision` exactly, or
+it classifies the observation `UNAVAILABLE` regardless of the Agent's
+actual health. `platform` picks up the new revision on every restart, but
+an Agent container left running from before the bump has no reason to
+reload `registry.json` — restarting `platform` alone is what surfaces the
+mismatch, since it starts comparing against the new revision immediately.
+
+**Fix**: after any commit that bumps `registry.json`'s `revision`,
+restart (not just recreate the new one) *every* already-running Agent
+container so each re-reads the file at its own startup:
+
+```bash
+docker compose restart summarize-agent review-agent ui-review-agent
+# ...and any other previously deployed Agent container; a plain restart
+# is sufficient here (no netns to repair, unlike test-agent/dashboard).
+```
+
 ### Adding a new Kafka principal to an already-provisioned broker
 
 `kafka/entrypoint.sh` seeds every principal's SCRAM credentials via
