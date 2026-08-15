@@ -2,8 +2,11 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { fetchAgents } from "./api.js";
 import AgentCard from "./AgentCard.vue";
+import AssignmentForm from "./AssignmentForm.vue";
 
 const REFRESH_INTERVAL_MS = 5000;
+
+const activeTab = ref("agents");
 
 const agents = ref([]);
 const lastRefreshedAt = ref(null);
@@ -60,18 +63,41 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <p v-if="error" class="error-banner">
-      Could not reach the platform ({{ error }}) — showing the last known status.
-    </p>
+    <nav class="tab-nav">
+      <button
+        type="button"
+        class="tab-button"
+        :class="{ 'tab-button--active': activeTab === 'agents' }"
+        @click="activeTab = 'agents'"
+      >
+        Agents
+      </button>
+      <button
+        type="button"
+        class="tab-button"
+        :class="{ 'tab-button--active': activeTab === 'assignment' }"
+        @click="activeTab = 'assignment'"
+      >
+        Submit assignment
+      </button>
+    </nav>
 
-    <p v-if="loading && agents.length === 0" class="empty-state">Loading agent status…</p>
-    <p v-else-if="!loading && agents.length === 0 && !error" class="empty-state">
-      No Agent bindings are declared in the Capability Registry yet.
-    </p>
+    <template v-if="activeTab === 'agents'">
+      <p v-if="error" class="error-banner">
+        Could not reach the platform ({{ error }}) — showing the last known status.
+      </p>
 
-    <div v-else class="agent-grid">
-      <AgentCard v-for="agent in agents" :key="`${agent.agent_id}:${agent.capability}`" :agent="agent" />
-    </div>
+      <p v-if="loading && agents.length === 0" class="empty-state">Loading agent status…</p>
+      <p v-else-if="!loading && agents.length === 0 && !error" class="empty-state">
+        No Agent bindings are declared in the Capability Registry yet.
+      </p>
+
+      <div v-else class="agent-grid">
+        <AgentCard v-for="agent in agents" :key="`${agent.agent_id}:${agent.capability}`" :agent="agent" />
+      </div>
+    </template>
+
+    <AssignmentForm v-else />
   </main>
 </template>
 
@@ -132,6 +158,34 @@ h1 {
 
 .refresh-button:hover {
   background: var(--surface-hover);
+}
+
+.tab-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab-button {
+  border: none;
+  background: none;
+  color: var(--muted-text);
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab-button:hover {
+  color: inherit;
+}
+
+.tab-button--active {
+  color: inherit;
+  font-weight: 600;
+  border-bottom-color: var(--text);
 }
 
 .error-banner {
