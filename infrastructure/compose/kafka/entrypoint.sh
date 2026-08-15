@@ -32,6 +32,8 @@ data_analysis_agent_producer_password="$(cat /run/secrets/kafka_data_analysis_ag
 data_analysis_agent_consumer_password="$(cat /run/secrets/kafka_data_analysis_agent_consumer_password)"
 technical_review_agent_producer_password="$(cat /run/secrets/kafka_technical_review_agent_producer_password)"
 technical_review_agent_consumer_password="$(cat /run/secrets/kafka_technical_review_agent_consumer_password)"
+assignment_route_agent_producer_password="$(cat /run/secrets/kafka_assignment_route_agent_producer_password)"
+assignment_route_agent_consumer_password="$(cat /run/secrets/kafka_assignment_route_agent_consumer_password)"
 
 cat > "${CONFIG_DIR}/server.properties" <<PROPERTIES
 process.roles=broker,controller
@@ -95,7 +97,9 @@ echo "Formatting KRaft storage (no-op if already formatted)..."
     --add-scram "SCRAM-SHA-256=[name=data-analysis-agent-producer,password=${data_analysis_agent_producer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=data-analysis-agent-consumer,password=${data_analysis_agent_consumer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=technical-review-agent-producer,password=${technical_review_agent_producer_password}]" \
-    --add-scram "SCRAM-SHA-256=[name=technical-review-agent-consumer,password=${technical_review_agent_consumer_password}]"
+    --add-scram "SCRAM-SHA-256=[name=technical-review-agent-consumer,password=${technical_review_agent_consumer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=assignment-route-agent-producer,password=${assignment_route_agent_producer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=assignment-route-agent-consumer,password=${assignment_route_agent_consumer_password}]"
 
 echo "Starting Kafka broker..."
 exec "${KAFKA_HOME}/bin/kafka-server-start.sh" "${CONFIG_DIR}/server.properties"
