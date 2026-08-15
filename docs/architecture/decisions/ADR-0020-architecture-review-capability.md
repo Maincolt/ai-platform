@@ -138,6 +138,27 @@ Registry binding) and live verification against the real Mac Docker host
 follow as a separate commit/PR, per this repository's established
 pattern.
 
+**Update (2026-08-15) — deployment wiring landed and live-verified**: PR #42
+added the `architecture-review-agent` Compose service (shared
+`ai-platform:sprint6` image), its own Kafka producer/consumer
+principals/topic pair/ACLs (`architecture-review-agent-producer`/
+`-consumer`, `task-commands.architecture-review.v1` + quarantine
+companion), and a Capability Registry binding; `test_kafka_acl_matrix.py`
+gained matching isolation cases. Deployed to the Mac Docker host following
+`ui.review`'s exact playbook: image rebuilt, new SCRAM credentials seeded
+against the already-provisioned broker via `kafka-configs.sh --alter`
+(the `kafka-storage.sh format --add-scram` gap documented in
+`docs/operations/README.md` Section 4), `platform`/`test-agent`/`dashboard`
+recreated to pick up the new netns after `platform` itself was recreated
+by the Compose diff. `GET /api/v1/agents` reported `architecture.review` as
+`READY`/`fresh: true` immediately. A real submission (a deliberately
+flawed "cache every AI Router completion indefinitely" mini-ADR) reached
+`COMPLETED` with seven genuine, contextually specific findings from the
+real Anthropic provider (indefinite-cache staleness, no invalidation
+strategy, PII-in-cache exposure, hash-collision risk, and more) — not a
+placeholder/fixture response. The full 89-case ACL matrix, including the
+new principals' isolation cases, passed live against the broker.
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape this ADR applies
