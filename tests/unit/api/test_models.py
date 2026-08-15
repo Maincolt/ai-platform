@@ -15,6 +15,7 @@ from ai_platform.api.models import WorkflowSubmitRequest
         "ui.review",
         "architecture.review",
         "data.analysis",
+        "technical.review",
     ],
 )
 def test_submit_request_accepts_every_built_in_capability(capability: str) -> None:

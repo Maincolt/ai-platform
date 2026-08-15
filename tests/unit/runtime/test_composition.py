@@ -36,6 +36,10 @@ from ai_platform.agents.summarize_agent.agent import SummarizeAgent
 from ai_platform.agents.summarize_agent.capability import (
     CAPABILITY_NAME as SUMMARIZE_CAPABILITY_NAME,
 )
+from ai_platform.agents.technical_review_agent.agent import TechnicalReviewAgent
+from ai_platform.agents.technical_review_agent.capability import (
+    CAPABILITY_NAME as TECHNICAL_REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.agents.test_agent.agent import TestAgent
 from ai_platform.agents.test_agent.capability import CAPABILITY_NAME as WORD_COUNT_CAPABILITY_NAME
 from ai_platform.agents.ui_review_agent.agent import UiReviewAgent
@@ -399,6 +403,26 @@ def test_build_executor_selects_data_analysis_agent_for_data_analysis_capability
         persistence=object(),  # type: ignore[arg-type]
     )
     assert isinstance(executor, DataAnalysisAgent)
+
+
+def test_build_executor_selects_technical_review_agent_for_technical_review_capability(
+    tmp_path: Path,
+) -> None:
+    config = _agent_config(
+        tmp_path,
+        ai_router_anthropic_api_key=SecretFileReference(
+            Path(_write_secret(tmp_path, "anthropic-key", "sk-test"))
+        ),
+        ai_router_anthropic_model="claude-haiku-4-5",
+        ai_router_max_output_tokens=512,
+    )
+    executor = _build_executor(
+        TECHNICAL_REVIEW_CAPABILITY_NAME,
+        config=config,
+        agent_id=AgentId(config.agent_id),
+        persistence=object(),  # type: ignore[arg-type]
+    )
+    assert isinstance(executor, TechnicalReviewAgent)
 
 
 def test_build_executor_fails_closed_for_unrecognized_capability(tmp_path: Path) -> None:
