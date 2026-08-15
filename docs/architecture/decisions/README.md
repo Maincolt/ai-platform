@@ -30,6 +30,7 @@ technical and structural choices.
 | [ADR-0021](ADR-0021-data-analysis-capability.md) | `data.analysis` — a Data-Analyst Review Capability | Accepted |
 | [ADR-0022](ADR-0022-technical-review-capability.md) | `technical.review` — a Technical-Architect Review Capability | Accepted |
 | [ADR-0023](ADR-0023-assignment-route-capability.md) | `assignment.route` — Team-Based Assignment Routing | Accepted |
+| [ADR-0024](ADR-0024-submission-history.md) | Submission History — `GET /api/v1/workflows` | Accepted |
 
 ## Naming
 

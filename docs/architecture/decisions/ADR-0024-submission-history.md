@@ -154,6 +154,31 @@ chronological, per-capability history instead; grouping is left to a
 future ADR if it turns out to matter once there's real history to look
 at.
 
+## Implementation Status
+
+**Landed across three PRs**: #51 (migration `0008`, `SubmissionCommitIntent`/
+`SubmissionHistoryQueryPort`, both persistence adapters, `GET
+/api/v1/workflows`, JSON Schema/OpenAPI contracts, unit/component/
+integration tests — 730 tests passing locally), #52 (the dashboard's
+History tab), and a live deployment pass on the Mac Docker host.
+
+**Update (2026-08-15) — live-verified end to end**: the migration applied
+cleanly against the already-provisioned broker/database (`orchestrator`
+schema version 3 → 4, migrations 0001–0007 correctly skipped as
+already-applied); `platform` and `dashboard` rebuilt and recreated
+(`test-agent` recreated for the existing netns gotcha — `registry.json`
+was unchanged this round, so no other Agent needed restarting, unlike
+every capability-adding deployment before this one). All eight
+capabilities remained `READY` throughout. A real submission through the
+live `GET /api/v1/workflows` returned the exact capability, input text,
+and state recorded — confirmed against a completely fresh `curl`
+round-trip, not just the test suite. The `capability` query filter
+correctly returned an empty list for an unrelated capability. The four
+`external_service`-marked tests in
+`tests/integration/test_workflow_state_machine_persistence.py`
+(including the new submission-history round-trip test) all passed
+directly against the real Mac Postgres.
+
 ## Related Decisions
 
 - [ADR-0006: Persistence, State, and Recovery](ADR-0006-persistence-state-and-recovery.md) — the atomic-commit-per-transaction discipline this ADR's insert follows
