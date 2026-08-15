@@ -81,7 +81,7 @@ def load_registry_artifact(path: Path, *, maximum_bytes: int = 262_144) -> Regis
 # selects its own binding by (environment, agent_id, implementation_identity,
 # deployment_declaration_digest) rather than by position/count.
 _SUPPORTED_CAPABILITY_NAMES = frozenset(
-    {"text.word-count", "text.summarize", "code.review", "ui.review"}
+    {"text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review"}
 )
 
 

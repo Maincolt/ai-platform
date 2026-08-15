@@ -40,6 +40,10 @@ from ai_platform.adapters.persistence import (
     PsycopgTransportRejectionTransaction,
 )
 from ai_platform.adapters.persistence.outbox import OutboxRecoveryPolicy
+from ai_platform.agents.architecture_review_agent.agent import ArchitectureReviewAgent
+from ai_platform.agents.architecture_review_agent.capability import (
+    CAPABILITY_NAME as ARCHITECTURE_REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
@@ -685,6 +689,16 @@ def _build_executor(
             ai_router=_build_ai_router(config),
             page_capture=PlaywrightPageCapture(),
             allowed_review_target=_UI_REVIEW_ALLOWED_TARGET,
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
+    if capability_name == ARCHITECTURE_REVIEW_CAPABILITY_NAME:
+        return ArchitectureReviewAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
             max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
         )
     raise RuntimeConfigurationError(f"UNSUPPORTED_AGENT_CAPABILITY:{capability_name}")
