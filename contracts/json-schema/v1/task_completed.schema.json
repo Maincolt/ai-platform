@@ -82,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review"]
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review", "assignment.route"]
         },
         "capability_version": {
           "const": "1.0"
@@ -316,6 +316,48 @@
                         "component": { "type": "string", "minLength": 1, "maxLength": 200 },
                         "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
                         "severity": { "enum": ["low", "medium", "high"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "assignment.route" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["assignments"],
+                "properties": {
+                  "assignments": {
+                    "type": "array",
+                    "description": "Advisory only (ADR-0023 Decision 2): nothing is dispatched automatically. Names which of the team's other capabilities should look at the input.",
+                    "maxItems": 6,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["capability", "rationale"],
+                      "properties": {
+                        "capability": {
+                          "enum": [
+                            "text.summarize",
+                            "code.review",
+                            "ui.review",
+                            "architecture.review",
+                            "data.analysis",
+                            "technical.review"
+                          ]
+                        },
+                        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 }
                       }
                     }
                   }

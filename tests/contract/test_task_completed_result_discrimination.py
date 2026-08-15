@@ -386,3 +386,73 @@ def test_technical_review_result_does_not_accept_the_summarize_capabilitys_field
     message = _message(capability="technical.review", result={"findings": [], "summary": "extra"})
     with pytest.raises(ValidationError):
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_result_validates_against_the_assignments_branch() -> None:
+    message = _message(
+        capability="assignment.route",
+        result={
+            "assignments": [
+                {
+                    "capability": "architecture.review",
+                    "rationale": "Proposes a new architectural boundary.",
+                },
+                {
+                    "capability": "technical.review",
+                    "rationale": "Also includes a concrete schema change.",
+                },
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_empty_assignments_list_is_valid() -> None:
+    message = _message(capability="assignment.route", result={"assignments": []})
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_capability_missing_assignments_is_rejected() -> None:
+    message = _message(capability="assignment.route", result={"findings": []})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_entry_with_a_technical_review_component_key_is_rejected() -> None:
+    """`assignment.route`'s recommendation shape has no `component`
+    concept -- it must not accidentally validate against
+    `technical.review`'s branch."""
+    message = _message(
+        capability="assignment.route",
+        result={"assignments": [{"component": "users table", "rationale": "x"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_entry_naming_an_ineligible_capability_is_rejected() -> None:
+    message = _message(
+        capability="assignment.route",
+        result={"assignments": [{"capability": "text.word-count", "rationale": "x"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_entry_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="assignment.route",
+        result={
+            "assignments": [{"capability": "code.review", "rationale": "x", "severity": "low"}]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_assignment_route_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(
+        capability="assignment.route", result={"assignments": [], "summary": "extra"}
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
