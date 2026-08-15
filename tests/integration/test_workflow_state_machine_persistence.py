@@ -25,6 +25,7 @@ just application code) defends terminal-state integrity:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -66,7 +67,7 @@ _CAPABILITY_VERSION = "1.0"
 
 # Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
 # (see tests/integration/conftest.py's copy of this same constant/comment).
-_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 4
 
 
 def _new_id() -> str:
@@ -306,6 +307,61 @@ def test_database_rejects_a_terminal_state_write_without_its_required_payload(
             unchanged = await persistence.get(workflow_id)
             assert unchanged is not None
             assert unchanged.state is WorkflowState.DISPATCHED
+        finally:
+            await pool.close()
+
+    asyncio.run(run())
+
+
+def test_submission_history_round_trips_and_reflects_current_workflow_state(
+    postgres_orchestrator_app_dsn: str,
+) -> None:
+    """ADR-0024: the history insert lands in the same atomic transaction as
+    the rest of `commit_submission`, and a listing always joins back to
+    `orchestrator.workflows` for the current state -- never a stale copy
+    from acceptance time."""
+
+    async def run() -> None:
+        now = datetime.now(UTC)
+        intent, workflow_id, _task_id, _attempt_id = _build_intent(now=now)
+        intent = dataclasses.replace(
+            intent,
+            capability_name="architecture.review",
+            capability_version="1.0",
+            input_text="sprint ten state machine words",
+        )
+
+        pool = await _open_orchestrator_pool(postgres_orchestrator_app_dsn)
+        try:
+            persistence = PsycopgOrchestratorPersistence(pool)
+            result = await persistence.commit_submission(intent)
+            assert result.created is True
+
+            entries = await persistence.list_recent(
+                capability_name="architecture.review", limit=10, before=None
+            )
+            entry = next(e for e in entries if e.workflow_id == workflow_id)
+            assert entry.capability_name == "architecture.review"
+            assert entry.capability_version == "1.0"
+            assert entry.input_text == "sprint ten state machine words"
+            assert entry.state is WorkflowState.DISPATCHED
+            assert entry.result_data is None
+            assert entry.failure_code is None
+
+            # A replay of the same key must not duplicate the history row.
+            replay = await persistence.commit_submission(intent)
+            assert replay.created is False
+            entries_after_replay = await persistence.list_recent(
+                capability_name="architecture.review", limit=10, before=None
+            )
+            matching = [e for e in entries_after_replay if e.workflow_id == workflow_id]
+            assert len(matching) == 1
+
+            # Filtering to an unrelated capability excludes this entry.
+            unrelated = await persistence.list_recent(
+                capability_name="technical.review", limit=10, before=None
+            )
+            assert workflow_id not in [e.workflow_id for e in unrelated]
         finally:
             await pool.close()
 

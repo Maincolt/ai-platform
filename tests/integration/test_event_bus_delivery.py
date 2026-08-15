@@ -87,7 +87,7 @@ _POLL_TIMEOUT_SECONDS = 2.0
 
 # Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
 # (see tests/integration/conftest.py's copy of this same constant/comment).
-_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+_EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 4
 
 _WORD_COUNT_CAPABILITY_NAME = "text.word-count"
 

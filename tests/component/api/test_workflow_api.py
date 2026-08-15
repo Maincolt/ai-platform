@@ -180,3 +180,95 @@ def test_public_response_never_exposes_internal_identifiers(client: TestClient) 
     assert "task_id" not in body
     assert "task_attempt_id" not in body
     assert "idempotency_scope_id" not in body
+
+
+def test_list_workflow_history_returns_recent_submission(client: TestClient) -> None:
+    submitted = client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
+    workflow_id = submitted.json()["workflow_id"]
+
+    response = client.get("/api/v1/workflows")
+
+    assert response.status_code == 200
+    body = response.json()
+    entry = next(e for e in body["entries"] if e["workflow_id"] == workflow_id)
+    assert entry["capability"] == "text.word-count"
+    assert entry["capability_version"] == "1.0"
+    assert entry["input_text"] == VALID_SUBMIT_BODY["text"]
+    assert entry["state"] == "DISPATCHED"
+    assert "submitted_at" in entry
+
+
+def test_list_workflow_history_state_matches_the_direct_read(client: TestClient) -> None:
+    """History always reads state fresh via a join, never a cached
+    snapshot from acceptance (ADR-0024) -- it must agree with a direct
+    GET /api/v1/workflows/{id} for the same workflow at the same moment."""
+    submitted = client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
+    workflow_id = submitted.json()["workflow_id"]
+    direct_read = client.get(f"/api/v1/workflows/{workflow_id}")
+
+    response = client.get("/api/v1/workflows")
+
+    entry = next(e for e in response.json()["entries"] if e["workflow_id"] == workflow_id)
+    assert entry["state"] == direct_read.json()["state"]
+
+
+def test_list_workflow_history_filters_by_capability(client: TestClient) -> None:
+    client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
+
+    matching = client.get("/api/v1/workflows", params={"capability": "text.word-count"})
+    other = client.get("/api/v1/workflows", params={"capability": "code.review"})
+
+    assert len(matching.json()["entries"]) >= 1
+    assert other.json()["entries"] == []
+
+
+def test_list_workflow_history_respects_limit(client: TestClient) -> None:
+    for index in range(3):
+        client.post("/api/v1/workflows", json={**VALID_SUBMIT_BODY, "text": f"entry {index}"})
+
+    response = client.get("/api/v1/workflows", params={"limit": 2})
+
+    assert len(response.json()["entries"]) == 2
+    assert response.json()["next_before"] is not None
+
+
+def test_list_workflow_history_limit_out_of_range_returns_400(client: TestClient) -> None:
+    # FastAPI's query-param validation raises RequestValidationError, caught
+    # by the same app-wide handler that turns a malformed submit body into
+    # a 400 (app.py's handle_validation_error) -- not a bare 422.
+    response = client.get("/api/v1/workflows", params={"limit": 0})
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "INVALID_REQUEST"
+
+    response = client.get("/api/v1/workflows", params={"limit": 101})
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "INVALID_REQUEST"
+
+
+def test_list_workflow_history_invalid_before_returns_400(client: TestClient) -> None:
+    response = client.get("/api/v1/workflows", params={"before": "not-a-timestamp"})
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "INVALID_REQUEST"
+
+
+def test_list_workflow_history_before_cursor_excludes_at_or_after(client: TestClient) -> None:
+    submitted = client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
+    workflow_id = submitted.json()["workflow_id"]
+    all_entries = client.get("/api/v1/workflows").json()["entries"]
+    submitted_at = next(e for e in all_entries if e["workflow_id"] == workflow_id)["submitted_at"]
+
+    response = client.get("/api/v1/workflows", params={"before": submitted_at})
+
+    assert workflow_id not in [e["workflow_id"] for e in response.json()["entries"]]
+
+
+def test_list_workflow_history_never_exposes_internal_identifiers(client: TestClient) -> None:
+    client.post("/api/v1/workflows", json=VALID_SUBMIT_BODY)
+
+    response = client.get("/api/v1/workflows")
+
+    for entry in response.json()["entries"]:
+        assert "task_id" not in entry
+        assert "task_attempt_id" not in entry
+        assert "idempotency_scope_id" not in entry

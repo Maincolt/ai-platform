@@ -20,6 +20,7 @@ from ai_platform.orchestrator.domain.accepted_request import (
 )
 from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
+from ai_platform.orchestrator.domain.states import WorkflowState
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
 from ai_platform.orchestrator.domain.workflow import Workflow
 from ai_platform.shared.identifiers import (
@@ -27,6 +28,7 @@ from ai_platform.shared.identifiers import (
     CorrelationId,
     MessageId,
     OwnerSubjectId,
+    RequestId,
     TaskAttemptId,
     TaskId,
     WorkflowId,
@@ -104,6 +106,14 @@ class SubmissionCommitIntent:
     task_attempt: TaskAttempt
     command_outbox: OrchestratorOutboxRecord
     audit: AuditRecord
+    # ADR-0024: written into orchestrator.submission_history in the same
+    # atomic transaction, only on the `created=True` (genuinely new
+    # submission) path -- never on a replay. Defaulted so the many existing
+    # call sites exercising unrelated submission-transaction concerns don't
+    # need to change.
+    capability_name: str = ""
+    capability_version: str = ""
+    input_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +121,38 @@ class SubmissionCommitResult:
     resolution: AcceptedRequestResolution
     workflow: Workflow
     created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionHistoryEntry:
+    """One past submission (ADR-0024), joined against its workflow's current
+    state/result at read time so it can never go stale."""
+
+    workflow_id: WorkflowId
+    request_id: RequestId
+    correlation_id: CorrelationId
+    capability_name: str
+    capability_version: str
+    input_text: str
+    submitted_at: datetime
+    state: WorkflowState
+    result_data: dict[str, object] | None
+    failure_code: str | None
+    failure_detail: str | None
+
+
+class SubmissionHistoryQueryPort(Protocol):
+    async def list_recent(
+        self,
+        *,
+        capability_name: str | None,
+        limit: int,
+        before: datetime | None,
+    ) -> list[SubmissionHistoryEntry]:
+        """Return up to `limit` submissions, newest first, optionally
+        filtered to one capability and/or strictly before a cursor
+        timestamp."""
+        ...
 
 
 class SubmissionTransactionPort(Protocol):

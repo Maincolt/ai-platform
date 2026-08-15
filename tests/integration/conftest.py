@@ -66,7 +66,7 @@ DOCKER_HOST_LAN_IP = "192.168.1.123"
 # topology re-validation, which caught these three call sites still
 # defaulting to the class's `expected_schema_version=1` default after
 # Sprint 9's migrations 0003-0007 shipped without these being updated.
-EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 3
+EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 4
 EXPECTED_AGENT_SCHEMA_VERSION = 4
 
 # Overridable so this suite can run either against the Docker host's

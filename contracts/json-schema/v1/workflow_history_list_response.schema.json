@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-platform:contract:api:workflow-history-list-response:1.0",
+  "title": "Workflow History List Response",
+  "description": "200 response body for GET /api/v1/workflows (ADR-0024). Newest-first, cursor-paginated submission history; state/result/failure are always the workflow's current values, read fresh at query time, never a cached snapshot from acceptance.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "correlation_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "capability": {
+            "type": "string",
+            "description": "The capability this submission was made to (ADR-0024): persisted at submission time, unlike the workflow's own row, which never carried it before this ADR."
+          },
+          "capability_version": {
+            "type": "string"
+          },
+          "input_text": {
+            "type": "string",
+            "description": "The submitted text, verbatim, bounded to the existing 10,000-character workflow.submit limit."
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"]
+          },
+          "result": {
+            "type": "object",
+            "description": "Present only when state is COMPLETED. Shape is capability-scoped (ADR-0015), same as workflow_read_response's result.",
+            "additionalProperties": true,
+            "minProperties": 1
+          },
+          "failure": {
+            "type": "object",
+            "description": "Present only when state is FAILED.",
+            "additionalProperties": false,
+            "required": ["code", "detail"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "required": [
+          "workflow_id",
+          "request_id",
+          "correlation_id",
+          "capability",
+          "capability_version",
+          "input_text",
+          "submitted_at",
+          "state"
+        ]
+      }
+    },
+    "next_before": {
+      "type": ["string", "null"],
+      "description": "Pass as the `before` query parameter to fetch the next page, newest-first. Present (non-null) only when `entries` reached the requested `limit`, meaning older entries may still exist.",
+      "format": "date-time"
+    }
+  },
+  "required": ["entries"]
+}

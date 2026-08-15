@@ -254,6 +254,9 @@ class SubmissionOrchestrator:
                 task_attempt=attempt,
                 command_outbox=outbox_record,
                 audit=audit,
+                capability_name=request.capability_name,
+                capability_version=request.capability_version,
+                input_text=request.text,
             )
         )
 

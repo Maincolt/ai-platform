@@ -327,6 +327,7 @@ def build_platform_process(
         orchestrator_persistence=persistence,
         agent_persistence=None,
         workflow_access_query=persistence,
+        submission_history_query=persistence,
         security_policy=LocalDevelopmentAuthorizationPolicy(),
         submission_orchestrator=submission,
         terminal_event_processor=terminal,
@@ -885,7 +886,7 @@ _EXPECTED_SCHEMA_VERSION: dict[str, int] = {
     # Bump alongside the latest applied infrastructure/migrations/*.sql for
     # each component so a stale database is rejected at startup rather than
     # silently misread.
-    "orchestrator": 3,
+    "orchestrator": 4,
     "agent": 4,
 }
 
