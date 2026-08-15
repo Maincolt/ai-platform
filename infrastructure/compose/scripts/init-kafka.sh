@@ -8,7 +8,8 @@
 # summarize-agent-consumer, review-agent-producer, review-agent-consumer,
 # ui-review-agent-producer, ui-review-agent-consumer,
 # architecture-review-agent-producer, architecture-review-agent-consumer,
-# data-analysis-agent-producer, data-analysis-agent-consumer)
+# data-analysis-agent-producer, data-analysis-agent-consumer,
+# technical-review-agent-producer, technical-review-agent-consumer)
 # receives only the topic and consumer-group access its role requires,
 # matching ADR-0005 Section 17 (Orchestrator writes commands and reads
 # outcomes; each Agent class reads only its own capability-scoped commands
@@ -39,6 +40,8 @@ TASK_COMMANDS_ARCHITECTURE_REVIEW="${PREFIX}.task-commands.architecture-review.v
 TASK_COMMANDS_ARCHITECTURE_REVIEW_DLQ="${TASK_COMMANDS_ARCHITECTURE_REVIEW}.quarantine"
 TASK_COMMANDS_DATA_ANALYSIS="${PREFIX}.task-commands.data-analysis.v1"
 TASK_COMMANDS_DATA_ANALYSIS_DLQ="${TASK_COMMANDS_DATA_ANALYSIS}.quarantine"
+TASK_COMMANDS_TECHNICAL_REVIEW="${PREFIX}.task-commands.technical-review.v1"
+TASK_COMMANDS_TECHNICAL_REVIEW_DLQ="${TASK_COMMANDS_TECHNICAL_REVIEW}.quarantine"
 TASK_OUTCOMES="${PREFIX}.task-outcomes.v1"
 TASK_OUTCOMES_DLQ="${TASK_OUTCOMES}.quarantine"
 
@@ -49,6 +52,7 @@ REVIEW_AGENT_COMMAND_GROUP="ai-platform-review-agent-commands"
 UI_REVIEW_AGENT_COMMAND_GROUP="ai-platform-ui-review-agent-commands"
 ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP="ai-platform-architecture-review-agent-commands"
 DATA_ANALYSIS_AGENT_COMMAND_GROUP="ai-platform-data-analysis-agent-commands"
+TECHNICAL_REVIEW_AGENT_COMMAND_GROUP="ai-platform-technical-review-agent-commands"
 
 admin_password="$(cat /run/secrets/kafka_admin_password)"
 cat > /tmp/admin-client.properties <<ADMIN
@@ -72,6 +76,7 @@ for topic in "${TASK_COMMANDS_WORD_COUNT}" "${TASK_COMMANDS_WORD_COUNT_DLQ}" \
     "${TASK_COMMANDS_UI_REVIEW}" "${TASK_COMMANDS_UI_REVIEW_DLQ}" \
     "${TASK_COMMANDS_ARCHITECTURE_REVIEW}" "${TASK_COMMANDS_ARCHITECTURE_REVIEW_DLQ}" \
     "${TASK_COMMANDS_DATA_ANALYSIS}" "${TASK_COMMANDS_DATA_ANALYSIS_DLQ}" \
+    "${TASK_COMMANDS_TECHNICAL_REVIEW}" "${TASK_COMMANDS_TECHNICAL_REVIEW_DLQ}" \
     "${TASK_OUTCOMES}" "${TASK_OUTCOMES_DLQ}"; do
     topics --create --if-not-exists --topic "${topic}" --partitions 3 --replication-factor 1
 done
@@ -90,6 +95,8 @@ acls --add --allow-principal "User:orchestrator-producer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_ARCHITECTURE_REVIEW}"
 acls --add --allow-principal "User:orchestrator-producer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_DATA_ANALYSIS}"
+acls --add --allow-principal "User:orchestrator-producer" \
+    --operation Write --operation Describe --topic "${TASK_COMMANDS_TECHNICAL_REVIEW}"
 
 acls --add --allow-principal "User:orchestrator-consumer" \
     --operation Read --operation Describe --topic "${TASK_OUTCOMES}"
@@ -157,5 +164,15 @@ acls --add --allow-principal "User:data-analysis-agent-consumer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_DATA_ANALYSIS_DLQ}"
 acls --add --allow-principal "User:data-analysis-agent-consumer" \
     --operation Read --group "${DATA_ANALYSIS_AGENT_COMMAND_GROUP}"
+
+acls --add --allow-principal "User:technical-review-agent-producer" \
+    --operation Write --operation Describe --topic "${TASK_OUTCOMES}"
+
+acls --add --allow-principal "User:technical-review-agent-consumer" \
+    --operation Read --operation Describe --topic "${TASK_COMMANDS_TECHNICAL_REVIEW}"
+acls --add --allow-principal "User:technical-review-agent-consumer" \
+    --operation Write --operation Describe --topic "${TASK_COMMANDS_TECHNICAL_REVIEW_DLQ}"
+acls --add --allow-principal "User:technical-review-agent-consumer" \
+    --operation Read --group "${TECHNICAL_REVIEW_AGENT_COMMAND_GROUP}"
 
 echo "Kafka topic and ACL bootstrap complete."
