@@ -283,7 +283,7 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the fourteen least-privilege application principals
+    """confluent_kafka client configs for the sixteen least-privilege application principals
     provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four, the
     `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added in
     Sprint 9 for capability-scoped `text-summarize` routing, the
@@ -292,9 +292,11 @@ def kafka_principal_client_configs(
     `ui-review-agent-producer`/`ui-review-agent-consumer` pair ADR-0019 added for
     capability-scoped `ui-review` routing, the
     `architecture-review-agent-producer`/`architecture-review-agent-consumer` pair ADR-0020
-    added for capability-scoped `architecture-review` routing, and the
+    added for capability-scoped `architecture-review` routing, the
     `data-analysis-agent-producer`/`data-analysis-agent-consumer` pair ADR-0021 added for
-    capability-scoped `data-analysis` routing)."""
+    capability-scoped `data-analysis` routing, and the
+    `technical-review-agent-producer`/`technical-review-agent-consumer` pair ADR-0022 added
+    for capability-scoped `technical-review` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -341,5 +343,13 @@ def kafka_principal_client_configs(
         "data-analysis-agent-consumer": _kafka_principal_client_config(
             "data-analysis-agent-consumer",
             "kafka_data_analysis_agent_consumer_password.txt",
+        ),
+        "technical-review-agent-producer": _kafka_principal_client_config(
+            "technical-review-agent-producer",
+            "kafka_technical_review_agent_producer_password.txt",
+        ),
+        "technical-review-agent-consumer": _kafka_principal_client_config(
+            "technical-review-agent-consumer",
+            "kafka_technical_review_agent_consumer_password.txt",
         ),
     }
