@@ -194,3 +194,67 @@ def test_ui_review_result_does_not_accept_the_summarize_capabilitys_field() -> N
     message = _message(capability="ui.review", result={"findings": [], "summary": "extra"})
     with pytest.raises(ValidationError):
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="architecture.review",
+        result={
+            "findings": [
+                {
+                    "section": "Decision 2",
+                    "summary": "Missing rollback plan.",
+                    "severity": "medium",
+                },
+                {"section": "Security", "summary": "No threat model provided.", "severity": "high"},
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="architecture.review", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_finding_with_a_ui_review_area_key_is_rejected() -> None:
+    """`architecture.review`'s findings shape has no `area` concept -- it
+    must not accidentally validate against `ui.review`'s branch."""
+    message = _message(
+        capability="architecture.review",
+        result={"findings": [{"area": "console", "summary": "x", "severity": "low"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="architecture.review",
+        result={"findings": [{"section": "Decision 2", "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="architecture.review",
+        result={
+            "findings": [
+                {"section": "Decision 2", "summary": "x", "severity": "low", "confidence": 0.9}
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_architecture_review_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(
+        capability="architecture.review", result={"findings": [], "summary": "extra"}
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]

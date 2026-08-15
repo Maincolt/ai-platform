@@ -26,6 +26,8 @@ review_agent_producer_password="$(cat /run/secrets/kafka_review_agent_producer_p
 review_agent_consumer_password="$(cat /run/secrets/kafka_review_agent_consumer_password)"
 ui_review_agent_producer_password="$(cat /run/secrets/kafka_ui_review_agent_producer_password)"
 ui_review_agent_consumer_password="$(cat /run/secrets/kafka_ui_review_agent_consumer_password)"
+architecture_review_agent_producer_password="$(cat /run/secrets/kafka_architecture_review_agent_producer_password)"
+architecture_review_agent_consumer_password="$(cat /run/secrets/kafka_architecture_review_agent_consumer_password)"
 
 cat > "${CONFIG_DIR}/server.properties" <<PROPERTIES
 process.roles=broker,controller
@@ -83,7 +85,9 @@ echo "Formatting KRaft storage (no-op if already formatted)..."
     --add-scram "SCRAM-SHA-256=[name=review-agent-producer,password=${review_agent_producer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=review-agent-consumer,password=${review_agent_consumer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=ui-review-agent-producer,password=${ui_review_agent_producer_password}]" \
-    --add-scram "SCRAM-SHA-256=[name=ui-review-agent-consumer,password=${ui_review_agent_consumer_password}]"
+    --add-scram "SCRAM-SHA-256=[name=ui-review-agent-consumer,password=${ui_review_agent_consumer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=architecture-review-agent-producer,password=${architecture_review_agent_producer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=architecture-review-agent-consumer,password=${architecture_review_agent_consumer_password}]"
 
 echo "Starting Kafka broker..."
 exec "${KAFKA_HOME}/bin/kafka-server-start.sh" "${CONFIG_DIR}/server.properties"

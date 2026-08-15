@@ -26,6 +26,7 @@ technical and structural choices.
 | [ADR-0017](ADR-0017-ai-router-follow-up-decisions.md) | AI Router Follow-Up Decisions and Multi-Agent Readiness Routing | Accepted |
 | [ADR-0018](ADR-0018-software-team-persona-capabilities.md) | Software-Team-Persona Capabilities — Scope and First Candidate | Accepted |
 | [ADR-0019](ADR-0019-ui-review-capability.md) | `ui.review` — a Playwright-Backed UI Review Capability | Accepted |
+| [ADR-0020](ADR-0020-architecture-review-capability.md) | `architecture.review` — a Solution-Architect Review Capability | Accepted |
 
 ## Naming
 
