@@ -82,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review"]
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis"]
         },
         "capability_version": {
           "const": "1.0"
@@ -248,6 +248,39 @@
                       "required": ["section", "summary", "severity"],
                       "properties": {
                         "section": { "type": "string", "minLength": 1, "maxLength": 200 },
+                        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "severity": { "enum": ["low", "medium", "high"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "data.analysis" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["findings"],
+                "properties": {
+                  "findings": {
+                    "type": "array",
+                    "description": "Advisory only (ADR-0021 Decision 2): never applied automatically.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["metric", "summary", "severity"],
+                      "properties": {
+                        "metric": { "type": "string", "minLength": 1, "maxLength": 200 },
                         "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
                         "severity": { "enum": ["low", "medium", "high"] }
                       }

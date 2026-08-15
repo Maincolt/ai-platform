@@ -8,7 +8,14 @@ from ai_platform.api.models import WorkflowSubmitRequest
 
 @pytest.mark.parametrize(
     "capability",
-    ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review"],
+    [
+        "text.word-count",
+        "text.summarize",
+        "code.review",
+        "ui.review",
+        "architecture.review",
+        "data.analysis",
+    ],
 )
 def test_submit_request_accepts_every_built_in_capability(capability: str) -> None:
     """ADR-0018/ADR-0019: `code.review`/`ui.review` are submittable
