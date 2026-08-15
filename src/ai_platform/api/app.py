@@ -8,7 +8,7 @@ response that can safely be produced.
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -21,7 +21,9 @@ from ai_platform.api.ids import Uuid7IdentifierFactory
 from ai_platform.api.models import (
     AgentsListResponse,
     AgentStatusModel,
+    SubmissionHistoryEntryModel,
     WorkflowFailureModel,
+    WorkflowHistoryListResponse,
     WorkflowReadResponse,
     WorkflowResultModel,
     WorkflowSubmitRequest,
@@ -267,6 +269,76 @@ async def read_workflow(
         result=_result_model(workflow),
         failure=_failure_model(workflow),
     )
+    return JSONResponse(
+        status_code=200,
+        content=response_body.model_dump(exclude_none=True),
+        headers={CORRELATION_HEADER: str(correlation_id)},
+    )
+
+
+_DEFAULT_HISTORY_LIMIT = 20
+_MAX_HISTORY_LIMIT = 100
+
+
+@app.get("/api/v1/workflows")
+async def list_workflow_history(
+    request: Request,
+    state: Annotated[AppState, Depends(get_app_state)],
+    capability: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=_MAX_HISTORY_LIMIT)] = _DEFAULT_HISTORY_LIMIT,
+    before: str | None = None,
+) -> JSONResponse:
+    """Read-only submission history (ADR-0024): newest first, optionally
+    filtered to one capability, cursor-paginated via `before`. `state`/
+    `result`/`failure` are always the workflow's current values, read
+    fresh at query time -- never a cached snapshot from acceptance."""
+    correlation_id = _effective_correlation_id(request)
+    state.security_policy.resolve(semantic_operation="workflow.read")
+
+    before_cursor: datetime | None = None
+    if before is not None:
+        try:
+            before_cursor = datetime.strptime(before, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            body = problem_details.invalid_request(
+                "before must be an RFC 3339 UTC timestamp, e.g. 2026-08-15T12:00:00Z",
+                correlation_id=correlation_id,
+            )
+            return JSONResponse(
+                status_code=400,
+                content=body,
+                headers={CORRELATION_HEADER: str(correlation_id)},
+                media_type="application/problem+json",
+            )
+
+    entries = await state.submission_history_query.list_recent(
+        capability_name=capability, limit=limit, before=before_cursor
+    )
+    entry_models = [
+        SubmissionHistoryEntryModel(
+            workflow_id=str(entry.workflow_id),
+            request_id=str(entry.request_id),
+            correlation_id=str(entry.correlation_id),
+            capability=entry.capability_name,
+            capability_version=entry.capability_version,
+            input_text=entry.input_text,
+            submitted_at=entry.submitted_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            state=entry.state.value,
+            result=(
+                WorkflowResultModel(**entry.result_data) if entry.result_data is not None else None
+            ),
+            failure=(
+                WorkflowFailureModel(code=entry.failure_code, detail=entry.failure_detail or "")
+                if entry.failure_code is not None
+                else None
+            ),
+        )
+        for entry in entries
+    ]
+    next_before = (
+        entries[-1].submitted_at.strftime("%Y-%m-%dT%H:%M:%SZ") if len(entries) == limit else None
+    )
+    response_body = WorkflowHistoryListResponse(entries=entry_models, next_before=next_before)
     return JSONResponse(
         status_code=200,
         content=response_body.model_dump(exclude_none=True),

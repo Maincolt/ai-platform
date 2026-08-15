@@ -17,6 +17,10 @@ from ai_platform.adapters.persistence.retry import (
     TransactionRetryPolicy,
     retry_transaction,
 )
+from ai_platform.adapters.persistence.submission_history import (
+    insert_submission_history,
+    select_submission_history,
+)
 from ai_platform.adapters.persistence.task import insert_task_and_attempt, update_task_outcome
 from ai_platform.adapters.persistence.workflow import (
     insert_workflow,
@@ -36,6 +40,7 @@ from ai_platform.ports.persistence.transactions import (
     ExpiredAttempt,
     SubmissionCommitIntent,
     SubmissionCommitResult,
+    SubmissionHistoryEntry,
     TerminalOutcomeCommitResult,
     TerminalOutcomeIntent,
     TerminalPersistenceDisposition,
@@ -86,6 +91,18 @@ class PsycopgOrchestratorPersistence:
             if allowed is None:
                 return None
             return await select_workflow(connection, workflow_id)
+
+    async def list_recent(
+        self,
+        *,
+        capability_name: str | None,
+        limit: int,
+        before: datetime | None,
+    ) -> list[SubmissionHistoryEntry]:
+        async with self._pool.connection() as connection:
+            return await select_submission_history(
+                connection, capability_name=capability_name, limit=limit, before=before
+            )
 
     @retry_transaction
     async def record_request_access(self, record: AcceptedRequestAccessAuditRecord) -> None:
@@ -149,6 +166,16 @@ class PsycopgOrchestratorPersistence:
             await insert_task_and_attempt(connection, intent.task, intent.task_attempt)
             await insert_outbox(connection, intent.command_outbox, schema="orchestrator")
             await insert_audit(connection, intent.audit, schema="orchestrator")
+            # ADR-0024: same atomic transaction, only on this genuinely-new
+            # path -- an EQUIVALENT_REPLAY never reaches here.
+            await insert_submission_history(
+                connection,
+                intent.workflow,
+                capability_name=intent.capability_name,
+                capability_version=intent.capability_version,
+                input_text=intent.input_text,
+                submitted_at=intent.workflow.history[0].occurred_at,
+            )
             return SubmissionCommitResult(
                 resolution=resolution, workflow=intent.workflow, created=True
             )

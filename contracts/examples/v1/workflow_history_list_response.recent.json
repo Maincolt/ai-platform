@@ -1,0 +1,41 @@
+{
+  "entries": [
+    {
+      "workflow_id": "01936a1e-7f3a-7c21-8f2e-4b6d9a2c1e01",
+      "request_id": "01936a1e-7f3a-7c21-8f2e-4b6d9a2c1e00",
+      "correlation_id": "01936a1e-7f3a-7c21-8f2e-4b6d9a2c1e02",
+      "capability": "assignment.route",
+      "capability_version": "1.0",
+      "input_text": "Proposed schema for a new notifications table, plus a weekly usage report.",
+      "submitted_at": "2026-08-15T18:44:20Z",
+      "state": "COMPLETED",
+      "result": {
+        "assignments": [
+          {
+            "capability": "technical.review",
+            "rationale": "Proposes a new database schema and API endpoint contract."
+          },
+          {
+            "capability": "data.analysis",
+            "rationale": "Requests a recurring usage/metrics report."
+          }
+        ]
+      }
+    },
+    {
+      "workflow_id": "01936a1e-6a2b-7c21-8f2e-4b6d9a2c1e03",
+      "request_id": "01936a1e-6a2b-7c21-8f2e-4b6d9a2c1e04",
+      "correlation_id": "01936a1e-6a2b-7c21-8f2e-4b6d9a2c1e05",
+      "capability": "code.review",
+      "capability_version": "1.0",
+      "input_text": "diff --git a/app.py b/app.py\n+API_KEY = \"hardcoded-secret\"",
+      "submitted_at": "2026-08-15T18:40:02Z",
+      "state": "FAILED",
+      "failure": {
+        "code": "ALL_PROVIDERS_EXHAUSTED",
+        "detail": "Every configured AI provider returned a classified failure for this request."
+      }
+    }
+  ],
+  "next_before": "2026-08-15T18:40:02Z"
+}

@@ -284,7 +284,7 @@ def test_pool_uses_orchestrator_schema_and_expected_version(tmp_path: Path) -> N
     config = PlatformRuntimeConfig.from_environment(_platform_env(tmp_path))
     pool = _pool(config, component_schema="orchestrator")
     assert pool.component_schema == "orchestrator"
-    assert pool.expected_schema_version == 3
+    assert pool.expected_schema_version == 4
 
 
 def test_pool_uses_agent_schema_and_expected_version(tmp_path: Path) -> None:

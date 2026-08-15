@@ -55,6 +55,7 @@ from ai_platform.ports.persistence.transactions import (
     ProviderCallUsageRecord,
     SubmissionCommitIntent,
     SubmissionCommitResult,
+    SubmissionHistoryEntry,
     TerminalOutcomeCommitResult,
     TerminalOutcomeIntent,
     TerminalPersistenceDisposition,
@@ -261,6 +262,13 @@ class InMemoryOrchestratorPersistence:
     _terminal_inbox: dict[tuple[str, str, MessageId], _TerminalInboxEntry] = field(
         default_factory=dict, repr=False
     )
+    # ADR-0024: (capability_name, capability_version, input_text, submitted_at)
+    # per workflow_id, mirroring orchestrator.submission_history -- state/
+    # result are read fresh from `workflows` at list_recent time, never
+    # copied here, same "never stale" property the real adapter has.
+    submission_history: dict[WorkflowId, tuple[str, str, str, datetime]] = field(
+        default_factory=dict
+    )
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def resolve(self, key: AcceptedRequestKey) -> AcceptedRequestResolution | None:
@@ -290,6 +298,46 @@ class InMemoryOrchestratorPersistence:
                 return None
             workflow = self.workflows.get(workflow_id)
             return copy.deepcopy(workflow) if workflow is not None else None
+
+    async def list_recent(
+        self,
+        *,
+        capability_name: str | None,
+        limit: int,
+        before: datetime | None,
+    ) -> list[SubmissionHistoryEntry]:
+        async with self._lock:
+            entries: list[SubmissionHistoryEntry] = []
+            for workflow_id, (
+                cap_name,
+                cap_version,
+                input_text,
+                submitted_at,
+            ) in self.submission_history.items():
+                if capability_name is not None and cap_name != capability_name:
+                    continue
+                if before is not None and submitted_at >= before:
+                    continue
+                workflow = self.workflows.get(workflow_id)
+                if workflow is None or workflow.state is None:
+                    continue
+                entries.append(
+                    SubmissionHistoryEntry(
+                        workflow_id=workflow_id,
+                        request_id=workflow.request_id,
+                        correlation_id=workflow.correlation_id,
+                        capability_name=cap_name,
+                        capability_version=cap_version,
+                        input_text=input_text,
+                        submitted_at=submitted_at,
+                        state=workflow.state,
+                        result_data=dict(workflow.result.result_data) if workflow.result else None,
+                        failure_code=workflow.failure.code if workflow.failure else None,
+                        failure_detail=workflow.failure.detail if workflow.failure else None,
+                    )
+                )
+            entries.sort(key=lambda entry: entry.submitted_at, reverse=True)
+            return entries[:limit]
 
     async def record_request_access(self, record: AcceptedRequestAccessAuditRecord) -> None:
         async with self._lock:
@@ -328,6 +376,12 @@ class InMemoryOrchestratorPersistence:
             self.task_attempts[intent.task_attempt.task_attempt_id] = intent.task_attempt
             self.command_outbox[intent.command_outbox.message_id] = intent.command_outbox
             self.audit_records.append(copy.deepcopy(intent.audit))
+            self.submission_history[workflow.workflow_id] = (
+                intent.capability_name,
+                intent.capability_version,
+                intent.input_text,
+                workflow.history[0].occurred_at,
+            )
             return SubmissionCommitResult(
                 resolution=resolution,
                 workflow=copy.deepcopy(workflow),

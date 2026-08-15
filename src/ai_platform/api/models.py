@@ -94,3 +94,29 @@ class WorkflowReadResponse(BaseModel):
     updated_at: str
     result: WorkflowResultModel | None = None
     failure: WorkflowFailureModel | None = None
+
+
+class SubmissionHistoryEntryModel(BaseModel):
+    """One past submission (ADR-0024). `state`/`result`/`failure` are the
+    workflow's current values, read fresh at query time -- never a cached
+    snapshot from when the submission was first accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str = Field(pattern=_UUIDV7_PATTERN)
+    request_id: str = Field(pattern=_UUIDV7_PATTERN)
+    correlation_id: str = Field(pattern=_UUIDV7_PATTERN)
+    capability: str
+    capability_version: str
+    input_text: str
+    submitted_at: str
+    state: Literal["RECEIVED", "PENDING", "DISPATCHED", "COMPLETED", "FAILED"]
+    result: WorkflowResultModel | None = None
+    failure: WorkflowFailureModel | None = None
+
+
+class WorkflowHistoryListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entries: list[SubmissionHistoryEntryModel]
+    next_before: str | None = None

@@ -89,6 +89,55 @@
             }
           }
         }
+      },
+      "get": {
+        "operationId": "workflow.history.list",
+        "summary": "Newest-first, cursor-paginated submission history, optionally filtered to one capability (workflow.history.list, ADR-0024)",
+        "parameters": [
+          {
+            "name": "capability",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "RFC 3339 UTC timestamp cursor; entries submitted strictly before this instant.",
+            "schema": { "type": "string", "format": "date-time" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submission history, newest first.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../../json-schema/v1/workflow_history_list_response.schema.json" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter (INVALID_REQUEST) -- e.g. a malformed `before` timestamp or an out-of-range `limit`.",
+            "headers": {
+              "Correlation-Id": { "$ref": "#/components/headers/CorrelationId" }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "../../json-schema/v1/problem_details.schema.json" }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/workflows/{workflow_id}": {

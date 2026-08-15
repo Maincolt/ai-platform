@@ -23,6 +23,7 @@ from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
 from ai_platform.orchestrator.domain.results import WorkflowFailure
 from ai_platform.orchestrator.domain.selection import SelectionIntent
+from ai_platform.orchestrator.domain.states import WorkflowState
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
 from ai_platform.orchestrator.domain.workflow import Workflow
 from ai_platform.ports.persistence.errors import PersistenceConflictError
@@ -102,6 +103,9 @@ def _submission_intent(
     task_id: str = "task-1",
     attempt_id: str = "attempt-1",
     message_id: str = "command-1",
+    capability_name: str = "",
+    capability_version: str = "",
+    input_text: str = "",
 ) -> SubmissionCommitIntent:
     key = key or _key()
     workflow_identifier = WorkflowId(workflow_id)
@@ -149,6 +153,9 @@ def _submission_intent(
             actor_id=ActorId("actor-1"),
             details={},
         ),
+        capability_name=capability_name,
+        capability_version=capability_version,
+        input_text=input_text,
     )
 
 
@@ -371,3 +378,105 @@ def test_agent_event_outbox_preserves_immutable_transport_metadata() -> None:
     assert stored.logical_channel == "task-outcomes"
     assert stored.ordering_key == "wf-1"
     assert stored.creation_sequence == 1
+
+
+def test_submission_history_records_capability_and_input_on_new_submission() -> None:
+    """ADR-0024: written in the same atomic commit, only on the
+    `created=True` path."""
+    persistence = InMemoryOrchestratorPersistence()
+    intent = _submission_intent(
+        capability_name="architecture.review",
+        capability_version="1.0",
+        input_text="review this design",
+    )
+
+    _run(persistence.commit_submission(intent))
+    entries = _run(persistence.list_recent(capability_name=None, limit=10, before=None))
+
+    assert len(entries) == 1
+    assert entries[0].workflow_id == WorkflowId("wf-1")
+    assert entries[0].capability_name == "architecture.review"
+    assert entries[0].capability_version == "1.0"
+    assert entries[0].input_text == "review this design"
+    assert entries[0].state == WorkflowState.DISPATCHED
+
+
+def test_submission_history_replay_does_not_duplicate_entry() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+    intent = _submission_intent(capability_name="code.review")
+
+    _run(persistence.commit_submission(intent))
+    _run(persistence.commit_submission(intent))  # Same key -> EQUIVALENT_REPLAY, no new commit.
+    entries = _run(persistence.list_recent(capability_name=None, limit=10, before=None))
+
+    assert len(entries) == 1
+
+
+def test_submission_history_filters_by_capability() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+    _run(
+        persistence.commit_submission(
+            _submission_intent(
+                key=_key("req-a"),
+                workflow_id="wf-a",
+                task_id="task-a",
+                attempt_id="attempt-a",
+                message_id="command-a",
+                capability_name="code.review",
+            )
+        )
+    )
+    _run(
+        persistence.commit_submission(
+            _submission_intent(
+                key=_key("req-b"),
+                workflow_id="wf-b",
+                task_id="task-b",
+                attempt_id="attempt-b",
+                message_id="command-b",
+                capability_name="data.analysis",
+            )
+        )
+    )
+
+    entries = _run(persistence.list_recent(capability_name="code.review", limit=10, before=None))
+
+    assert {entry.workflow_id for entry in entries} == {WorkflowId("wf-a")}
+
+
+def test_submission_history_respects_limit_and_orders_newest_first() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+    for index in range(3):
+        _run(
+            persistence.commit_submission(
+                _submission_intent(
+                    key=_key(f"req-{index}"),
+                    workflow_id=f"wf-{index}",
+                    task_id=f"task-{index}",
+                    attempt_id=f"attempt-{index}",
+                    message_id=f"command-{index}",
+                    capability_name="code.review",
+                )
+            )
+        )
+        # Distinguish submitted_at ordering deterministically, since the
+        # in-memory intents above all share NOW's history[0].occurred_at.
+        persistence.submission_history[WorkflowId(f"wf-{index}")] = (
+            "code.review",
+            "1.0",
+            "",
+            NOW + timedelta(seconds=index),
+        )
+
+    entries = _run(persistence.list_recent(capability_name=None, limit=2, before=None))
+
+    assert [entry.workflow_id for entry in entries] == [WorkflowId("wf-2"), WorkflowId("wf-1")]
+
+
+def test_submission_history_before_cursor_excludes_at_or_after() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+    _run(persistence.commit_submission(_submission_intent(capability_name="code.review")))
+
+    entries = _run(persistence.list_recent(capability_name=None, limit=10, before=NOW))
+
+    assert entries == []
