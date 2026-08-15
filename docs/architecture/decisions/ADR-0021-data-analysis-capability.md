@@ -142,6 +142,34 @@ Registry binding) and live verification against the real Mac Docker host
 follow as a separate commit/PR, per this repository's established
 pattern.
 
+**Update (2026-08-15) — deployment wiring landed and live-verified**: PR
+#44 added the `data-analysis-agent` Compose service (shared
+`ai-platform:sprint6` image), its own Kafka producer/consumer
+principals/topic pair/ACLs (`data-analysis-agent-producer`/`-consumer`,
+`task-commands.data-analysis.v1` + quarantine companion), and a
+Capability Registry binding (revision `local-compose-7`); the new Kafka
+secrets were declared in the top-level `secrets:` stanza from the start
+this time, unlike `architecture.review`'s deployment, which missed that
+step and needed a follow-up fix commit.
+`test_kafka_acl_matrix.py` gained matching isolation cases (106 cases
+total across all six capabilities). Deployed to the Mac Docker host:
+image rebuilt, new SCRAM credentials seeded against the already-
+provisioned broker via `kafka-configs.sh --alter`, `platform`/
+`test-agent`/`dashboard` recreated for the netns gotcha, and —
+applying the registry-revision-bump gotcha documented in
+`docs/operations/README.md` after being hit live during this same
+capability's deployment cycle — `summarize-agent`/`review-agent`/
+`ui-review-agent`/`architecture-review-agent` were all restarted so each
+re-read the bumped `registry.json` revision. `GET /api/v1/agents`
+reported all six capabilities `READY`/`fresh: true` on the first check,
+with no repeat of the partial-`UNAVAILABLE` state the prior deployment
+hit. A real submission (four weeks of metrics with a sharp week-4
+anomaly across MAU, p95 latency, AI provider cost, and support tickets)
+reached `COMPLETED` with four genuine, correctly-correlated findings from
+the real Anthropic provider — not a placeholder/fixture response. The
+full 106-case ACL matrix, including the new principals' isolation cases,
+passed live against the broker.
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape this ADR applies
