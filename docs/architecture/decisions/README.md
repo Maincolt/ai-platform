@@ -29,6 +29,7 @@ technical and structural choices.
 | [ADR-0020](ADR-0020-architecture-review-capability.md) | `architecture.review` — a Solution-Architect Review Capability | Accepted |
 | [ADR-0021](ADR-0021-data-analysis-capability.md) | `data.analysis` — a Data-Analyst Review Capability | Accepted |
 | [ADR-0022](ADR-0022-technical-review-capability.md) | `technical.review` — a Technical-Architect Review Capability | Accepted |
+| [ADR-0023](ADR-0023-assignment-route-capability.md) | `assignment.route` — Team-Based Assignment Routing | Accepted |
 
 ## Naming
 

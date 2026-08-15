@@ -210,6 +210,38 @@ Registry binding), the `submit-assignment.py` dispatch script, and live
 verification against the real Mac Docker host follow as separate
 commits/PRs, per this repository's established pattern.
 
+**Update (2026-08-15) — deployment wiring, dispatch script, and live
+verification landed**: PR #48 added the `assignment-route-agent` Compose
+service (shared `ai-platform:sprint6` image), its own Kafka producer/
+consumer principals/topic pair/ACLs (`assignment-route-agent-producer`/
+`-consumer`, `task-commands.assignment-route.v1` + quarantine companion),
+and a Capability Registry binding (revision `local-compose-9`);
+`test_kafka_acl_matrix.py` gained matching isolation cases (143 cases
+total across all eight capabilities). PR #49 added
+`infrastructure/compose/scripts/submit-assignment.py`, the Decision 5
+dispatch script.
+
+Deployed to the Mac Docker host following the now-established playbook:
+image rebuilt, new SCRAM credentials seeded against the already-
+provisioned broker via `kafka-configs.sh --alter`, `platform`/
+`test-agent`/`dashboard` recreated for the netns gotcha, and every other
+already-running agent restarted per the registry-revision-bump gotcha.
+`GET /api/v1/agents` reported all eight capabilities `READY`/`fresh:
+true` on the first check. A real submission to `assignment.route` alone
+correctly recommended `technical.review` and `data.analysis` for a
+mixed schema-design-and-reporting assignment, with accurate rationale
+for each. The full 143-case ACL matrix passed live.
+
+`submit-assignment.py` was then run end to end against the same
+assignment: it submitted to `assignment.route`, read the two-capability
+recommendation, dispatched the same text to both `technical.review` and
+`data.analysis` as independent workflows, and printed a combined report
+with each capability's genuine, distinct findings (schema/API concerns
+from `technical.review`; reporting/metrics concerns from `data.analysis`)
+— confirming the "agents work together as a team" design works
+end to end, entirely through ordinary Workflow API calls, with no
+platform/Orchestrator/Agent architecture change.
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape this ADR applies
