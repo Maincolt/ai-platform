@@ -166,6 +166,29 @@ def test_agent_declaration_accepts_architecture_review_capability(tmp_path: Path
     assert loaded.capability_name == "architecture.review"
 
 
+def test_agent_declaration_accepts_data_analysis_capability(tmp_path: Path) -> None:
+    """ADR-0021: `data.analysis` is a supported built-in capability.
+    Regression test for the exact gap ADR-0018 already documented once --
+    a new capability must be added to `_SUPPORTED_CAPABILITY_NAMES` or
+    Agent startup fails with `AGENT_DECLARATION_MISMATCH`."""
+    document = _registry_document()
+    binding = cast(list[dict[str, object]], document["bindings"])[0]
+    binding["capability_name"] = "data.analysis"
+    artifact = tmp_path / "declaration.json"
+    artifact.write_text(json.dumps(document), encoding="utf-8")
+
+    revision, loaded = load_agent_deployment_declaration(
+        artifact,
+        environment="development",
+        agent_id=AgentId("018f23a7-6b4d-7c91-8a2e-123456789abc"),
+        implementation_identity="test-agent",
+        declaration_digest="sha256:declaration",
+    )
+
+    assert revision == "sprint-6"
+    assert loaded.capability_name == "data.analysis"
+
+
 def test_agent_declaration_mismatch_refuses_loading(tmp_path: Path) -> None:
     document = _registry_document()
     binding = cast(list[dict[str, object]], document["bindings"])[0]

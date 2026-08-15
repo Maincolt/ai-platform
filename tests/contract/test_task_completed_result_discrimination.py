@@ -258,3 +258,65 @@ def test_architecture_review_result_does_not_accept_the_summarize_capabilitys_fi
     )
     with pytest.raises(ValidationError):
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="data.analysis",
+        result={
+            "findings": [
+                {
+                    "metric": "p95 latency",
+                    "summary": "p95 latency doubled week-over-week.",
+                    "severity": "medium",
+                },
+                {"metric": "AI provider cost", "summary": "Cost spiked 3x.", "severity": "high"},
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="data.analysis", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_finding_with_an_architecture_review_section_key_is_rejected() -> None:
+    """`data.analysis`'s findings shape has no `section` concept -- it must
+    not accidentally validate against `architecture.review`'s branch."""
+    message = _message(
+        capability="data.analysis",
+        result={"findings": [{"section": "Decision 2", "summary": "x", "severity": "low"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="data.analysis",
+        result={"findings": [{"metric": "p95 latency", "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="data.analysis",
+        result={
+            "findings": [
+                {"metric": "p95 latency", "summary": "x", "severity": "low", "confidence": 0.9}
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_data_analysis_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(capability="data.analysis", result={"findings": [], "summary": "extra"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
