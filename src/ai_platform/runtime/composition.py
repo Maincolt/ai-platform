@@ -53,6 +53,8 @@ from ai_platform.agents.data_analysis_agent.agent import DataAnalysisAgent
 from ai_platform.agents.data_analysis_agent.capability import (
     CAPABILITY_NAME as DATA_ANALYSIS_CAPABILITY_NAME,
 )
+from ai_platform.agents.principal_developer_agent.agent import PrincipalDeveloperAgent
+from ai_platform.agents.principal_developer_agent.source_control import GitHubSourceControlClient
 from ai_platform.agents.product_owner_agent.agent import ProductOwnerAgent
 from ai_platform.agents.product_owner_agent.tracker import GitHubProjectsBacklogClient
 from ai_platform.agents.review_agent.agent import ReviewAgent
@@ -112,6 +114,7 @@ from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
     CommonRuntimeConfig,
     PlatformRuntimeConfig,
+    PrincipalDeveloperRuntimeConfig,
     ProductOwnerRuntimeConfig,
     RuntimeConfigurationError,
     ScrumMasterRuntimeConfig,
@@ -853,6 +856,98 @@ def build_product_owner_process(
     )
 
 
+def build_principal_developer_process(
+    config: PrincipalDeveloperRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `principal-developer-agent` (ADR-0026 Phase 4, ADR-0031).
+
+    Mirrors `build_scrum_master_process`/`build_product_owner_process`
+    exactly: same zero-Kafka, zero-Capability-Registry,
+    `PeriodicService`-only shape. Per ADR-0031 Decision 5, this function
+    builds and wires the process the same as any other role -- whether
+    it is ever deployed with a *real*, merge-capable credential is a
+    deployment-time decision, not something this composition function
+    gates."""
+    if config.github_token is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
+    if config.github_repo_owner is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_repo_owner")
+    if config.github_repo_name is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_repo_name")
+
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    source_control = GitHubSourceControlClient(
+        token=config.github_token.read(),
+        owner=config.github_repo_owner,
+        repo=config.github_repo_name,
+    )
+    principal_developer = PrincipalDeveloperAgent(
+        agent_deployment_id=config.agent_id,
+        state=state,
+        source_control=source_control,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
+        max_actions_per_day=config.autonomous_max_actions_per_day,
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            principal_developer.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
 def _build_executor(
     capability_name: str,
     *,
@@ -1013,7 +1108,12 @@ _APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
 # class spanning `CommonRuntimeConfig` and the autonomous-role configs
 # (ADR-0028's `ScrumMasterRuntimeConfig` deliberately does not subclass
 # `CommonRuntimeConfig`/`AgentRuntimeConfig` -- see its own docstring).
-_AIRouterConfig = AgentRuntimeConfig | ScrumMasterRuntimeConfig | ProductOwnerRuntimeConfig
+_AIRouterConfig = (
+    AgentRuntimeConfig
+    | ScrumMasterRuntimeConfig
+    | ProductOwnerRuntimeConfig
+    | PrincipalDeveloperRuntimeConfig
+)
 
 
 def _build_ai_router(config: _AIRouterConfig) -> FallbackAIRouter:

@@ -1088,6 +1088,71 @@ services:
       - ai_router_openai_api_key
       - github_token_product_owner
 
+  # ADR-0026/ADR-0031: principal-developer-agent, ADR-0026 Phase 4 -- the
+  # last phase ADR-0026 itself authorizes, and the highest-blast-radius
+  # role: real PR review and merge rights, no per-action approval. Same
+  # zero-Kafka, zero-Capability-Registry, PeriodicService-only shape as
+  # scrum-master-agent/product-owner-agent. `merge` is gated on GitHub's
+  # own mergeable_state == "clean", re-checked immediately before the
+  # merge call itself (ADR-0031 Decision 1).
+  #
+  # ADR-0031 Decision 5: deployed here with an OBVIOUSLY-FAKE PLACEHOLDER
+  # PAT ONLY. This role's first real credential -- and therefore its
+  # first real, autonomous merge against this repository's actual main
+  # branch -- requires an explicit, separate go-ahead from the
+  # repository owner. Do not replace github_token_principal_developer.txt
+  # with a real PAT without that explicit go-ahead.
+  principal-developer-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-principal-developer-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750003"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-principal-developer-agent
+      # 0.0.0.0, not loopback (ADR-0017 Decision 5): same reasoning as
+      # scrum-master-agent/product-owner-agent -- Docker-healthcheck-only
+      # readiness signal.
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      # AI Router (ADR-0014), reusing ADR-0017 Decision 3's exact
+      # approved model list unchanged -- same as every other capability.
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0031 Decision 4: a separate, principal-developer-only PAT
+      # (repo scope) -- never any other role's. PLACEHOLDER per Decision
+      # 5; see the block comment above.
+      AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token_principal_developer
+      AI_PLATFORM_AGENT_GITHUB_REPO_OWNER: "Maincolt"
+      AI_PLATFORM_AGENT_GITHUB_REPO_NAME: "ai-platform"
+      # ADR-0031 Decision 3: reuses the other two roles' proven defaults
+      # (repository owner's explicit choice), tracked as an independent
+      # per-role budget (role='principal-developer' rows).
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+      - github_token_principal_developer
+
   # ADR-0023: assignment.route, the platform's eighth capability. Built
   # from the shared ai-platform:sprint6 image, same as technical-review-agent.
   assignment-route-agent:
@@ -1251,6 +1316,14 @@ secrets:
   # one.
   github_token_product_owner:
     file: ./secrets/github_token_product_owner.txt
+  # ADR-0031 Decision 4: a separate, principal-developer-only PAT (repo
+  # scope). PLACEHOLDER ONLY per ADR-0031 Decision 5 -- this role's real
+  # PAT requires an explicit, separate go-ahead from the repository
+  # owner before it is ever supplied; never assume "placeholder present"
+  # means "safe to replace with a real one" the way every other role's
+  # credential did.
+  github_token_principal_developer:
+    file: ./secrets/github_token_principal_developer.txt
 
 volumes:
   postgres-data:
