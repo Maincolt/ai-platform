@@ -15,6 +15,12 @@ const error = ref(null);
 const routing = ref(null);
 const assignments = ref([]);
 
+const STATE_TAG_TYPES = {
+  COMPLETED: "success",
+  DISPATCHED: "info",
+  FAILED: "danger",
+};
+
 function resetResults() {
   error.value = null;
   routing.value = null;
@@ -73,41 +79,55 @@ async function handleSubmit() {
       text independently.
     </p>
 
-    <textarea
+    <el-input
       v-model="text"
-      class="assignment-input"
-      rows="6"
+      type="textarea"
+      :rows="6"
       placeholder="e.g. Proposed schema for a new notifications table, plus a weekly usage report..."
       :disabled="submitting"
     />
 
-    <button type="button" class="submit-button" :disabled="submitting || !text.trim()" @click="handleSubmit">
+    <el-button
+      type="primary"
+      class="submit-button"
+      :loading="submitting"
+      :disabled="!text.trim()"
+      @click="handleSubmit"
+    >
       {{ submitting ? "Routing…" : "Submit assignment" }}
-    </button>
+    </el-button>
 
-    <p v-if="error" class="error-banner">{{ error }}</p>
+    <el-alert
+      v-if="error"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="error"
+      class="error-banner"
+    />
 
     <section v-if="routing" class="routing-result">
       <h2>Routing decision: {{ routing.state }}</h2>
-      <p v-if="routing.state === 'COMPLETED' && assignments.length === 0" class="empty-state">
-        No capability was recommended for this assignment.
-      </p>
+      <el-empty
+        v-if="routing.state === 'COMPLETED' && assignments.length === 0"
+        description="No capability was recommended for this assignment."
+      />
       <p v-else-if="routing.state !== 'COMPLETED'" class="empty-state">
         {{ routing.failure_code }}
       </p>
     </section>
 
-    <section v-for="entry in assignments" :key="entry.capability" class="assignment-card">
+    <el-card v-for="entry in assignments" :key="entry.capability" class="assignment-card">
       <div class="card-top">
         <h3>{{ entry.capability }}</h3>
-        <span class="state-badge" :class="`state-${entry.state.toLowerCase()}`">{{ entry.state }}</span>
+        <el-tag :type="STATE_TAG_TYPES[entry.state] ?? 'info'">{{ entry.state }}</el-tag>
       </div>
       <p class="rationale">{{ entry.rationale }}</p>
       <pre v-if="entry.outcome?.result" class="result">{{ JSON.stringify(entry.outcome.result, null, 2) }}</pre>
       <p v-else-if="entry.outcome?.failure_code" class="result-failure">
         {{ entry.outcome.failure_code }}
       </p>
-    </section>
+    </el-card>
   </div>
 </template>
 
@@ -117,48 +137,15 @@ async function handleSubmit() {
 }
 
 .intro {
-  color: var(--muted-text);
+  color: var(--el-text-color-secondary);
   margin: 0 0 1rem;
-}
-
-.assignment-input {
-  width: 100%;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--surface);
-  color: inherit;
-  padding: 0.75rem;
-  font-family: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
 }
 
 .submit-button {
   margin-top: 0.75rem;
-  border: 1px solid var(--border-color);
-  background: var(--surface);
-  color: inherit;
-  border-radius: 6px;
-  padding: 0.5rem 1.1rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.submit-button:hover:not(:disabled) {
-  background: var(--surface-hover);
-}
-
-.submit-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .error-banner {
-  background: var(--error-background);
-  color: var(--error-text);
-  border: 1px solid var(--error-border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
   margin-top: 1rem;
 }
 
@@ -172,14 +159,10 @@ async function handleSubmit() {
 }
 
 .empty-state {
-  color: var(--muted-text);
+  color: var(--el-text-color-secondary);
 }
 
 .assignment-card {
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 1rem 1.1rem;
-  background: var(--surface);
   margin-top: 1rem;
 }
 
@@ -195,36 +178,13 @@ async function handleSubmit() {
   font-size: 1rem;
 }
 
-.state-badge {
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.state-completed {
-  color: var(--status-online-text);
-  background: var(--status-online-bg);
-}
-
-.state-dispatched {
-  color: var(--status-unknown-text);
-  background: var(--status-unknown-bg);
-}
-
-.state-failed {
-  color: var(--status-unavailable-text);
-  background: var(--status-unavailable-bg);
-}
-
 .rationale {
-  color: var(--muted-text);
+  color: var(--el-text-color-secondary);
   margin: 0.6rem 0;
 }
 
 .result {
-  background: var(--pill-background);
+  background: var(--el-fill-color-light);
   border-radius: 6px;
   padding: 0.75rem;
   overflow-x: auto;
@@ -233,7 +193,7 @@ async function handleSubmit() {
 }
 
 .result-failure {
-  color: var(--status-unavailable-text);
+  color: var(--el-color-danger);
   margin: 0;
 }
 </style>

@@ -1,54 +1,8 @@
-:root {
-  --background: #f5f6f8;
-  --surface: #ffffff;
-  --surface-hover: #f0f1f4;
-  --pill-background: #e8eaee;
-  --border-color: #dde0e5;
-  --text: #1a1d21;
-  --muted-text: #62676f;
-
-  --error-background: #fdecea;
-  --error-border: #f3c6c2;
-  --error-text: #7a2e26;
-
-  --status-online-text: #146c2e;
-  --status-online-bg: #e3f6e9;
-  --status-stale-text: #8a5a00;
-  --status-stale-bg: #fdf0d5;
-  --status-unavailable-text: #a3271e;
-  --status-unavailable-bg: #fbe4e2;
-  --status-unknown-text: #4b4f56;
-  --status-unknown-bg: #eceef1;
-  --status-busy-text: #1b5aab;
-  --status-busy-bg: #e3edfb;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #14161a;
-    --surface: #1d2025;
-    --surface-hover: #262a30;
-    --pill-background: #2a2e35;
-    --border-color: #33373f;
-    --text: #e7e9ec;
-    --muted-text: #9aa0aa;
-
-    --error-background: #3a201d;
-    --error-border: #6b342c;
-    --error-text: #f3b3ac;
-
-    --status-online-text: #7fe0a0;
-    --status-online-bg: #163827;
-    --status-stale-text: #f0c874;
-    --status-stale-bg: #3a2f13;
-    --status-unavailable-text: #f5978d;
-    --status-unavailable-bg: #3c1f1c;
-    --status-unknown-text: #c3c8d1;
-    --status-unknown-bg: #2a2e35;
-    --status-busy-text: #8fb9f0;
-    --status-busy-bg: #1c2c40;
-  }
-}
+/* ADR-0032: the custom-property design tokens (--surface, --status-*,
+   etc.) this file used to define are retired -- every component now
+   styles itself with Element Plus, which brings its own light/dark
+   theming (see main.js's `dark` class wiring). This file keeps only the
+   page-level reset Element Plus doesn't provide. */
 
 * {
   box-sizing: border-box;
@@ -56,8 +10,6 @@
 
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--text);
   font-family:
     system-ui,
     -apple-system,

@@ -130,3 +130,68 @@ def test_record_action_writes_a_durable_audit_row(postgres_agent_app_dsn: str) -
             await pool.close()
 
     asyncio.run(run())
+
+
+def test_list_role_budgets_returns_every_role_for_the_day(postgres_agent_app_dsn: str) -> None:
+    async def run() -> None:
+        pool = await _open_agent_pool(postgres_agent_app_dsn)
+        try:
+            state = PsycopgAutonomousStatePort(pool)
+            role_a = f"sprint-test-role-{uuid.uuid7()}"
+            role_b = f"sprint-test-role-{uuid.uuid7()}"
+            today = datetime.now(UTC).date()
+
+            await state.record_budget_usage(role=role_a, today=today, actions=1, spend_cents=5)
+            await state.record_budget_usage(role=role_b, today=today, actions=2, spend_cents=3)
+
+            budgets = await state.list_role_budgets(today=today)
+            by_role = {record.role: record for record in budgets}
+
+            assert by_role[role_a].actions_used == 1
+            assert by_role[role_a].spend_cents_used == 5
+            assert by_role[role_b].actions_used == 2
+            assert by_role[role_b].spend_cents_used == 3
+        finally:
+            await pool.close()
+
+    asyncio.run(run())
+
+
+def test_list_recent_actions_returns_newest_first(postgres_agent_app_dsn: str) -> None:
+    async def run() -> None:
+        pool = await _open_agent_pool(postgres_agent_app_dsn)
+        try:
+            state = PsycopgAutonomousStatePort(pool)
+            target = f"PVTI_test_{uuid.uuid7()}"
+
+            await state.record_action(
+                agent_deployment_id="scrum-master-agent",
+                role="scrum-master",
+                action_type="set_status",
+                target=target,
+                inputs={},
+                result_status="SUCCEEDED",
+                result_detail="first",
+                occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+            await state.record_action(
+                agent_deployment_id="scrum-master-agent",
+                role="scrum-master",
+                action_type="set_status",
+                target=target,
+                inputs={},
+                result_status="FAILED",
+                result_detail="second",
+                occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+            )
+
+            recent = await state.list_recent_actions(limit=1000)
+            matching = [record for record in recent if record.target == target]
+
+            assert len(matching) == 2
+            assert matching[0].result_status == "FAILED"
+            assert matching[1].result_status == "SUCCEEDED"
+        finally:
+            await pool.close()
+
+    asyncio.run(run())

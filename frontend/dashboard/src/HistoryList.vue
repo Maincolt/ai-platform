@@ -14,6 +14,14 @@ const CAPABILITY_FILTERS = [
   "text.word-count",
 ];
 
+const STATE_TAG_TYPES = {
+  COMPLETED: "success",
+  DISPATCHED: "info",
+  RECEIVED: "info",
+  PENDING: "info",
+  FAILED: "danger",
+};
+
 const entries = ref([]);
 const nextBefore = ref(null);
 const capability = ref("");
@@ -59,53 +67,56 @@ onMounted(() => load());
 <template>
   <div class="history-list">
     <div class="history-controls">
-      <label for="capability-filter">Capability</label>
-      <select id="capability-filter" v-model="capability" @change="onCapabilityChange">
-        <option v-for="option in CAPABILITY_FILTERS" :key="option" :value="option">
-          {{ option || "All capabilities" }}
-        </option>
-      </select>
-      <button type="button" class="refresh-button" @click="load()">Refresh</button>
+      <span class="filter-label">Capability</span>
+      <el-select v-model="capability" placeholder="All capabilities" @change="onCapabilityChange">
+        <el-option
+          v-for="option in CAPABILITY_FILTERS"
+          :key="option"
+          :label="option || 'All capabilities'"
+          :value="option"
+        />
+      </el-select>
+      <el-button @click="load()">Refresh</el-button>
     </div>
 
-    <p v-if="error" class="error-banner">{{ error }}</p>
-    <p v-if="loading" class="empty-state">Loading history…</p>
-    <p v-else-if="!loading && entries.length === 0 && !error" class="empty-state">
-      No submissions yet.
-    </p>
+    <el-alert
+      v-if="error"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="error"
+      class="error-banner"
+    />
+    <el-empty v-if="loading" description="Loading history…" />
+    <el-empty v-else-if="!loading && entries.length === 0 && !error" description="No submissions yet." />
 
-    <table v-else class="history-table">
-      <thead>
-        <tr>
-          <th>Submitted</th>
-          <th>Capability</th>
-          <th>Input</th>
-          <th>State</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="entry in entries" :key="entry.workflow_id">
-          <td class="mono">{{ new Date(entry.submitted_at).toLocaleString() }}</td>
-          <td>{{ entry.capability }}</td>
-          <td class="input-cell" :title="entry.input_text">{{ truncate(entry.input_text) }}</td>
-          <td>
-            <span class="state-badge" :class="`state-${entry.state.toLowerCase()}`">
-              {{ entry.state }}
-            </span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <el-table v-else :data="entries" class="history-table">
+      <el-table-column label="Submitted" width="200">
+        <template #default="{ row }">
+          <span class="mono">{{ new Date(row.submitted_at).toLocaleString() }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="capability" label="Capability" width="180" />
+      <el-table-column label="Input">
+        <template #default="{ row }">
+          <span :title="row.input_text">{{ truncate(row.input_text) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="State" width="140">
+        <template #default="{ row }">
+          <el-tag :type="STATE_TAG_TYPES[row.state] ?? 'info'">{{ row.state }}</el-tag>
+        </template>
+      </el-table-column>
+    </el-table>
 
-    <button
+    <el-button
       v-if="nextBefore"
-      type="button"
       class="load-more-button"
-      :disabled="loadingMore"
+      :loading="loadingMore"
       @click="load({ append: true })"
     >
       {{ loadingMore ? "Loading…" : "Load older" }}
-    </button>
+    </el-button>
   </div>
 </template>
 
@@ -121,113 +132,22 @@ onMounted(() => load());
   margin-bottom: 1rem;
 }
 
-.history-controls label {
-  color: var(--muted-text);
+.filter-label {
+  color: var(--el-text-color-secondary);
   font-size: 0.9rem;
 }
 
-.history-controls select {
-  border: 1px solid var(--border-color);
-  background: var(--surface);
-  color: inherit;
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.9rem;
-}
-
-.refresh-button,
-.load-more-button {
-  border: 1px solid var(--border-color);
-  background: var(--surface);
-  color: inherit;
-  border-radius: 6px;
-  padding: 0.4rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.refresh-button:hover,
-.load-more-button:hover:not(:disabled) {
-  background: var(--surface-hover);
+.error-banner {
+  margin-bottom: 1rem;
 }
 
 .load-more-button {
   margin-top: 1rem;
 }
 
-.load-more-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.error-banner {
-  background: var(--error-background);
-  color: var(--error-text);
-  border: 1px solid var(--error-border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-}
-
-.empty-state {
-  color: var(--muted-text);
-  padding: 2rem 0;
-}
-
-.history-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-
-.history-table th {
-  text-align: left;
-  color: var(--muted-text);
-  font-weight: 600;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.history-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border-color);
-  vertical-align: top;
-}
-
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   white-space: nowrap;
-}
-
-.input-cell {
-  max-width: 420px;
-  overflow-wrap: anywhere;
-}
-
-.state-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.state-completed {
-  color: var(--status-online-text);
-  background: var(--status-online-bg);
-}
-
-.state-dispatched,
-.state-received,
-.state-pending {
-  color: var(--status-unknown-text);
-  background: var(--status-unknown-bg);
-}
-
-.state-failed {
-  color: var(--status-unavailable-text);
-  background: var(--status-unavailable-bg);
 }
 </style>

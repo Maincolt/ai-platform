@@ -158,11 +158,17 @@ services:
       AI_PLATFORM_AGENT_READINESS_TTL_SECONDS: "10"
       AI_PLATFORM_AGENT_READINESS_REFRESH_INTERVAL_SECONDS: "5"
       AI_PLATFORM_TASK_RESULT_TIMEOUT_SECONDS: "60"
+      # ADR-0032: the same `agent`-schema DSN every autonomous role
+      # already uses, so GET /api/v1/autonomous-agents can read
+      # agent.autonomous_* state -- platform's first read outside its
+      # own orchestrator schema, read-only in practice (see the ADR).
+      AI_PLATFORM_ORCHESTRATOR_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
     secrets:
       - dsn_orchestrator
       - kafka_orchestrator_producer_password
       - kafka_orchestrator_consumer_password
       - readiness_credential
+      - dsn_agent
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
     ports:

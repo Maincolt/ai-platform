@@ -38,6 +38,7 @@ technical and structural choices.
 | [ADR-0029](ADR-0029-scrum-master-agent-action-set-expansion.md) | `scrum-master-agent` — Rounding Out the Action Set (close/relabel/reassign) | Accepted |
 | [ADR-0030](ADR-0030-product-owner-agent-phase-3.md) | `product-owner-agent` — ADR-0026 Phase 3 | Accepted |
 | [ADR-0031](ADR-0031-principal-developer-agent-phase-4.md) | `principal-developer-agent` — ADR-0026 Phase 4 | Accepted |
+| [ADR-0032](ADR-0032-autonomous-agent-dashboard-visibility.md) | Autonomous Agent Status — Dashboard Visibility | Accepted |
 
 ## Naming
 

@@ -75,6 +75,14 @@ class PlatformRuntimeConfig(CommonRuntimeConfig):
     readiness_ttl_seconds: float
     readiness_refresh_interval_seconds: float
     task_result_timeout_seconds: float
+    agent_database_dsn: SecretFileReference | None = None
+    """ADR-0032: an optional second DSN, authenticated as the same
+    `agent`-schema role every autonomous role's own DSN already uses, so
+    the dashboard's autonomous-status endpoint can read
+    `agent.autonomous_*` state. Read-only in practice -- `platform` never
+    calls a write method on the resulting port. Left unset, the endpoint
+    degrades to an inert response rather than platform failing to
+    start."""
 
     @classmethod
     def from_environment(
@@ -167,6 +175,9 @@ class PlatformRuntimeConfig(CommonRuntimeConfig):
             ),
             task_result_timeout_seconds=_bounded_float(
                 values, "AI_PLATFORM_TASK_RESULT_TIMEOUT_SECONDS", 0.1, 86_400.0
+            ),
+            agent_database_dsn=_optional_secret(
+                values, "AI_PLATFORM_ORCHESTRATOR_AGENT_DATABASE_DSN_FILE"
             ),
         )
 

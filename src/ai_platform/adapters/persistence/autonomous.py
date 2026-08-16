@@ -12,7 +12,11 @@ from datetime import date, datetime
 from psycopg.types.json import Jsonb
 
 from ai_platform.adapters.persistence.connection import AsyncPsycopgPool
-from ai_platform.ports.persistence.autonomous import DailyBudgetStatus
+from ai_platform.ports.persistence.autonomous import (
+    AutonomousActionRecord,
+    DailyBudgetStatus,
+    RoleBudgetRecord,
+)
 from ai_platform.ports.persistence.errors import PermanentPersistenceError
 
 
@@ -98,3 +102,57 @@ class PsycopgAutonomousStatePort:
                     occurred_at,
                 ),
             )
+
+    async def list_role_budgets(self, *, today: date) -> tuple[RoleBudgetRecord, ...]:
+        async with self._pool.connection() as connection:
+            rows = await (
+                await connection.execute(
+                    "SELECT role, actions_used, spend_cents_used "
+                    "FROM agent.autonomous_role_budget WHERE day = %s ORDER BY role",
+                    (today,),
+                )
+            ).fetchall()
+        records: list[RoleBudgetRecord] = []
+        for role, actions_used, spend_cents_used in rows:
+            if (
+                not isinstance(role, str)
+                or not isinstance(actions_used, int)
+                or not isinstance(spend_cents_used, int)
+            ):
+                raise PermanentPersistenceError("Stored autonomous budget usage is invalid.")
+            records.append(
+                RoleBudgetRecord(
+                    role=role, actions_used=actions_used, spend_cents_used=spend_cents_used
+                )
+            )
+        return tuple(records)
+
+    async def list_recent_actions(self, *, limit: int) -> tuple[AutonomousActionRecord, ...]:
+        async with self._pool.connection() as connection:
+            rows = await (
+                await connection.execute(
+                    "SELECT occurred_at, role, action_type, target, result_status "
+                    "FROM agent.autonomous_actions ORDER BY occurred_at DESC, id DESC LIMIT %s",
+                    (limit,),
+                )
+            ).fetchall()
+        records: list[AutonomousActionRecord] = []
+        for occurred_at, role, action_type, target, result_status in rows:
+            if (
+                not isinstance(occurred_at, datetime)
+                or not isinstance(role, str)
+                or not isinstance(action_type, str)
+                or not isinstance(target, str)
+                or not isinstance(result_status, str)
+            ):
+                raise PermanentPersistenceError("Stored autonomous action record is invalid.")
+            records.append(
+                AutonomousActionRecord(
+                    occurred_at=occurred_at,
+                    role=role,
+                    action_type=action_type,
+                    target=target,
+                    result_status=result_status,
+                )
+            )
+        return tuple(records)

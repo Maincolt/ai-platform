@@ -85,6 +85,37 @@ class AgentsListResponse(BaseModel):
     agents: list[AgentStatusModel]
 
 
+class AutonomousRoleBudgetModel(BaseModel):
+    """One autonomous role's today-usage (ADR-0032)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    actions_used: int
+    spend_cents_used: int
+
+
+class AutonomousActionModel(BaseModel):
+    """One audit-log entry (ADR-0032). Deliberately excludes `inputs`/
+    `result_detail` -- see `AutonomousActionRecord`'s own docstring."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurred_at: str
+    role: str
+    action_type: str
+    target: str
+    result_status: Literal["SUCCEEDED", "FAILED"]
+
+
+class AutonomousStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kill_switch_engaged: bool
+    role_budgets: list[AutonomousRoleBudgetModel]
+    recent_actions: list[AutonomousActionModel]
+
+
 class WorkflowReadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

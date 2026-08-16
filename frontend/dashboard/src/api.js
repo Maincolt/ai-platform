@@ -68,6 +68,25 @@ export async function pollWorkflowToTerminal(
 }
 
 /**
+ * Fetch the ADR-0026 autonomous roles' status (GET /api/v1/autonomous-agents,
+ * ADR-0032) -- kill switch, today's per-role budget usage, and recent
+ * audit-log entries. Returns an inert response
+ * (`kill_switch_engaged: false`, empty lists) rather than throwing when
+ * the platform has no `agent`-schema DSN configured -- that degrade
+ * happens server-side, so this function's error path is only real
+ * network/HTTP failures.
+ */
+export async function fetchAutonomousStatus() {
+  const response = await fetch("/api/v1/autonomous-agents", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/autonomous-agents failed: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * Fetch a page of submission history (GET /api/v1/workflows, ADR-0024).
  * Newest first. Pass `before` (an entry's own `submitted_at`, or a
  * previous response's `next_before`) to page further back.
