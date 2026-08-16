@@ -210,3 +210,28 @@ Accepted; implementation follows in the accepting PR (domain module,
 migration, runtime wiring, deployment wiring, and live verification
 against the repository owner's real board, with an explicit warning
 before any real write action is taken for the first time).
+
+**Update (2026-08-16):** deployed to the Mac Docker host with the
+repository owner's real, separately-scoped PAT. Migration 0009 applied
+cleanly; the service reaches `ready: true` on its healthcheck; a real
+board fetch and a real Anthropic completion both succeeded on live
+cycles. The 4 `tests/integration/test_autonomous_state.py` tests passed
+against the real Postgres instance.
+
+Live deployment surfaced and fixed two bugs neither unit/component
+tests nor code review had caught:
+- `run_cycle()` built its `AICompletionRequest` with `deadline=now`
+  (the instant of construction) instead of a future point in time, so
+  `is_past_deadline()` always evaluated true by the time the provider
+  adapter checked it — every cycle failed with a classified failure
+  before any provider HTTP call was made. Fixed by wiring the
+  previously-unused `ai_router_provider_timeout_seconds` config value
+  into a real `now + timedelta(...)` deadline.
+- Section 11's ops-doc commands referenced a `-U ai_platform_admin`
+  psql role that doesn't exist; fixed to `-U postgres`, matching every
+  other section's already-correct commands.
+
+No real write action has been taken against the board yet — the board
+is currently empty, so the model has had nothing to propose. The first
+real write action still needs the explicit go-ahead this ADR's own
+Alternatives/Consequences sections call for.
