@@ -880,11 +880,10 @@ services:
 
   # ADR-0027: scrum.status, the platform's tenth capability -- ADR-0026's
   # Phase 1. Built from the shared ai-platform:sprint6 image, same as
-  # security-review-agent. AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE and the two
-  # project-coordinate env vars below are placeholders until a real GitHub
-  # Projects v2 board exists (ADR-0027 Decision 5) -- readiness does not
-  # depend on a live board fetch, but a real submission fails closed with
-  # PROJECT_BOARD_FETCH_FAILED until they're replaced with real values.
+  # security-review-agent. AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE points at a
+  # real read:project-scoped PAT (ADR-0027 Decision 5); the project
+  # coordinates below point at the repository owner's real Projects v2
+  # board.
   scrum-status-agent:
     image: ai-platform:sprint6
     profiles: ["app"]
@@ -954,10 +953,9 @@ services:
       # ADR-0027 Decision 4: config-driven, not hardcoded (unlike
       # ui.review's allowed target) -- no SSRF-shaped risk here, since the
       # fetch always goes to api.github.com, scoped by whichever
-      # read:project-only PAT is configured. Placeholders until a real
-      # board exists.
+      # read:project-only PAT is configured.
       AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token
-      AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER: "REPLACE_ME"
+      AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER: "Maincolt"
       AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER: "1"
     secrets:
       - dsn_agent
