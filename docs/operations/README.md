@@ -651,7 +651,7 @@ pattern Section 3/5 already use.
 ### Checking whether the kill switch is engaged
 
 ```bash
-docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
   -c "SELECT engaged, updated_at FROM agent.autonomous_kill_switch;"
 ```
 
@@ -661,7 +661,7 @@ No redeploy needed — `scrum-master-agent`'s `PeriodicService` checks this
 at the start of every cycle, before any GitHub call:
 
 ```bash
-docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
   -c "UPDATE agent.autonomous_kill_switch SET engaged = TRUE, updated_at = now();"
 ```
 
@@ -670,7 +670,7 @@ Disengage the same way with `engaged = FALSE`.
 ### Checking today's budget usage
 
 ```bash
-docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
   -c "SELECT role, day, actions_used, spend_cents_used FROM agent.autonomous_role_budget ORDER BY day DESC LIMIT 7;"
 ```
 
@@ -682,7 +682,7 @@ provider billing (ADR-0028 Decision 2) — treat `actions_used` against
 ### Reading "what did it actually do" — the audit log
 
 ```bash
-docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
   -c "SELECT occurred_at, action_type, target, result_status, result_detail FROM agent.autonomous_actions ORDER BY occurred_at DESC LIMIT 20;"
 ```
 
