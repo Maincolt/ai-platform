@@ -26,7 +26,11 @@ from ai_platform.ports.ai_router import (
     AICompletionResult,
     AICompletionUsage,
 )
-from ai_platform.ports.persistence.autonomous import DailyBudgetStatus
+from ai_platform.ports.persistence.autonomous import (
+    AutonomousActionRecord,
+    DailyBudgetStatus,
+    RoleBudgetRecord,
+)
 
 _PULL_REQUESTS = (PullRequestSnapshot(number=1, title="Fix bug", mergeable_state="clean"),)
 
@@ -142,6 +146,12 @@ class InMemoryAutonomousState:
                 occurred_at=occurred_at,
             )
         )
+
+    async def list_role_budgets(self, *, today: date) -> tuple[RoleBudgetRecord, ...]:
+        raise NotImplementedError("not exercised by these cycle tests")
+
+    async def list_recent_actions(self, *, limit: int) -> tuple[AutonomousActionRecord, ...]:
+        raise NotImplementedError("not exercised by these cycle tests")
 
 
 def _build_agent(

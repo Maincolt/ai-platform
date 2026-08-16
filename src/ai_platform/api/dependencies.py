@@ -28,6 +28,7 @@ from ai_platform.orchestrator.registry.availability import (
 )
 from ai_platform.orchestrator.registry.declarations import CapabilityBinding
 from ai_platform.orchestrator.registry.snapshot import RegistrySnapshot, load_registry_snapshot
+from ai_platform.ports.persistence.autonomous import AutonomousStatePort
 from ai_platform.ports.persistence.transactions import (
     AuthorizedWorkflowQueryPort,
     InFlightWorkloadQueryPort,
@@ -84,6 +85,7 @@ class AppState:
     task_result_timeout: timedelta
     registry_snapshot: RegistrySnapshot | None = None
     availability_port: AvailabilityPort | None = None
+    autonomous_state: AutonomousStatePort | None = None
 
 
 def default_test_agent_binding() -> CapabilityBinding:

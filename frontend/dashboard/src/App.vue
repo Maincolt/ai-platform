@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { fetchAgents } from "./api.js";
 import AgentCard from "./AgentCard.vue";
 import AssignmentForm from "./AssignmentForm.vue";
+import AutonomousAgentsPanel from "./AutonomousAgentsPanel.vue";
 import HistoryList from "./HistoryList.vue";
 
 const REFRESH_INTERVAL_MS = 5000;
@@ -49,70 +50,66 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main>
-    <header class="page-header">
+  <el-container class="page">
+    <el-header class="page-header" height="auto">
       <div>
         <h1>Agent Status</h1>
         <p class="subtitle">Live from the Capability Registry</p>
       </div>
       <div class="header-meta">
-        <span class="summary-pill">{{ summary.online }} / {{ summary.total }} online</span>
+        <el-tag type="success" round>{{ summary.online }} / {{ summary.total }} online</el-tag>
         <span v-if="lastRefreshedAt" class="last-refreshed">
           Updated {{ lastRefreshedAt.toLocaleTimeString() }}
         </span>
-        <button type="button" class="refresh-button" @click="refresh">Refresh now</button>
+        <el-button size="small" @click="refresh">Refresh now</el-button>
       </div>
-    </header>
+    </el-header>
 
-    <nav class="tab-nav">
-      <button
-        type="button"
-        class="tab-button"
-        :class="{ 'tab-button--active': activeTab === 'agents' }"
-        @click="activeTab = 'agents'"
-      >
-        Agents
-      </button>
-      <button
-        type="button"
-        class="tab-button"
-        :class="{ 'tab-button--active': activeTab === 'assignment' }"
-        @click="activeTab = 'assignment'"
-      >
-        Submit assignment
-      </button>
-      <button
-        type="button"
-        class="tab-button"
-        :class="{ 'tab-button--active': activeTab === 'history' }"
-        @click="activeTab = 'history'"
-      >
-        History
-      </button>
-    </nav>
+    <el-main class="page-main">
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="Agents" name="agents">
+          <el-alert
+            v-if="error"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="error-banner"
+            :title="`Could not reach the platform (${error}) — showing the last known status.`"
+          />
 
-    <template v-if="activeTab === 'agents'">
-      <p v-if="error" class="error-banner">
-        Could not reach the platform ({{ error }}) — showing the last known status.
-      </p>
+          <el-empty v-if="loading && agents.length === 0" description="Loading agent status…" />
+          <el-empty
+            v-else-if="!loading && agents.length === 0 && !error"
+            description="No Agent bindings are declared in the Capability Registry yet."
+          />
 
-      <p v-if="loading && agents.length === 0" class="empty-state">Loading agent status…</p>
-      <p v-else-if="!loading && agents.length === 0 && !error" class="empty-state">
-        No Agent bindings are declared in the Capability Registry yet.
-      </p>
+          <div v-else class="agent-grid">
+            <AgentCard
+              v-for="agent in agents"
+              :key="`${agent.agent_id}:${agent.capability}`"
+              :agent="agent"
+            />
+          </div>
+        </el-tab-pane>
 
-      <div v-else class="agent-grid">
-        <AgentCard v-for="agent in agents" :key="`${agent.agent_id}:${agent.capability}`" :agent="agent" />
-      </div>
-    </template>
+        <el-tab-pane label="Submit assignment" name="assignment" lazy>
+          <AssignmentForm />
+        </el-tab-pane>
 
-    <AssignmentForm v-else-if="activeTab === 'assignment'" />
-    <HistoryList v-else />
-  </main>
+        <el-tab-pane label="History" name="history" lazy>
+          <HistoryList />
+        </el-tab-pane>
+
+        <el-tab-pane label="Autonomous Agents" name="autonomous" lazy>
+          <AutonomousAgentsPanel />
+        </el-tab-pane>
+      </el-tabs>
+    </el-main>
+  </el-container>
 </template>
 
 <style scoped>
-main {
+.page {
   max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1.5rem 4rem;
@@ -124,7 +121,7 @@ main {
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  padding: 0 0 1.5rem;
 }
 
 h1 {
@@ -134,7 +131,7 @@ h1 {
 
 .subtitle {
   margin: 0.25rem 0 0;
-  color: var(--muted-text);
+  color: var(--el-text-color-secondary);
 }
 
 .header-meta {
@@ -144,72 +141,17 @@ h1 {
   flex-wrap: wrap;
 }
 
-.summary-pill {
-  font-weight: 600;
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
-  background: var(--pill-background);
-}
-
 .last-refreshed {
-  color: var(--muted-text);
+  color: var(--el-text-color-secondary);
   font-size: 0.9rem;
 }
 
-.refresh-button {
-  border: 1px solid var(--border-color);
-  background: var(--surface);
-  color: inherit;
-  border-radius: 6px;
-  padding: 0.4rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.refresh-button:hover {
-  background: var(--surface-hover);
-}
-
-.tab-nav {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tab-button {
-  border: none;
-  background: none;
-  color: var(--muted-text);
-  padding: 0.6rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.95rem;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-
-.tab-button:hover {
-  color: inherit;
-}
-
-.tab-button--active {
-  color: inherit;
-  font-weight: 600;
-  border-bottom-color: var(--text);
+.page-main {
+  padding: 0;
 }
 
 .error-banner {
-  background: var(--error-background);
-  color: var(--error-text);
-  border: 1px solid var(--error-border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
   margin-bottom: 1.5rem;
-}
-
-.empty-state {
-  color: var(--muted-text);
-  padding: 2rem 0;
 }
 
 .agent-grid {

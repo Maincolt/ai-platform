@@ -6,7 +6,7 @@ response that can safely be produced.
 """
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +21,9 @@ from ai_platform.api.ids import Uuid7IdentifierFactory
 from ai_platform.api.models import (
     AgentsListResponse,
     AgentStatusModel,
+    AutonomousActionModel,
+    AutonomousRoleBudgetModel,
+    AutonomousStatusResponse,
     SubmissionHistoryEntryModel,
     WorkflowFailureModel,
     WorkflowHistoryListResponse,
@@ -389,6 +392,61 @@ async def list_agents(
                 )
             )
     response_body = AgentsListResponse(agents=agents)
+    return JSONResponse(
+        status_code=200,
+        content=response_body.model_dump(),
+        headers={CORRELATION_HEADER: str(correlation_id)},
+    )
+
+
+@app.get("/api/v1/autonomous-agents")
+async def autonomous_agents_status(
+    request: Request,
+    state: Annotated[AppState, Depends(get_app_state)],
+) -> JSONResponse:
+    """Read-only status for the ADR-0026 autonomous roles (`scrum-master`,
+    `product-owner`, `principal-developer`) -- kill switch, today's
+    per-role budget usage, and recent audit-log entries (ADR-0032).
+    These roles are deliberately not Capability Registry bindings
+    (ADR-0028 Decision 6), so `GET /api/v1/agents` has nothing for them;
+    this is a separate, simpler read model for the same underlying
+    `agent.autonomous_*` state `psql` already exposes directly.
+
+    Degrades to an inert response (`kill_switch_engaged=false`, empty
+    lists) when `state.autonomous_state` is unconfigured, the same
+    graceful-degrade posture `list_agents` already has toward a missing
+    registry."""
+    correlation_id = _effective_correlation_id(request)
+    if state.autonomous_state is None:
+        response_body = AutonomousStatusResponse(
+            kill_switch_engaged=False, role_budgets=[], recent_actions=[]
+        )
+    else:
+        today = datetime.now(UTC).date()
+        kill_switch_engaged = await state.autonomous_state.is_kill_switch_engaged()
+        role_budgets = await state.autonomous_state.list_role_budgets(today=today)
+        recent_actions = await state.autonomous_state.list_recent_actions(limit=20)
+        response_body = AutonomousStatusResponse(
+            kill_switch_engaged=kill_switch_engaged,
+            role_budgets=[
+                AutonomousRoleBudgetModel(
+                    role=record.role,
+                    actions_used=record.actions_used,
+                    spend_cents_used=record.spend_cents_used,
+                )
+                for record in role_budgets
+            ],
+            recent_actions=[
+                AutonomousActionModel(
+                    occurred_at=record.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    role=record.role,
+                    action_type=record.action_type,
+                    target=record.target,
+                    result_status=cast("Literal['SUCCEEDED', 'FAILED']", record.result_status),
+                )
+                for record in recent_actions
+            ],
+        )
     return JSONResponse(
         status_code=200,
         content=response_body.model_dump(),

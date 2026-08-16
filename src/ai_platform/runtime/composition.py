@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -342,6 +342,22 @@ def build_platform_process(
         },
         timeout_seconds=config.database_timeout_seconds,
     )
+    # ADR-0032: an optional second pool, authenticated as the same
+    # `agent`-schema role every autonomous role's own DSN already uses,
+    # so the dashboard's autonomous-status endpoint can read
+    # `agent.autonomous_*` state -- the first time `platform` reads
+    # outside its own `orchestrator` schema. Read-only in practice;
+    # nothing here ever calls a write method on the resulting port.
+    # Left unset, `autonomous_state` stays `None` and the endpoint
+    # degrades to an inert response rather than platform failing to start.
+    autonomous_state: PsycopgAutonomousStatePort | None = None
+    agent_pool: AsyncPsycopgPool | None = None
+    if config.agent_database_dsn is not None:
+        agent_pool = _pool(
+            replace(config, database_dsn=config.agent_database_dsn),
+            component_schema="agent",
+        )
+        autonomous_state = PsycopgAutonomousStatePort(agent_pool)
     app_state = AppState(
         orchestrator_persistence=persistence,
         agent_persistence=None,
@@ -352,6 +368,7 @@ def build_platform_process(
         submission_orchestrator=submission,
         terminal_event_processor=terminal,
         readiness=readiness,
+        autonomous_state=autonomous_state,
         registry_loaded=registry_loaded,
         task_result_timeout=timedelta(seconds=config.task_result_timeout_seconds),
         registry_snapshot=registry,
@@ -401,6 +418,8 @@ def build_platform_process(
         ),
     ]
     resources: list[AsyncResource] = [pool, StartupGateResource(broker_health.require_available)]
+    if agent_pool is not None:
+        resources.append(agent_pool)
 
     def compose_outcome_recovery() -> None:
         schemas = load_canonical_message_schemas(

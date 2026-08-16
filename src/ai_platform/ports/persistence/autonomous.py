@@ -27,6 +27,35 @@ class DailyBudgetStatus:
     spend_cents_used: int
 
 
+@dataclass(frozen=True, slots=True)
+class RoleBudgetRecord:
+    """One role's today-usage row, for a caller listing every role at
+    once (ADR-0032) rather than asking about one specific role
+    (`get_daily_budget`). Only roles with an actual row are included --
+    the caller decides how to treat a role with none (zero usage, same
+    convention `DailyBudgetStatus` already uses for a single role)."""
+
+    role: str
+    actions_used: int
+    spend_cents_used: int
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousActionRecord:
+    """One audit-log row, for a caller listing recent actions across
+    every role (ADR-0032) rather than dispatching one. Deliberately
+    excludes `inputs`/`result_detail` -- both can carry arbitrary text
+    sourced from untrusted fetched content (ADR-0032 Security), and this
+    record is meant for display, not full audit reconstruction (use
+    `agent.autonomous_actions` directly via `psql` for that)."""
+
+    occurred_at: datetime
+    role: str
+    action_type: str
+    target: str
+    result_status: str
+
+
 class AutonomousStatePort(Protocol):
     async def is_kill_switch_engaged(self) -> bool:
         """Platform-wide kill switch (ADR-0026 Decision 7). Checked first,
@@ -60,4 +89,15 @@ class AutonomousStatePort(Protocol):
     ) -> None:
         """Append one row to the audit log (ADR-0026 Decision 7) -- one
         row per attempted action, win or lose, never updated or deleted."""
+        ...
+
+    async def list_role_budgets(self, *, today: date) -> tuple[RoleBudgetRecord, ...]:
+        """Every role with a budget row for `today` (ADR-0032) -- a
+        dashboard-facing read across all roles at once, unlike
+        `get_daily_budget`'s single-role query."""
+        ...
+
+    async def list_recent_actions(self, *, limit: int) -> tuple[AutonomousActionRecord, ...]:
+        """The `limit` most recent audit-log rows across every role,
+        newest first (ADR-0032)."""
         ...

@@ -639,7 +639,7 @@ failure from a too-fast or too-slow crash window on a given run is a known,
 accepted flake in this suite, not a sign the environment is broken — rerun
 once if either test fails.
 
-## 11. Autonomous Agent Operations (ADR-0026/ADR-0028/ADR-0030/ADR-0031)
+## 11. Autonomous Agent Operations (ADR-0026/ADR-0028/ADR-0030/ADR-0031/ADR-0032)
 
 `scrum-master-agent` was the first Agent deployable that takes real,
 autonomous write actions with no per-action human approval;
@@ -651,6 +651,13 @@ all three share the exact same `agent.autonomous_*` tables (migration
 DB-backed safety mechanisms. All commands below run against those tables
 via `docker exec` into the running `postgres` container, the same
 pattern Section 3/5 already use.
+
+**Most of this is now also visible in the dashboard's "Autonomous Agents"
+tab (ADR-0032)** — kill switch state, each role's today-budget usage, and
+recent audit-log entries, via `GET /api/v1/autonomous-agents`. The `psql`
+commands below remain the only way to see a full audit row (`inputs`/
+`result_detail` are deliberately not exposed by that endpoint) or to
+engage/disengage the kill switch — the dashboard is read-only.
 
 **`principal-developer-agent` is deployed with a placeholder credential
 only (ADR-0031 Decision 5)** — it cannot merge anything real until the
