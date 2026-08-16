@@ -184,3 +184,16 @@ stand-in, documented as such, not a permanent design commitment.
 ## Implementation Status
 
 Accepted; implementation follows in the accepting PR.
+
+**Update (2026-08-16):** merged (PR #62) and deployed to the Mac Docker
+host. The service reaches `ready: true` on its healthcheck; `scrum-
+master-agent`'s behavior-preserving refactor onto the shared config
+base/pure helpers was confirmed unaffected on the same redeploy (real
+board fetch + real Anthropic completion both still succeeded). No real
+GitHub PAT has been supplied for this role yet — deployed with an
+obviously-fake placeholder credential, same pattern every prior role's
+credential started with; a live cycle correctly failed closed with a
+real GitHub `401 Bad credentials` rather than silently doing nothing or
+crashing. Real live-verification (a genuine backlog fetch and, per this
+ADR's own posture, an eventual first real write action) awaits the
+repository owner supplying a real `project`+`repo`-scoped PAT.
