@@ -197,3 +197,18 @@ real GitHub `401 Bad credentials` rather than silently doing nothing or
 crashing. Real live-verification (a genuine backlog fetch and, per this
 ADR's own posture, an eventual first real write action) awaits the
 repository owner supplying a real `project`+`repo`-scoped PAT.
+
+**Update (2026-08-16, later the same day):** the repository owner
+supplied a real, separately-scoped PAT. Redeployed with it: a live
+cycle showed a genuine board fetch and a genuine Anthropic completion
+both succeeding (real `200 OK` from both `api.github.com` and
+`api.anthropic.com`), matching `scrum-master-agent`'s own live-
+verification shape. No action was proposed on this first real cycle —
+the board's only item is the pre-existing test card `scrum-master-agent`
+already covers, and the estimated spend for this cycle rounded to 0
+cents, so `agent.autonomous_role_budget`/`agent.autonomous_actions`
+show no `role='product-owner'` rows yet. `product-owner-agent` is now
+in the same "live and correctly idle" state `scrum-master-agent` was in
+before the test card existed — its first real write action awaits
+either a new/changed board item to react to, or an explicit prompt the
+same way the test card was added for `scrum-master-agent`.
