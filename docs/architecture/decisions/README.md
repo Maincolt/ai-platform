@@ -34,6 +34,7 @@ technical and structural choices.
 | [ADR-0025](ADR-0025-security-review-capability.md) | `security.review` — a Security-Reviewer Review Capability | Accepted |
 | [ADR-0026](ADR-0026-autonomous-team-agents.md) | Autonomous Team Agents — Scrum Master, Product Owner, and Principal Developer Acting Without Human Approval | Accepted |
 | [ADR-0027](ADR-0027-scrum-status-capability.md) | `scrum.status` — a Read-Only, Live Scrum-Board Status Capability | Accepted |
+| [ADR-0028](ADR-0028-scrum-master-agent-phase-2.md) | `scrum-master-agent` — ADR-0026 Phase 2, Real Autonomous Board Write Access | Accepted |
 
 ## Naming
 

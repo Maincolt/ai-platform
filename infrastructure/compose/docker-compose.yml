@@ -968,6 +968,65 @@ services:
     volumes:
       - ./runtime/registry.json:/app/runtime-config/registry.json:ro
 
+  # ADR-0026/ADR-0028: scrum-master-agent, ADR-0026 Phase 2 -- the first
+  # Agent deployable with zero Kafka wiring and no Capability Registry
+  # binding. It consumes no ExecuteTask commands; it wakes up hourly
+  # (PeriodicService) and, subject to the kill switch and daily
+  # action/spend cap, takes real autonomous write actions against the
+  # same GitHub Projects v2 board scrum-status-agent reads. Its PAT
+  # (AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE) is deliberately a *different*,
+  # separately-scoped credential from scrum-status-agent's (ADR-0028
+  # Decision 4, per-role least privilege) -- never share the two.
+  scrum-master-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-scrum-master-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750001"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-scrum-master-agent
+      # 0.0.0.0, not loopback (ADR-0017 Decision 5): scrum-master-agent
+      # does not share platform's network namespace. Readiness here is a
+      # Docker-healthcheck-only signal (ADR-0028 Decision 6) -- this
+      # agent is not a Capability Registry binding and platform never
+      # queries it.
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      # AI Router (ADR-0014), reusing ADR-0017 Decision 3's exact
+      # approved model list unchanged -- same as every other capability.
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0028 Decision 4: a separate, scrum-master-only PAT (project +
+      # repo scopes) -- never scrum-status-agent's read-only token.
+      AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token_scrum_master
+      AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER: "Maincolt"
+      AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER: "1"
+      # ADR-0028 Decision 2: repository owner's explicit choices.
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+      - github_token_scrum_master
+
   # ADR-0023: assignment.route, the platform's eighth capability. Built
   # from the shared ai-platform:sprint6 image, same as technical-review-agent.
   assignment-route-agent:
@@ -1118,6 +1177,12 @@ secrets:
   # provider keys followed) until a real Projects v2 board exists.
   github_token:
     file: ./secrets/github_token.txt
+  # ADR-0028 Decision 4: a separate, scrum-master-only PAT (project +
+  # repo scopes) -- deliberately never the same credential as
+  # github_token above (per-role least privilege). Placeholder until the
+  # repository owner supplies a real one.
+  github_token_scrum_master:
+    file: ./secrets/github_token_scrum_master.txt
 
 volumes:
   postgres-data:

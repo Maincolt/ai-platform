@@ -638,3 +638,55 @@ timing-dependent windows (the same races described in
 failure from a too-fast or too-slow crash window on a given run is a known,
 accepted flake in this suite, not a sign the environment is broken — rerun
 once if either test fails.
+
+## 11. Autonomous Agent Operations (ADR-0026/ADR-0028)
+
+`scrum-master-agent` is the first Agent deployable that takes real,
+autonomous write actions with no per-action human approval — three
+independent, DB-backed safety mechanisms exist for operating it. All
+commands below run against `agent.autonomous_*` tables (migration 0009)
+via `docker exec` into the running `postgres` container, the same
+pattern Section 3/5 already use.
+
+### Checking whether the kill switch is engaged
+
+```bash
+docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+  -c "SELECT engaged, updated_at FROM agent.autonomous_kill_switch;"
+```
+
+### Engaging the kill switch (halts all autonomous action-taking immediately)
+
+No redeploy needed — `scrum-master-agent`'s `PeriodicService` checks this
+at the start of every cycle, before any GitHub call:
+
+```bash
+docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+  -c "UPDATE agent.autonomous_kill_switch SET engaged = TRUE, updated_at = now();"
+```
+
+Disengage the same way with `engaged = FALSE`.
+
+### Checking today's budget usage
+
+```bash
+docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+  -c "SELECT role, day, actions_used, spend_cents_used FROM agent.autonomous_role_budget ORDER BY day DESC LIMIT 7;"
+```
+
+`spend_cents_used` is an estimate from a hardcoded per-model rate table
+(`src/ai_platform/agents/scrum_master_agent/agent.py`), not exact
+provider billing (ADR-0028 Decision 2) — treat `actions_used` against
+`AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY` as the primary signal.
+
+### Reading "what did it actually do" — the audit log
+
+```bash
+docker exec ai-platform-local-postgres-1 psql -U ai_platform_admin -d ai_platform \
+  -c "SELECT occurred_at, action_type, target, result_status, result_detail FROM agent.autonomous_actions ORDER BY occurred_at DESC LIMIT 20;"
+```
+
+One row per attempted action, win or lose, append-only — this is the
+after-the-fact record ADR-0026 Decision 7 relies on since there is no
+per-action human checkpoint. `inputs` (jsonb) holds the full proposed
+action fields including the model's own stated `rationale`.

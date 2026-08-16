@@ -35,6 +35,7 @@ from ai_platform.adapters.event_bus.topics import KafkaTopicMapping, TopicBindin
 from ai_platform.adapters.persistence import (
     AsyncPsycopgPool,
     PsycopgAgentPersistence,
+    PsycopgAutonomousStatePort,
     PsycopgOrchestratorPersistence,
     PsycopgOutboxTransaction,
     PsycopgTransportRejectionTransaction,
@@ -56,6 +57,8 @@ from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
 )
+from ai_platform.agents.scrum_master_agent.agent import ScrumMasterAgent
+from ai_platform.agents.scrum_master_agent.tracker import GitHubProjectsTrackerClient
 from ai_platform.agents.scrum_status_agent.agent import ScrumStatusAgent
 from ai_platform.agents.scrum_status_agent.board import GitHubProjectsBoardReader
 from ai_platform.agents.scrum_status_agent.capability import (
@@ -108,6 +111,7 @@ from ai_platform.runtime.configuration import (
     CommonRuntimeConfig,
     PlatformRuntimeConfig,
     RuntimeConfigurationError,
+    ScrumMasterRuntimeConfig,
     SecretFileReference,
 )
 from ai_platform.runtime.consumer import EventConsumerWorker
@@ -661,6 +665,96 @@ def build_agent_process(
     )
 
 
+def build_scrum_master_process(
+    config: ScrumMasterRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `scrum-master-agent` (ADR-0026 Phase 2, ADR-0028).
+
+    Deliberately does not reuse `build_agent_process`: this process
+    consumes no `ExecuteTask` commands and publishes no events, so it
+    skips the Kafka command-consumer/outbox-publisher/quarantine wiring
+    entirely -- the first Agent deployable with zero Kafka wiring. Its
+    only service is a `PeriodicService` driving `ScrumMasterAgent
+    .run_cycle()` on a fixed interval; readiness is a minimal Docker-
+    healthcheck-only signal, not a Capability Registry declaration (this
+    agent is not something a Workflow can be submitted to)."""
+    if config.github_token is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
+    if config.github_project_owner is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_owner")
+    if config.github_project_number is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_number")
+
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    tracker = GitHubProjectsTrackerClient(
+        token=config.github_token.read(),
+        owner=config.github_project_owner,
+        project_number=config.github_project_number,
+    )
+    scrum_master = ScrumMasterAgent(
+        agent_deployment_id=config.agent_id,
+        state=state,
+        project_tracker=tracker,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        max_actions_per_day=config.autonomous_max_actions_per_day,
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            scrum_master.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
 def _build_executor(
     capability_name: str,
     *,
@@ -814,7 +908,15 @@ _APPROVED_ANTHROPIC_MODELS = frozenset({"claude-haiku-4-5"})
 _APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
 
 
-def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
+# Both `AgentRuntimeConfig` and `ScrumMasterRuntimeConfig` declare the
+# same six `ai_router_*` fields; this alias lets the AI Router builder
+# helpers below serve either without a shared base class -- ADR-0028's
+# `ScrumMasterRuntimeConfig` deliberately does not subclass
+# `CommonRuntimeConfig`/`AgentRuntimeConfig` (see its own docstring).
+_AIRouterConfig = AgentRuntimeConfig | ScrumMasterRuntimeConfig
+
+
+def _build_ai_router(config: _AIRouterConfig) -> FallbackAIRouter:
     providers: list[ProviderAdapter] = []
     if (
         config.ai_router_anthropic_api_key is not None
@@ -850,14 +952,14 @@ def _build_ai_router(config: AgentRuntimeConfig) -> FallbackAIRouter:
     return FallbackAIRouter(providers)
 
 
-def _require_ai_router_secret(config: AgentRuntimeConfig, field_name: str) -> str:
+def _require_ai_router_secret(config: _AIRouterConfig, field_name: str) -> str:
     reference = getattr(config, field_name)
     if reference is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
     return cast(SecretFileReference, reference).read()
 
 
-def _require_ai_router_str(config: AgentRuntimeConfig, field_name: str) -> str:
+def _require_ai_router_str(config: _AIRouterConfig, field_name: str) -> str:
     value = getattr(config, field_name)
     if value is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
@@ -865,7 +967,7 @@ def _require_ai_router_str(config: AgentRuntimeConfig, field_name: str) -> str:
 
 
 def _require_approved_ai_router_model(
-    config: AgentRuntimeConfig, field_name: str, *, approved: frozenset[str]
+    config: _AIRouterConfig, field_name: str, *, approved: frozenset[str]
 ) -> str:
     """Fail closed on an unapproved model (ADR-0017 Decision 3)."""
     value = _require_ai_router_str(config, field_name)
@@ -874,7 +976,7 @@ def _require_approved_ai_router_model(
     return value
 
 
-def _require_ai_router_int(config: AgentRuntimeConfig, field_name: str) -> int:
+def _require_ai_router_int(config: _AIRouterConfig, field_name: str) -> int:
     value = getattr(config, field_name)
     if value is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
@@ -937,7 +1039,7 @@ _EXPECTED_SCHEMA_VERSION: dict[str, int] = {
     # each component so a stale database is rejected at startup rather than
     # silently misread.
     "orchestrator": 4,
-    "agent": 4,
+    "agent": 5,
 }
 
 
