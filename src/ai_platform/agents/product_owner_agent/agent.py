@@ -1,14 +1,15 @@
-"""The Scrum Master Agent's cycle logic (ADR-0026, ADR-0028).
+"""The Product Owner Agent's cycle logic (ADR-0026, ADR-0030).
 
-Unlike every prior Agent, there is no `handle(context, *, now)` reacting
-to one `ExecuteTask` command. Instead, `run_cycle()` is the operation a
-`PeriodicService` (`src/ai_platform/runtime/lifecycle.py`) invokes on a
-fixed interval. Each cycle: check the kill switch, check today's budget,
-fetch the board, make one AI Router call proposing a bounded batch of
-actions, strictly parse/validate the proposal, then dispatch each valid
-action independently -- one action's failure never blocks or rolls back
-the others (ADR-0028 Decision 3). Every dispatch attempt, win or lose,
-is recorded to the durable audit log before the cycle ends.
+Same shape as `scrum_master_agent.agent` (ADR-0028): no `handle(context,
+*, now)` reacting to one `ExecuteTask` command. `run_cycle()` is the
+operation a `PeriodicService` (`src/ai_platform/runtime/lifecycle.py`)
+invokes on a fixed interval. Each cycle: check the kill switch, check
+today's budget, fetch the board, make one AI Router call proposing a
+bounded batch of actions, strictly parse/validate the proposal, then
+dispatch each valid action independently -- one action's failure never
+blocks or rolls back the others (ADR-0028 Decision 3, reused unchanged).
+Every dispatch attempt, win or lose, is recorded to the durable audit log
+before the cycle ends.
 """
 
 import json
@@ -18,53 +19,49 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from ai_platform.agents._autonomous_shared import estimate_spend_cents, strip_markdown_json_fence
-from ai_platform.agents.scrum_master_agent.errors import (
-    ProjectBoardFetchFailedError,
+from ai_platform.agents.product_owner_agent.errors import (
+    BacklogFetchFailedError,
     TrackerActionFailedError,
 )
-from ai_platform.agents.scrum_master_agent.tracker import ProjectBoardSnapshot, ProjectTrackerPort
+from ai_platform.agents.product_owner_agent.tracker import BacklogTrackerPort, ProjectBoardSnapshot
 from ai_platform.ports.ai_router import AICompletionRequest, AIRouterPort, DataClassification
 from ai_platform.ports.persistence.autonomous import AutonomousStatePort
 
 logger = logging.getLogger(__name__)
 
-_ROLE = "scrum-master"
+_ROLE = "product-owner"
 _VALID_ACTIONS = frozenset(
     {
-        "set_status",
-        "add_comment",
-        "create_draft_item",
-        "close_issue",
-        "relabel",
-        "reassign",
+        "create_ticket",
+        "edit_ticket",
+        "close_ticket",
+        "archive_draft_ticket",
+        "reprioritize",
+        "adjust_sprint_scope",
     }
 )
 _MAX_PROPOSED_ACTIONS = 10
 _MAX_LONG_FIELD_LENGTH = 2000
 _MAX_SHORT_FIELD_LENGTH = 200
-_MAX_LIST_ITEMS = 10
-_MAX_LIST_ITEM_LENGTH = 100
+# Sentinel `after_item_id` value meaning "move to the top of the board"
+# (GraphQL's `updateProjectV2ItemPosition afterId: null`) -- every other
+# field in this parser must be a non-empty string, so a real item_id and
+# "move to top" both need a non-empty-string representation.
+_REPRIORITIZE_TOP_SENTINEL = "TOP"
 _ACTION_REQUIRED_KEYS: dict[str, frozenset[str]] = {
-    "set_status": frozenset({"action", "item_id", "status", "rationale"}),
-    "add_comment": frozenset({"action", "issue_url", "body", "rationale"}),
-    "create_draft_item": frozenset({"action", "title", "body", "rationale"}),
-    "close_issue": frozenset({"action", "issue_url", "rationale"}),
-    "relabel": frozenset({"action", "issue_url", "labels", "rationale"}),
-    "reassign": frozenset({"action", "issue_url", "assignees", "rationale"}),
-}
-# Keys whose value is a bounded list of strings rather than a scalar
-# string -- ADR-0029 Decision 2. Every other required key across every
-# action is a scalar string.
-_ACTION_LIST_FIELDS: dict[str, frozenset[str]] = {
-    "relabel": frozenset({"labels"}),
-    "reassign": frozenset({"assignees"}),
+    "create_ticket": frozenset({"action", "title", "body", "rationale"}),
+    "edit_ticket": frozenset({"action", "issue_url", "title", "body", "rationale"}),
+    "close_ticket": frozenset({"action", "issue_url", "rationale"}),
+    "archive_draft_ticket": frozenset({"action", "item_id", "rationale"}),
+    "reprioritize": frozenset({"action", "item_id", "after_item_id", "rationale"}),
+    "adjust_sprint_scope": frozenset({"action", "item_id", "status", "rationale"}),
 }
 
 
 @dataclass(frozen=True, slots=True)
 class ProposedAction:
     action: str
-    fields: dict[str, str | tuple[str, ...]]
+    fields: dict[str, str]
     rationale: str
 
 
@@ -78,35 +75,35 @@ def _build_action_prompt(snapshot: ProjectBoardSnapshot) -> str:
         or "(no items)"
     )
     return (
-        "You are a scrum master with real, autonomous write access to "
+        "You are a product owner with real, autonomous write access to "
         "this project board. Review the board and respond with ONLY a "
         "JSON array (no prose, no markdown fences) of proposed action "
         "objects. You may propose zero actions if nothing is warranted "
         "-- do not act just to have done something. Each object must "
-        'have an "action" key set to exactly one of "set_status", '
-        '"add_comment", "create_draft_item", "close_issue", "relabel", '
-        'or "reassign", plus these keys for that action (no others):\n'
-        '- "set_status": "item_id" (must match an item_id shown below '
-        'exactly), "status" (the target status name), "rationale" (one '
-        "sentence).\n"
-        '- "add_comment": "issue_url" (must match an item\'s url shown '
-        'below exactly -- never a draft item), "body" (the comment '
-        'text), "rationale" (one sentence).\n'
-        '- "create_draft_item": "title", "body" (the draft issue '
-        'description), "rationale" (one sentence).\n'
-        '- "close_issue": "issue_url" (must match an item\'s url shown '
+        'have an "action" key set to exactly one of "create_ticket", '
+        '"edit_ticket", "close_ticket", "archive_draft_ticket", '
+        '"reprioritize", or "adjust_sprint_scope", plus these keys for '
+        "that action (no others):\n"
+        '- "create_ticket": "title", "body" (the ticket description), '
+        '"rationale" (one sentence).\n'
+        '- "edit_ticket": "issue_url" (must match an item\'s url shown '
+        'below exactly -- never a draft item), "title", "body" (the '
+        'complete replacement title/body), "rationale" (one sentence).\n'
+        '- "close_ticket": "issue_url" (must match an item\'s url shown '
         'below exactly -- never a draft item), "rationale" (one '
         "sentence).\n"
-        '- "relabel": "issue_url" (must match an item\'s url shown below '
-        'exactly -- never a draft item), "labels" (a JSON array of the '
-        "complete replacement label set -- every label the issue should "
-        'have after this action, not just ones to add), "rationale" '
-        "(one sentence).\n"
-        '- "reassign": "issue_url" (must match an item\'s url shown '
-        'below exactly -- never a draft item), "assignees" (a JSON '
-        "array of the complete replacement assignee set -- every "
-        "GitHub username the issue should be assigned to after this "
-        'action, not just ones to add), "rationale" (one sentence).\n\n'
+        '- "archive_draft_ticket": "item_id" (must match a draft item\'s '
+        "item_id shown below exactly -- an item with no url), "
+        '"rationale" (one sentence).\n'
+        '- "reprioritize": "item_id" (must match an item_id shown below '
+        'exactly), "after_item_id" (another item_id to place this item '
+        f"directly after, or the literal string {_REPRIORITIZE_TOP_SENTINEL!r} "
+        'to move it to the very top of the board), "rationale" (one '
+        "sentence).\n"
+        '- "adjust_sprint_scope": "item_id" (must match an item_id shown '
+        'below exactly), "status" (the target status name -- a '
+        '"Backlog"-style option removes it from the active sprint, an '
+        'active-sprint option adds it), "rationale" (one sentence).\n\n'
         f"Board: {snapshot.title}\n"
         f"Items:\n{item_lines}"
     )
@@ -114,17 +111,6 @@ def _build_action_prompt(snapshot: ProjectBoardSnapshot) -> str:
 
 def _valid_field(value: object, *, maximum_length: int) -> bool:
     return isinstance(value, str) and bool(value) and len(value) <= maximum_length
-
-
-def _valid_string_list_field(value: object) -> tuple[str, ...] | None:
-    if not isinstance(value, list):
-        return None
-    items = cast(list[object], value)
-    if len(items) > _MAX_LIST_ITEMS:
-        return None
-    if not all(_valid_field(item, maximum_length=_MAX_LIST_ITEM_LENGTH) for item in items):
-        return None
-    return tuple(cast(list[str], items))
 
 
 def _parse_proposed_actions(output_text: str) -> list[ProposedAction] | None:
@@ -159,19 +145,12 @@ def _parse_proposed_actions(output_text: str) -> list[ProposedAction] | None:
         if not _valid_field(rationale, maximum_length=_MAX_LONG_FIELD_LENGTH):
             return None
 
-        list_fields = _ACTION_LIST_FIELDS.get(action, frozenset())
-        fields: dict[str, str | tuple[str, ...]] = {}
+        fields: dict[str, str] = {}
         for key in required_keys - {"action", "rationale"}:
             value = item[key]
-            if key in list_fields:
-                items = _valid_string_list_field(value)
-                if items is None:
-                    return None
-                fields[key] = items
-                continue
             bound = (
                 _MAX_SHORT_FIELD_LENGTH
-                if key in {"item_id", "status", "title", "issue_url"}
+                if key in {"item_id", "after_item_id", "status", "title", "issue_url"}
                 else _MAX_LONG_FIELD_LENGTH
             )
             if not _valid_field(value, maximum_length=bound):
@@ -184,13 +163,13 @@ def _parse_proposed_actions(output_text: str) -> list[ProposedAction] | None:
     return proposals
 
 
-class ScrumMasterAgent:
+class ProductOwnerAgent:
     def __init__(
         self,
         *,
         agent_deployment_id: str,
         state: AutonomousStatePort,
-        project_tracker: ProjectTrackerPort,
+        backlog_tracker: BacklogTrackerPort,
         ai_router: AIRouterPort,
         max_output_tokens: int,
         provider_deadline_seconds: float,
@@ -207,7 +186,7 @@ class ScrumMasterAgent:
             raise ValueError("max_spend_cents_per_day must be positive")
         self._agent_deployment_id = agent_deployment_id
         self._state = state
-        self._project_tracker = project_tracker
+        self._backlog_tracker = backlog_tracker
         self._ai_router = ai_router
         self._max_output_tokens = max_output_tokens
         self._provider_deadline_seconds = provider_deadline_seconds
@@ -216,7 +195,7 @@ class ScrumMasterAgent:
 
     async def run_cycle(self) -> None:
         if await self._state.is_kill_switch_engaged():
-            logger.info("scrum-master-agent: kill switch engaged, skipping cycle")
+            logger.info("product-owner-agent: kill switch engaged, skipping cycle")
             return
 
         now = datetime.now(UTC)
@@ -226,20 +205,20 @@ class ScrumMasterAgent:
             budget.actions_used >= self._max_actions_per_day
             or budget.spend_cents_used >= self._max_spend_cents_per_day
         ):
-            logger.info("scrum-master-agent: daily budget exhausted, skipping cycle")
+            logger.info("product-owner-agent: daily budget exhausted, skipping cycle")
             return
 
         try:
-            snapshot = await self._project_tracker.fetch()
-        except ProjectBoardFetchFailedError as error:
-            logger.warning("scrum-master-agent: board fetch failed: %s", error.reason)
+            snapshot = await self._backlog_tracker.fetch()
+        except BacklogFetchFailedError as error:
+            logger.warning("product-owner-agent: backlog fetch failed: %s", error.reason)
             return
 
         completion = await self._ai_router.complete(
             AICompletionRequest(
                 prompt=_build_action_prompt(snapshot),
                 max_output_tokens=self._max_output_tokens,
-                idempotency_key=f"scrum-master-{now.isoformat()}",
+                idempotency_key=f"product-owner-{now.isoformat()}",
                 deadline=now + timedelta(seconds=self._provider_deadline_seconds),
                 classification=DataClassification.NO_SPECIAL_HANDLING,
             )
@@ -252,18 +231,18 @@ class ScrumMasterAgent:
                 )
 
         if completion.output_text is None:
-            logger.warning("scrum-master-agent: AI Router returned a classified failure")
+            logger.warning("product-owner-agent: AI Router returned a classified failure")
             return
 
         proposals = _parse_proposed_actions(completion.output_text)
         if proposals is None:
-            logger.warning("scrum-master-agent: proposed-actions response did not parse")
+            logger.warning("product-owner-agent: proposed-actions response did not parse")
             return
 
         remaining_actions = self._max_actions_per_day - budget.actions_used
         for proposal in proposals:
             if remaining_actions <= 0:
-                logger.info("scrum-master-agent: daily action cap reached mid-cycle, stopping")
+                logger.info("product-owner-agent: daily action cap reached mid-cycle, stopping")
                 break
             await self._dispatch(proposal, now=now)
             remaining_actions -= 1
@@ -302,45 +281,47 @@ class ScrumMasterAgent:
         )
 
     async def _dispatch_action(self, proposal: ProposedAction) -> str:
-        if proposal.action == "set_status":
-            item_id = cast(str, proposal.fields["item_id"])
-            await self._project_tracker.set_status(
-                item_id=item_id, status_name=cast(str, proposal.fields["status"])
+        if proposal.action == "create_ticket":
+            await self._backlog_tracker.create_ticket(
+                title=proposal.fields["title"], body=proposal.fields["body"]
+            )
+            return proposal.fields["title"]
+        if proposal.action == "edit_ticket":
+            issue_url = proposal.fields["issue_url"]
+            await self._backlog_tracker.edit_ticket(
+                issue_url=issue_url, title=proposal.fields["title"], body=proposal.fields["body"]
+            )
+            return issue_url
+        if proposal.action == "close_ticket":
+            issue_url = proposal.fields["issue_url"]
+            await self._backlog_tracker.close_ticket(issue_url=issue_url)
+            return issue_url
+        if proposal.action == "archive_draft_ticket":
+            item_id = proposal.fields["item_id"]
+            await self._backlog_tracker.archive_draft_ticket(item_id=item_id)
+            return item_id
+        if proposal.action == "reprioritize":
+            item_id = proposal.fields["item_id"]
+            after_item_id = proposal.fields["after_item_id"]
+            await self._backlog_tracker.reprioritize(
+                item_id=item_id,
+                after_item_id=None
+                if after_item_id == _REPRIORITIZE_TOP_SENTINEL
+                else after_item_id,
             )
             return item_id
-        if proposal.action == "add_comment":
-            issue_url = cast(str, proposal.fields["issue_url"])
-            await self._project_tracker.add_comment(
-                issue_url=issue_url, body=cast(str, proposal.fields["body"])
+        if proposal.action == "adjust_sprint_scope":
+            item_id = proposal.fields["item_id"]
+            await self._backlog_tracker.adjust_sprint_scope(
+                item_id=item_id, status_name=proposal.fields["status"]
             )
-            return issue_url
-        if proposal.action == "create_draft_item":
-            await self._project_tracker.create_draft_item(
-                title=cast(str, proposal.fields["title"]), body=cast(str, proposal.fields["body"])
-            )
-            return cast(str, proposal.fields["title"])
-        if proposal.action == "close_issue":
-            issue_url = cast(str, proposal.fields["issue_url"])
-            await self._project_tracker.close_issue(issue_url=issue_url)
-            return issue_url
-        if proposal.action == "relabel":
-            issue_url = cast(str, proposal.fields["issue_url"])
-            await self._project_tracker.relabel(
-                issue_url=issue_url, labels=cast(tuple[str, ...], proposal.fields["labels"])
-            )
-            return issue_url
-        if proposal.action == "reassign":
-            issue_url = cast(str, proposal.fields["issue_url"])
-            await self._project_tracker.reassign(
-                issue_url=issue_url, assignees=cast(tuple[str, ...], proposal.fields["assignees"])
-            )
-            return issue_url
+            return item_id
         raise TrackerActionFailedError(proposal.action, "unrecognized action type")
 
 
 def _proposal_target(proposal: ProposedAction) -> str:
-    if proposal.action in {"set_status"}:
-        return cast(str, proposal.fields.get("item_id", ""))
-    if proposal.action in {"add_comment", "close_issue", "relabel", "reassign"}:
-        return cast(str, proposal.fields.get("issue_url", ""))
-    return cast(str, proposal.fields.get("title", ""))
+    if proposal.action in {"edit_ticket", "close_ticket"}:
+        return proposal.fields.get("issue_url", "")
+    if proposal.action in {"archive_draft_ticket", "reprioritize", "adjust_sprint_scope"}:
+        return proposal.fields.get("item_id", "")
+    return proposal.fields.get("title", "")
