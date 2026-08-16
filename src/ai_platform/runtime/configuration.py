@@ -294,6 +294,112 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ScrumMasterRuntimeConfig:
+    """ADR-0028: deliberately not a `CommonRuntimeConfig` subclass -- this
+    process consumes no `ExecuteTask` commands and publishes no events,
+    so none of `CommonRuntimeConfig`'s Kafka/contract-schema fields
+    apply. A `PeriodicService`-driven process needs only a DB pool, the
+    AI Router, a GitHub credential, and its own cadence/budget knobs."""
+
+    environment: str
+    database_dsn: SecretFileReference
+    database_pool_min_size: int
+    database_pool_max_size: int
+    database_timeout_seconds: float
+    agent_id: str
+    agent_component: str
+    readiness_host: str
+    readiness_port: int
+    readiness_credential: SecretFileReference
+    startup_timeout_seconds: float
+    shutdown_grace_seconds: float
+    ai_router_anthropic_api_key: SecretFileReference | None
+    ai_router_anthropic_model: str | None
+    ai_router_openai_api_key: SecretFileReference | None
+    ai_router_openai_model: str | None
+    ai_router_max_output_tokens: int | None
+    ai_router_provider_timeout_seconds: float | None
+    github_token: SecretFileReference | None
+    github_project_owner: str | None
+    github_project_number: int | None
+    autonomous_poll_interval_seconds: float
+    autonomous_max_actions_per_day: int
+    autonomous_max_spend_cents_per_day: int
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> ScrumMasterRuntimeConfig:
+        values = os.environ if environment is None else environment
+        env_name = _required(values, "AI_PLATFORM_ENVIRONMENT")
+        if env_name != "development":
+            raise RuntimeConfigurationError("SYNTHETIC_POLICY_REQUIRES_DEVELOPMENT")
+        pool_min_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE", 1, 32)
+        pool_max_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE", 1, 64)
+        if pool_min_size > pool_max_size:
+            raise RuntimeConfigurationError("DATABASE_POOL_MIN_EXCEEDS_MAX")
+        readiness_host = _required(values, "AI_PLATFORM_AGENT_READINESS_HOST")
+        if not (_is_loopback_literal(readiness_host) or readiness_host == "0.0.0.0"):
+            raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK_OR_ALL_INTERFACES")
+        return cls(
+            environment=env_name,
+            database_dsn=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_AGENT_DATABASE_DSN_FILE"))
+            ),
+            database_pool_min_size=pool_min_size,
+            database_pool_max_size=pool_max_size,
+            database_timeout_seconds=_bounded_float(
+                values, "AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS", 0.1, 120.0
+            ),
+            agent_id=_required(values, "AI_PLATFORM_AGENT_ID"),
+            agent_component=_required(values, "AI_PLATFORM_AGENT_COMPONENT"),
+            readiness_host=readiness_host,
+            readiness_port=_bounded_int(values, "AI_PLATFORM_AGENT_READINESS_PORT", 1, 65_535),
+            readiness_credential=SecretFileReference(
+                Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
+            ),
+            startup_timeout_seconds=_bounded_float(
+                values, "AI_PLATFORM_STARTUP_TIMEOUT_SECONDS", 0.1, 300.0
+            ),
+            shutdown_grace_seconds=_bounded_float(
+                values, "AI_PLATFORM_SHUTDOWN_GRACE_SECONDS", 0.1, 300.0
+            ),
+            ai_router_anthropic_api_key=_optional_secret(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE"
+            ),
+            ai_router_anthropic_model=_optional_str(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL"
+            ),
+            ai_router_openai_api_key=_optional_secret(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE"
+            ),
+            ai_router_openai_model=_optional_str(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL"
+            ),
+            ai_router_max_output_tokens=_optional_int(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS", 1, 32_000
+            ),
+            ai_router_provider_timeout_seconds=_optional_float(
+                values, "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS", 0.1, 300.0
+            ),
+            github_token=_optional_secret(values, "AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE"),
+            github_project_owner=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER"),
+            github_project_number=_optional_int(
+                values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER", 1, 1_000_000
+            ),
+            autonomous_poll_interval_seconds=_bounded_float(
+                values, "AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS", 1.0, 86_400.0
+            ),
+            autonomous_max_actions_per_day=_bounded_int(
+                values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY", 1, 10_000
+            ),
+            autonomous_max_spend_cents_per_day=_bounded_int(
+                values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY", 1, 1_000_000
+            ),
+        )
+
+
 def _common(values: Mapping[str, str], *, prefix: str) -> CommonRuntimeConfig:
     environment = _required(values, "AI_PLATFORM_ENVIRONMENT")
     if environment != "development":
