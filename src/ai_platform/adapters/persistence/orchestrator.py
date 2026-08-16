@@ -45,7 +45,13 @@ from ai_platform.ports.persistence.transactions import (
     TerminalOutcomeIntent,
     TerminalPersistenceDisposition,
 )
-from ai_platform.shared.identifiers import OwnerSubjectId, TaskAttemptId, TaskId, WorkflowId
+from ai_platform.shared.identifiers import (
+    AgentId,
+    OwnerSubjectId,
+    TaskAttemptId,
+    TaskId,
+    WorkflowId,
+)
 
 
 class PsycopgOrchestratorPersistence:
@@ -103,6 +109,25 @@ class PsycopgOrchestratorPersistence:
             return await select_submission_history(
                 connection, capability_name=capability_name, limit=limit, before=before
             )
+
+    async def count_in_flight_by_agent(self) -> dict[AgentId, int]:
+        async with self._pool.connection() as connection:
+            rows = await (
+                await connection.execute(
+                    """
+                    SELECT agent_id, COUNT(*)
+                    FROM orchestrator.task_attempts
+                    WHERE state = 'DISPATCHED'
+                    GROUP BY agent_id
+                    """
+                )
+            ).fetchall()
+        counts: dict[AgentId, int] = {}
+        for row in rows:
+            if not isinstance(row[1], int):
+                raise PermanentPersistenceError("Stored in-flight count is invalid.")
+            counts[AgentId(str(row[0]))] = row[1]
+        return counts
 
     @retry_transaction
     async def record_request_access(self, record: AcceptedRequestAccessAuditRecord) -> None:

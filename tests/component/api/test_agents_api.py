@@ -131,6 +131,29 @@ def test_never_observed_agent_reports_unknown_with_no_timestamp() -> None:
     assert agent["last_observed_at"] is None
 
 
+def test_default_state_reports_zero_in_flight_when_idle(client: TestClient) -> None:
+    response = client.get("/api/v1/agents")
+
+    agent = response.json()["agents"][0]
+    assert agent["in_flight_count"] == 0
+
+
+def test_in_flight_count_increments_after_a_dispatched_submission(client: TestClient) -> None:
+    submit_body = {
+        "text": "the quick brown fox",
+        "capability": "text.word-count",
+        "capability_version": "1.0",
+    }
+    submit_response = client.post("/api/v1/workflows", json=submit_body)
+    assert submit_response.status_code == 202
+    assert submit_response.json()["state"] == "DISPATCHED"
+
+    response = client.get("/api/v1/agents")
+
+    agent = response.json()["agents"][0]
+    assert agent["in_flight_count"] == 1
+
+
 def test_registry_not_loaded_reports_no_agents_not_an_error() -> None:
     base_state = build_app_state()
     state = replace(base_state, registry_snapshot=None, availability_port=None)

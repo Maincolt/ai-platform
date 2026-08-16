@@ -19,6 +19,8 @@
   --status-unavailable-bg: #fbe4e2;
   --status-unknown-text: #4b4f56;
   --status-unknown-bg: #eceef1;
+  --status-busy-text: #1b5aab;
+  --status-busy-bg: #e3edfb;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -43,6 +45,8 @@
     --status-unavailable-bg: #3c1f1c;
     --status-unknown-text: #c3c8d1;
     --status-unknown-bg: #2a2e35;
+    --status-busy-text: #8fb9f0;
+    --status-busy-bg: #1c2c40;
   }
 }
 

@@ -366,3 +366,68 @@ def test_submission_history_round_trips_and_reflects_current_workflow_state(
             await pool.close()
 
     asyncio.run(run())
+
+
+def test_in_flight_count_reflects_dispatched_state_and_clears_on_terminal_outcome(
+    postgres_orchestrator_app_dsn: str,
+) -> None:
+    """The "agent busy" signal must be read fresh against
+    `orchestrator.task_attempts.state = 'DISPATCHED'` -- present the moment
+    a submission commits, gone the moment a terminal outcome lands, with
+    no separate instrumentation to fall out of sync."""
+
+    async def run() -> None:
+        now = datetime.now(UTC)
+        intent, workflow_id, task_id, attempt_id = _build_intent(now=now)
+        agent_id = intent.task_attempt.selection.agent_id
+
+        pool = await _open_orchestrator_pool(postgres_orchestrator_app_dsn)
+        try:
+            persistence = PsycopgOrchestratorPersistence(pool)
+            result = await persistence.commit_submission(intent)
+            assert result.created is True
+
+            counts = await persistence.count_in_flight_by_agent()
+            assert counts.get(agent_id, 0) == 1
+
+            terminal_intent = TerminalOutcomeIntent(
+                environment="sprint10-state-machine",
+                logical_consumer_id="sprint10-state-machine-outcomes",
+                validated_message_id=MessageId(_new_id()),
+                immutable_message_digest=f"digest-{_new_id()}",
+                workflow_id=workflow_id,
+                task_id=task_id,
+                task_attempt_id=attempt_id,
+                correlation_id=intent.workflow.correlation_id,
+                causation_message_id=intent.command_outbox.message_id,
+                producer_component="sprint10-state-machine-impl",
+                producer_instance_id="sprint10-state-machine-agent",
+                capability_name=_CAPABILITY_NAME,
+                capability_version=_CAPABILITY_VERSION,
+                result_text="sprint ten state machine words",
+                agent_evidence_component="sprint10-state-machine-impl",
+                agent_evidence_instance_id="sprint10-state-machine-agent",
+                outcome=AgentOutcome(
+                    task_attempt_id=attempt_id,
+                    completed_at=now,
+                    result_data={"word_count": 5},
+                    failure_code=None,
+                ),
+                occurred_at=now,
+                audit=AuditRecord(
+                    kind="workflow_terminal_outcome",
+                    workflow_id=workflow_id,
+                    occurred_at=now,
+                    actor_id=ActorId("system:sprint10-state-machine"),
+                    details={},
+                ),
+            )
+            terminal_result = await persistence.apply_terminal_outcome(terminal_intent)
+            assert terminal_result.disposition.value == "APPLIED"
+
+            counts_after = await persistence.count_in_flight_by_agent()
+            assert counts_after.get(agent_id, 0) == 0
+        finally:
+            await pool.close()
+
+    asyncio.run(run())

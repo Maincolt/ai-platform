@@ -25,6 +25,7 @@ from ai_platform.orchestrator.domain.task import Task, TaskAttempt
 from ai_platform.orchestrator.domain.workflow import Workflow
 from ai_platform.shared.identifiers import (
     ActorId,
+    AgentId,
     CorrelationId,
     MessageId,
     OwnerSubjectId,
@@ -158,6 +159,18 @@ class SubmissionHistoryQueryPort(Protocol):
 class SubmissionTransactionPort(Protocol):
     async def commit_submission(self, intent: SubmissionCommitIntent) -> SubmissionCommitResult:
         """Atomically arbitrate and commit the complete submission unit."""
+        ...
+
+
+class InFlightWorkloadQueryPort(Protocol):
+    async def count_in_flight_by_agent(self) -> dict[AgentId, int]:
+        """Return, per Agent deployment, how many task attempts are
+        currently DISPATCHED (claimed, no terminal outcome recorded yet).
+
+        Read fresh on every call, same as `SubmissionHistoryQueryPort` --
+        never a cached count. An Agent with no entry has zero in-flight
+        work, not an unknown/error state.
+        """
         ...
 
 

@@ -21,7 +21,7 @@ from ai_platform.orchestrator.domain.accepted_request import (
 )
 from ai_platform.orchestrator.domain.audit import AuditRecord
 from ai_platform.orchestrator.domain.recovery import OrchestratorOutboxRecord
-from ai_platform.orchestrator.domain.results import WorkflowFailure
+from ai_platform.orchestrator.domain.results import WorkflowFailure, WorkflowResult
 from ai_platform.orchestrator.domain.selection import SelectionIntent
 from ai_platform.orchestrator.domain.states import WorkflowState
 from ai_platform.orchestrator.domain.task import Task, TaskAttempt
@@ -480,3 +480,59 @@ def test_submission_history_before_cursor_excludes_at_or_after() -> None:
     entries = _run(persistence.list_recent(capability_name=None, limit=10, before=NOW))
 
     assert entries == []
+
+
+def test_in_flight_count_reports_dispatched_attempt_by_agent() -> None:
+    """The new submission commit leaves the workflow in DISPATCHED state
+    with one attempt selected onto `_selection()`'s agent -- exactly the
+    "claimed, no terminal outcome yet" shape `count_in_flight_by_agent`
+    treats as busy."""
+    persistence = InMemoryOrchestratorPersistence()
+    _run(persistence.commit_submission(_submission_intent()))
+
+    counts = _run(persistence.count_in_flight_by_agent())
+
+    assert counts == {AgentId("test-agent"): 1}
+
+
+def test_in_flight_count_is_empty_when_no_submissions_exist() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+
+    counts = _run(persistence.count_in_flight_by_agent())
+
+    assert counts == {}
+
+
+def test_in_flight_count_aggregates_multiple_dispatched_attempts_per_agent() -> None:
+    persistence = InMemoryOrchestratorPersistence()
+    for index in range(2):
+        _run(
+            persistence.commit_submission(
+                _submission_intent(
+                    key=_key(f"req-{index}"),
+                    workflow_id=f"wf-{index}",
+                    task_id=f"task-{index}",
+                    attempt_id=f"attempt-{index}",
+                    message_id=f"command-{index}",
+                )
+            )
+        )
+
+    counts = _run(persistence.count_in_flight_by_agent())
+
+    assert counts == {AgentId("test-agent"): 2}
+
+
+def test_in_flight_count_excludes_attempts_once_workflow_reaches_terminal_state() -> None:
+    """A COMPLETED/FAILED workflow's attempt is no longer "outstanding" --
+    the count must be read fresh against current workflow state, not the
+    attempt's own (durably DISPATCHED) record."""
+    persistence = InMemoryOrchestratorPersistence()
+    committed = _run(persistence.commit_submission(_submission_intent()))
+    workflow = committed.workflow
+    workflow.complete(result=WorkflowResult(result_data={"word_count": 1}), occurred_at=NOW)
+    persistence.workflows[workflow.workflow_id] = workflow
+
+    counts = _run(persistence.count_in_flight_by_agent())
+
+    assert counts == {}

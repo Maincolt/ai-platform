@@ -328,6 +328,7 @@ def build_platform_process(
         agent_persistence=None,
         workflow_access_query=persistence,
         submission_history_query=persistence,
+        in_flight_query=persistence,
         security_policy=LocalDevelopmentAuthorizationPolicy(),
         submission_orchestrator=submission,
         terminal_event_processor=terminal,

@@ -32,6 +32,13 @@ const lastObservedLabel = computed(() => {
   return new Date(props.agent.last_observed_at).toLocaleString();
 });
 
+const isBusy = computed(() => (props.agent.in_flight_count ?? 0) > 0);
+
+const busyLabel = computed(() => {
+  const count = props.agent.in_flight_count ?? 0;
+  return count === 1 ? "Busy · 1 in flight" : `Busy · ${count} in flight`;
+});
+
 const shortAgentId = computed(() => {
   const id = props.agent.agent_id;
   return id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
@@ -47,6 +54,11 @@ const shortAgentId = computed(() => {
         {{ statusLabel }}
       </span>
     </div>
+
+    <span v-if="isBusy" class="status-badge status-busy">
+      <span class="status-dot" />
+      {{ busyLabel }}
+    </span>
 
     <dl class="details">
       <dt>Implementation</dt>
@@ -133,6 +145,12 @@ const shortAgentId = computed(() => {
 .status-unknown {
   color: var(--status-unknown-text);
   background: var(--status-unknown-bg);
+}
+
+.status-busy {
+  color: var(--status-busy-text);
+  background: var(--status-busy-bg);
+  align-self: flex-start;
 }
 
 .details {
