@@ -36,6 +36,10 @@ from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
 )
+from ai_platform.agents.scrum_status_agent.agent import ScrumStatusAgent
+from ai_platform.agents.scrum_status_agent.capability import (
+    CAPABILITY_NAME as SCRUM_STATUS_CAPABILITY_NAME,
+)
 from ai_platform.agents.security_review_agent.agent import SecurityReviewAgent
 from ai_platform.agents.security_review_agent.capability import (
     CAPABILITY_NAME as SECURITY_REVIEW_CAPABILITY_NAME,
@@ -451,6 +455,29 @@ def test_build_executor_selects_security_review_agent_for_security_review_capabi
         persistence=object(),  # type: ignore[arg-type]
     )
     assert isinstance(executor, SecurityReviewAgent)
+
+
+def test_build_executor_selects_scrum_status_agent_for_scrum_status_capability(
+    tmp_path: Path,
+) -> None:
+    config = _agent_config(
+        tmp_path,
+        ai_router_anthropic_api_key=SecretFileReference(
+            Path(_write_secret(tmp_path, "anthropic-key", "sk-test"))
+        ),
+        ai_router_anthropic_model="claude-haiku-4-5",
+        ai_router_max_output_tokens=512,
+        github_token=SecretFileReference(Path(_write_secret(tmp_path, "github-token", "ghp_test"))),
+        github_project_owner="octocat",
+        github_project_number=1,
+    )
+    executor = _build_executor(
+        SCRUM_STATUS_CAPABILITY_NAME,
+        config=config,
+        agent_id=AgentId(config.agent_id),
+        persistence=object(),  # type: ignore[arg-type]
+    )
+    assert isinstance(executor, ScrumStatusAgent)
 
 
 def test_build_executor_selects_assignment_route_agent_for_assignment_route_capability(

@@ -34,6 +34,8 @@ technical_review_agent_producer_password="$(cat /run/secrets/kafka_technical_rev
 technical_review_agent_consumer_password="$(cat /run/secrets/kafka_technical_review_agent_consumer_password)"
 security_review_agent_producer_password="$(cat /run/secrets/kafka_security_review_agent_producer_password)"
 security_review_agent_consumer_password="$(cat /run/secrets/kafka_security_review_agent_consumer_password)"
+scrum_status_agent_producer_password="$(cat /run/secrets/kafka_scrum_status_agent_producer_password)"
+scrum_status_agent_consumer_password="$(cat /run/secrets/kafka_scrum_status_agent_consumer_password)"
 assignment_route_agent_producer_password="$(cat /run/secrets/kafka_assignment_route_agent_producer_password)"
 assignment_route_agent_consumer_password="$(cat /run/secrets/kafka_assignment_route_agent_consumer_password)"
 
@@ -102,6 +104,8 @@ echo "Formatting KRaft storage (no-op if already formatted)..."
     --add-scram "SCRAM-SHA-256=[name=technical-review-agent-consumer,password=${technical_review_agent_consumer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=security-review-agent-producer,password=${security_review_agent_producer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=security-review-agent-consumer,password=${security_review_agent_consumer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=scrum-status-agent-producer,password=${scrum_status_agent_producer_password}]" \
+    --add-scram "SCRAM-SHA-256=[name=scrum-status-agent-consumer,password=${scrum_status_agent_consumer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=assignment-route-agent-producer,password=${assignment_route_agent_producer_password}]" \
     --add-scram "SCRAM-SHA-256=[name=assignment-route-agent-consumer,password=${assignment_route_agent_consumer_password}]"
 

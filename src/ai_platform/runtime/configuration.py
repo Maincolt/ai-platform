@@ -194,6 +194,9 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
     ai_router_openai_model: str | None
     ai_router_max_output_tokens: int | None
     ai_router_provider_timeout_seconds: float | None
+    github_token: SecretFileReference | None
+    github_project_owner: str | None
+    github_project_number: int | None
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None) -> AgentRuntimeConfig:
@@ -282,6 +285,11 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
             ),
             ai_router_provider_timeout_seconds=_optional_float(
                 values, "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS", 0.1, 300.0
+            ),
+            github_token=_optional_secret(values, "AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE"),
+            github_project_owner=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER"),
+            github_project_number=_optional_int(
+                values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER", 1, 1_000_000
             ),
         )
 

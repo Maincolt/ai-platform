@@ -17,6 +17,7 @@ from ai_platform.api.models import WorkflowSubmitRequest
         "data.analysis",
         "technical.review",
         "security.review",
+        "scrum.status",
         "assignment.route",
     ],
 )

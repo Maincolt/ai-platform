@@ -11,6 +11,7 @@
 # data-analysis-agent-producer, data-analysis-agent-consumer,
 # technical-review-agent-producer, technical-review-agent-consumer,
 # security-review-agent-producer, security-review-agent-consumer,
+# scrum-status-agent-producer, scrum-status-agent-consumer,
 # assignment-route-agent-producer, assignment-route-agent-consumer)
 # receives only the topic and consumer-group access its role requires,
 # matching ADR-0005 Section 17 (Orchestrator writes commands and reads
@@ -46,6 +47,8 @@ TASK_COMMANDS_TECHNICAL_REVIEW="${PREFIX}.task-commands.technical-review.v1"
 TASK_COMMANDS_TECHNICAL_REVIEW_DLQ="${TASK_COMMANDS_TECHNICAL_REVIEW}.quarantine"
 TASK_COMMANDS_SECURITY_REVIEW="${PREFIX}.task-commands.security-review.v1"
 TASK_COMMANDS_SECURITY_REVIEW_DLQ="${TASK_COMMANDS_SECURITY_REVIEW}.quarantine"
+TASK_COMMANDS_SCRUM_STATUS="${PREFIX}.task-commands.scrum-status.v1"
+TASK_COMMANDS_SCRUM_STATUS_DLQ="${TASK_COMMANDS_SCRUM_STATUS}.quarantine"
 TASK_COMMANDS_ASSIGNMENT_ROUTE="${PREFIX}.task-commands.assignment-route.v1"
 TASK_COMMANDS_ASSIGNMENT_ROUTE_DLQ="${TASK_COMMANDS_ASSIGNMENT_ROUTE}.quarantine"
 TASK_OUTCOMES="${PREFIX}.task-outcomes.v1"
@@ -60,6 +63,7 @@ ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP="ai-platform-architecture-review-agent-c
 DATA_ANALYSIS_AGENT_COMMAND_GROUP="ai-platform-data-analysis-agent-commands"
 TECHNICAL_REVIEW_AGENT_COMMAND_GROUP="ai-platform-technical-review-agent-commands"
 SECURITY_REVIEW_AGENT_COMMAND_GROUP="ai-platform-security-review-agent-commands"
+SCRUM_STATUS_AGENT_COMMAND_GROUP="ai-platform-scrum-status-agent-commands"
 ASSIGNMENT_ROUTE_AGENT_COMMAND_GROUP="ai-platform-assignment-route-agent-commands"
 
 admin_password="$(cat /run/secrets/kafka_admin_password)"
@@ -86,6 +90,7 @@ for topic in "${TASK_COMMANDS_WORD_COUNT}" "${TASK_COMMANDS_WORD_COUNT_DLQ}" \
     "${TASK_COMMANDS_DATA_ANALYSIS}" "${TASK_COMMANDS_DATA_ANALYSIS_DLQ}" \
     "${TASK_COMMANDS_TECHNICAL_REVIEW}" "${TASK_COMMANDS_TECHNICAL_REVIEW_DLQ}" \
     "${TASK_COMMANDS_SECURITY_REVIEW}" "${TASK_COMMANDS_SECURITY_REVIEW_DLQ}" \
+    "${TASK_COMMANDS_SCRUM_STATUS}" "${TASK_COMMANDS_SCRUM_STATUS_DLQ}" \
     "${TASK_COMMANDS_ASSIGNMENT_ROUTE}" "${TASK_COMMANDS_ASSIGNMENT_ROUTE_DLQ}" \
     "${TASK_OUTCOMES}" "${TASK_OUTCOMES_DLQ}"; do
     topics --create --if-not-exists --topic "${topic}" --partitions 3 --replication-factor 1
@@ -109,6 +114,8 @@ acls --add --allow-principal "User:orchestrator-producer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_TECHNICAL_REVIEW}"
 acls --add --allow-principal "User:orchestrator-producer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_SECURITY_REVIEW}"
+acls --add --allow-principal "User:orchestrator-producer" \
+    --operation Write --operation Describe --topic "${TASK_COMMANDS_SCRUM_STATUS}"
 acls --add --allow-principal "User:orchestrator-producer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_ASSIGNMENT_ROUTE}"
 
@@ -198,6 +205,16 @@ acls --add --allow-principal "User:security-review-agent-consumer" \
     --operation Write --operation Describe --topic "${TASK_COMMANDS_SECURITY_REVIEW_DLQ}"
 acls --add --allow-principal "User:security-review-agent-consumer" \
     --operation Read --group "${SECURITY_REVIEW_AGENT_COMMAND_GROUP}"
+
+acls --add --allow-principal "User:scrum-status-agent-producer" \
+    --operation Write --operation Describe --topic "${TASK_OUTCOMES}"
+
+acls --add --allow-principal "User:scrum-status-agent-consumer" \
+    --operation Read --operation Describe --topic "${TASK_COMMANDS_SCRUM_STATUS}"
+acls --add --allow-principal "User:scrum-status-agent-consumer" \
+    --operation Write --operation Describe --topic "${TASK_COMMANDS_SCRUM_STATUS_DLQ}"
+acls --add --allow-principal "User:scrum-status-agent-consumer" \
+    --operation Read --group "${SCRUM_STATUS_AGENT_COMMAND_GROUP}"
 
 acls --add --allow-principal "User:assignment-route-agent-producer" \
     --operation Write --operation Describe --topic "${TASK_OUTCOMES}"

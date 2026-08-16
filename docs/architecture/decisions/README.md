@@ -33,6 +33,7 @@ technical and structural choices.
 | [ADR-0024](ADR-0024-submission-history.md) | Submission History — `GET /api/v1/workflows` | Accepted |
 | [ADR-0025](ADR-0025-security-review-capability.md) | `security.review` — a Security-Reviewer Review Capability | Accepted |
 | [ADR-0026](ADR-0026-autonomous-team-agents.md) | Autonomous Team Agents — Scrum Master, Product Owner, and Principal Developer Acting Without Human Approval | Accepted |
+| [ADR-0027](ADR-0027-scrum-status-capability.md) | `scrum.status` — a Read-Only, Live Scrum-Board Status Capability | Accepted |
 
 ## Naming
 
