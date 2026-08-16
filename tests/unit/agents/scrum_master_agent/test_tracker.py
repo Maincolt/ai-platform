@@ -392,3 +392,163 @@ def test_add_comment_raises_on_network_error() -> None:
 
     with pytest.raises(TrackerActionFailedError, match="request to GitHub failed"):
         _run(client.add_comment(issue_url="https://github.com/octocat/repo/issues/1", body="x"))
+
+
+# --- close_issue ---------------------------------------------------------
+
+
+def test_close_issue_patches_the_correct_repo_issue() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 1, "state": "closed"})
+
+    client = _client(handler)
+
+    _run(client.close_issue(issue_url="https://github.com/octocat/repo/issues/42"))
+
+    assert captured["method"] == "PATCH"
+    assert captured["url"] == "https://api.github.com/repos/octocat/repo/issues/42"
+    assert captured["body"] == {"state": "closed"}
+
+
+def test_close_issue_rejects_a_draft_item_url() -> None:
+    client = _client(_unreachable_comment_handler)
+
+    with pytest.raises(TrackerActionFailedError, match="not a recognized issue"):
+        _run(client.close_issue(issue_url=""))
+
+
+def test_close_issue_raises_on_non_200_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="404"):
+        _run(client.close_issue(issue_url="https://github.com/octocat/repo/issues/1"))
+
+
+def test_close_issue_raises_on_network_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="request to GitHub failed"):
+        _run(client.close_issue(issue_url="https://github.com/octocat/repo/issues/1"))
+
+
+# --- relabel ---------------------------------------------------------------
+
+
+def test_relabel_puts_the_full_replacement_label_set() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=[])
+
+    client = _client(handler)
+
+    _run(
+        client.relabel(
+            issue_url="https://github.com/octocat/repo/issues/42", labels=("bug", "priority-1")
+        )
+    )
+
+    assert captured["method"] == "PUT"
+    assert captured["url"] == "https://api.github.com/repos/octocat/repo/issues/42/labels"
+    assert captured["body"] == {"labels": ["bug", "priority-1"]}
+
+
+def test_relabel_rejects_a_draft_item_url() -> None:
+    client = _client(_unreachable_comment_handler)
+
+    with pytest.raises(TrackerActionFailedError, match="not a recognized issue"):
+        _run(client.relabel(issue_url="", labels=("bug",)))
+
+
+def test_relabel_raises_on_non_200_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="404"):
+        _run(client.relabel(issue_url="https://github.com/octocat/repo/issues/1", labels=("bug",)))
+
+
+def test_relabel_raises_on_network_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="request to GitHub failed"):
+        _run(client.relabel(issue_url="https://github.com/octocat/repo/issues/1", labels=("bug",)))
+
+
+# --- reassign ----------------------------------------------------------------
+
+
+def test_reassign_patches_the_full_replacement_assignee_set() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 1})
+
+    client = _client(handler)
+
+    _run(
+        client.reassign(
+            issue_url="https://github.com/octocat/repo/issues/42", assignees=("octocat",)
+        )
+    )
+
+    assert captured["method"] == "PATCH"
+    assert captured["url"] == "https://api.github.com/repos/octocat/repo/issues/42"
+    assert captured["body"] == {"assignees": ["octocat"]}
+
+
+def test_reassign_rejects_a_draft_item_url() -> None:
+    client = _client(_unreachable_comment_handler)
+
+    with pytest.raises(TrackerActionFailedError, match="not a recognized issue"):
+        _run(client.reassign(issue_url="", assignees=("octocat",)))
+
+
+def test_reassign_raises_on_non_200_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="404"):
+        _run(
+            client.reassign(
+                issue_url="https://github.com/octocat/repo/issues/1", assignees=("octocat",)
+            )
+        )
+
+
+def test_reassign_raises_on_network_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _client(handler)
+
+    with pytest.raises(TrackerActionFailedError, match="request to GitHub failed"):
+        _run(
+            client.reassign(
+                issue_url="https://github.com/octocat/repo/issues/1", assignees=("octocat",)
+            )
+        )

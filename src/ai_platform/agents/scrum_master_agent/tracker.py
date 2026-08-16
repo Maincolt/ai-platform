@@ -152,6 +152,27 @@ class ProjectTrackerPort(Protocol):
         `TrackerActionFailedError` on any failure."""
         ...
 
+    async def close_issue(self, *, issue_url: str) -> None:
+        """Close an existing issue or pull request. `issue_url` must be a
+        `github.com/{owner}/{repo}/issues|pull/{number}` URL. Raises
+        `TrackerActionFailedError` on any failure, including a draft-item
+        URL (empty string) that has no issue to close."""
+        ...
+
+    async def relabel(self, *, issue_url: str, labels: tuple[str, ...]) -> None:
+        """Replace an issue's label set with exactly `labels` (a full
+        replace, not an add/remove delta). Raises
+        `TrackerActionFailedError` on any failure, including a draft-item
+        URL that has no issue to relabel."""
+        ...
+
+    async def reassign(self, *, issue_url: str, assignees: tuple[str, ...]) -> None:
+        """Replace an issue's assignee set with exactly `assignees` (a
+        full replace, not an add/remove delta). Raises
+        `TrackerActionFailedError` on any failure, including a draft-item
+        URL that has no issue to reassign."""
+        ...
+
 
 def _truncate(text: str, maximum_length: int) -> str:
     return text if len(text) <= maximum_length else text[:maximum_length]
@@ -419,3 +440,59 @@ class GitHubProjectsTrackerClient:
             raise TrackerActionFailedError(
                 "add_comment", f"GitHub returned HTTP {response.status_code}: {response.text[:500]}"
             )
+
+    def _parse_issue_url(self, action: str, issue_url: str) -> tuple[str, str, str]:
+        match = _ISSUE_URL_PATTERN.match(issue_url)
+        if match is None:
+            raise TrackerActionFailedError(
+                action, f"{issue_url!r} is not a recognized issue/PR URL"
+            )
+        return match["owner"], match["repo"], match["number"]
+
+    async def _patch_issue(self, action: str, issue_url: str, payload: dict[str, object]) -> None:
+        owner, repo, number = self._parse_issue_url(action, issue_url)
+        url = f"{_GITHUB_REST_ROOT}/repos/{owner}/{repo}/issues/{number}"
+        try:
+            async with self._client() as client:
+                response = await client.patch(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+        except httpx.HTTPError as error:
+            raise TrackerActionFailedError(action, f"request to GitHub failed: {error}") from error
+        if response.status_code != 200:
+            raise TrackerActionFailedError(
+                action, f"GitHub returned HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+    async def close_issue(self, *, issue_url: str) -> None:
+        await self._patch_issue("close_issue", issue_url, {"state": "closed"})
+
+    async def relabel(self, *, issue_url: str, labels: tuple[str, ...]) -> None:
+        owner, repo, number = self._parse_issue_url("relabel", issue_url)
+        url = f"{_GITHUB_REST_ROOT}/repos/{owner}/{repo}/issues/{number}/labels"
+        try:
+            async with self._client() as client:
+                response = await client.put(
+                    url,
+                    json={"labels": list(labels)},
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+        except httpx.HTTPError as error:
+            raise TrackerActionFailedError(
+                "relabel", f"request to GitHub failed: {error}"
+            ) from error
+        if response.status_code != 200:
+            raise TrackerActionFailedError(
+                "relabel", f"GitHub returned HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+    async def reassign(self, *, issue_url: str, assignees: tuple[str, ...]) -> None:
+        await self._patch_issue("reassign", issue_url, {"assignees": list(assignees)})

@@ -29,14 +29,35 @@ from ai_platform.ports.persistence.autonomous import AutonomousStatePort
 logger = logging.getLogger(__name__)
 
 _ROLE = "scrum-master"
-_VALID_ACTIONS = frozenset({"set_status", "add_comment", "create_draft_item"})
+_VALID_ACTIONS = frozenset(
+    {
+        "set_status",
+        "add_comment",
+        "create_draft_item",
+        "close_issue",
+        "relabel",
+        "reassign",
+    }
+)
 _MAX_PROPOSED_ACTIONS = 10
 _MAX_LONG_FIELD_LENGTH = 2000
 _MAX_SHORT_FIELD_LENGTH = 200
+_MAX_LIST_ITEMS = 10
+_MAX_LIST_ITEM_LENGTH = 100
 _ACTION_REQUIRED_KEYS: dict[str, frozenset[str]] = {
     "set_status": frozenset({"action", "item_id", "status", "rationale"}),
     "add_comment": frozenset({"action", "issue_url", "body", "rationale"}),
     "create_draft_item": frozenset({"action", "title", "body", "rationale"}),
+    "close_issue": frozenset({"action", "issue_url", "rationale"}),
+    "relabel": frozenset({"action", "issue_url", "labels", "rationale"}),
+    "reassign": frozenset({"action", "issue_url", "assignees", "rationale"}),
+}
+# Keys whose value is a bounded list of strings rather than a scalar
+# string -- ADR-0029 Decision 2. Every other required key across every
+# action is a scalar string.
+_ACTION_LIST_FIELDS: dict[str, frozenset[str]] = {
+    "relabel": frozenset({"labels"}),
+    "reassign": frozenset({"assignees"}),
 }
 
 # Rough, hardcoded USD-cents-per-1000-tokens estimates (input_rate,
@@ -55,7 +76,7 @@ _DEFAULT_RATE_CENTS_PER_1K_TOKENS = (0.5, 1.5)
 @dataclass(frozen=True, slots=True)
 class ProposedAction:
     action: str
-    fields: dict[str, str]
+    fields: dict[str, str | tuple[str, ...]]
     rationale: str
 
 
@@ -85,8 +106,8 @@ def _build_action_prompt(snapshot: ProjectBoardSnapshot) -> str:
         "objects. You may propose zero actions if nothing is warranted "
         "-- do not act just to have done something. Each object must "
         'have an "action" key set to exactly one of "set_status", '
-        '"add_comment", or "create_draft_item", plus these keys for '
-        "that action (no others):\n"
+        '"add_comment", "create_draft_item", "close_issue", "relabel", '
+        'or "reassign", plus these keys for that action (no others):\n'
         '- "set_status": "item_id" (must match an item_id shown below '
         'exactly), "status" (the target status name), "rationale" (one '
         "sentence).\n"
@@ -94,7 +115,20 @@ def _build_action_prompt(snapshot: ProjectBoardSnapshot) -> str:
         'below exactly -- never a draft item), "body" (the comment '
         'text), "rationale" (one sentence).\n'
         '- "create_draft_item": "title", "body" (the draft issue '
-        'description), "rationale" (one sentence).\n\n'
+        'description), "rationale" (one sentence).\n'
+        '- "close_issue": "issue_url" (must match an item\'s url shown '
+        'below exactly -- never a draft item), "rationale" (one '
+        "sentence).\n"
+        '- "relabel": "issue_url" (must match an item\'s url shown below '
+        'exactly -- never a draft item), "labels" (a JSON array of the '
+        "complete replacement label set -- every label the issue should "
+        'have after this action, not just ones to add), "rationale" '
+        "(one sentence).\n"
+        '- "reassign": "issue_url" (must match an item\'s url shown '
+        'below exactly -- never a draft item), "assignees" (a JSON '
+        "array of the complete replacement assignee set -- every "
+        "GitHub username the issue should be assigned to after this "
+        'action, not just ones to add), "rationale" (one sentence).\n\n'
         f"Board: {snapshot.title}\n"
         f"Items:\n{item_lines}"
     )
@@ -112,6 +146,17 @@ def _strip_markdown_json_fence(text: str) -> str:
 
 def _valid_field(value: object, *, maximum_length: int) -> bool:
     return isinstance(value, str) and bool(value) and len(value) <= maximum_length
+
+
+def _valid_string_list_field(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, list):
+        return None
+    items = cast(list[object], value)
+    if len(items) > _MAX_LIST_ITEMS:
+        return None
+    if not all(_valid_field(item, maximum_length=_MAX_LIST_ITEM_LENGTH) for item in items):
+        return None
+    return tuple(cast(list[str], items))
 
 
 def _parse_proposed_actions(output_text: str) -> list[ProposedAction] | None:
@@ -146,9 +191,16 @@ def _parse_proposed_actions(output_text: str) -> list[ProposedAction] | None:
         if not _valid_field(rationale, maximum_length=_MAX_LONG_FIELD_LENGTH):
             return None
 
-        fields: dict[str, str] = {}
+        list_fields = _ACTION_LIST_FIELDS.get(action, frozenset())
+        fields: dict[str, str | tuple[str, ...]] = {}
         for key in required_keys - {"action", "rationale"}:
             value = item[key]
+            if key in list_fields:
+                items = _valid_string_list_field(value)
+                if items is None:
+                    return None
+                fields[key] = items
+                continue
             bound = (
                 _MAX_SHORT_FIELD_LENGTH
                 if key in {"item_id", "status", "title", "issue_url"}
@@ -283,28 +335,44 @@ class ScrumMasterAgent:
 
     async def _dispatch_action(self, proposal: ProposedAction) -> str:
         if proposal.action == "set_status":
-            item_id = proposal.fields["item_id"]
+            item_id = cast(str, proposal.fields["item_id"])
             await self._project_tracker.set_status(
-                item_id=item_id, status_name=proposal.fields["status"]
+                item_id=item_id, status_name=cast(str, proposal.fields["status"])
             )
             return item_id
         if proposal.action == "add_comment":
-            issue_url = proposal.fields["issue_url"]
+            issue_url = cast(str, proposal.fields["issue_url"])
             await self._project_tracker.add_comment(
-                issue_url=issue_url, body=proposal.fields["body"]
+                issue_url=issue_url, body=cast(str, proposal.fields["body"])
             )
             return issue_url
         if proposal.action == "create_draft_item":
             await self._project_tracker.create_draft_item(
-                title=proposal.fields["title"], body=proposal.fields["body"]
+                title=cast(str, proposal.fields["title"]), body=cast(str, proposal.fields["body"])
             )
-            return proposal.fields["title"]
+            return cast(str, proposal.fields["title"])
+        if proposal.action == "close_issue":
+            issue_url = cast(str, proposal.fields["issue_url"])
+            await self._project_tracker.close_issue(issue_url=issue_url)
+            return issue_url
+        if proposal.action == "relabel":
+            issue_url = cast(str, proposal.fields["issue_url"])
+            await self._project_tracker.relabel(
+                issue_url=issue_url, labels=cast(tuple[str, ...], proposal.fields["labels"])
+            )
+            return issue_url
+        if proposal.action == "reassign":
+            issue_url = cast(str, proposal.fields["issue_url"])
+            await self._project_tracker.reassign(
+                issue_url=issue_url, assignees=cast(tuple[str, ...], proposal.fields["assignees"])
+            )
+            return issue_url
         raise TrackerActionFailedError(proposal.action, "unrecognized action type")
 
 
 def _proposal_target(proposal: ProposedAction) -> str:
-    if proposal.action == "set_status":
-        return proposal.fields.get("item_id", "")
-    if proposal.action == "add_comment":
-        return proposal.fields.get("issue_url", "")
-    return proposal.fields.get("title", "")
+    if proposal.action in {"set_status"}:
+        return cast(str, proposal.fields.get("item_id", ""))
+    if proposal.action in {"add_comment", "close_issue", "relabel", "reassign"}:
+        return cast(str, proposal.fields.get("issue_url", ""))
+    return cast(str, proposal.fields.get("title", ""))
