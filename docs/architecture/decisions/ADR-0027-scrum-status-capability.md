@@ -219,10 +219,32 @@ with unit, component, and contract-level test coverage mirroring
 `runtime/composition.py`'s executor selection, reusing ADR-0017 Decision
 3's exact approved model list unchanged.
 
-Deployment wiring (Compose service, Kafka principals/topics/ACLs,
-Registry binding) follows as a separate commit/PR, per this repository's
-established pattern. Real end-to-end live verification is blocked until
-the repository owner creates a real Projects v2 board and supplies a real
-`read:project`-scoped PAT (Decision 5) — deployment will confirm
-`scrum-status-agent` reaches `READY` with placeholder credentials, but a
-genuine board-derived submission will follow once real credentials exist.
+**Update (2026-08-16) — deployment wiring landed and live-verified**: PR
+#56 added the `scrum-status-agent` Compose service (shared
+`ai-platform:sprint6` image), its own Kafka producer/consumer
+principals/topic pair/ACLs (`scrum-status-agent-producer`/`-consumer`,
+`task-commands.scrum-status.v1` + quarantine companion), and a Capability
+Registry binding (revision `local-compose-11`); the new Kafka secrets
+were declared in the top-level `secrets:` stanza from the start, and a
+`github_token` secret entry was added holding an obviously-fake
+placeholder until a real PAT exists.
+`test_kafka_acl_matrix.py` gained matching isolation cases (183 cases
+total across all ten capabilities). Deployed to the Mac Docker host:
+image rebuilt, new SCRAM credentials seeded against the already-
+provisioned broker via `kafka-configs.sh --alter`, all twelve
+agent/platform/dashboard/test-agent services recreated for the
+registry-revision-bump gotcha. `GET /api/v1/agents` reported all ten
+capabilities `READY`/`fresh: true` on the first check, confirmed
+visually via a Playwright screenshot of the live dashboard showing
+"10 / 10 online" with `scrum.status` as its own card and zero frontend
+changes needed. The full 183-case ACL matrix, including the new
+principals' isolation cases, passed live against the broker.
+
+A real submission against the placeholder credentials correctly failed
+closed as designed: `PROJECT_BOARD_FETCH_FAILED` carrying GitHub's own
+real `401 Bad credentials` response, proving the whole fetch-then-AI-call
+pipeline is wired correctly end to end short of the credential itself.
+**Genuine board-derived live verification remains blocked** until the
+repository owner creates a real GitHub Projects v2 board and supplies a
+real `read:project`-scoped PAT (Decision 5) — this is expected, not a
+defect, per this ADR's own Negative consequence.
