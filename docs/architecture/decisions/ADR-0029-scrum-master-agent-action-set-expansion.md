@@ -109,3 +109,13 @@ cannot drift from a stale view of "what labels are already there."
 ## Implementation Status
 
 Accepted; implementation follows in the accepting PR.
+
+**Update (2026-08-16):** merged (PR #61) and deployed to the Mac Docker
+host. A live cycle after redeploy showed both the board fetch and the
+Anthropic completion succeeding with the new action types available in
+the prompt/parser. No `close_issue`/`relabel`/`reassign` has fired for
+real yet — the only item on the board remains the draft test card from
+ADR-0028's live verification, and draft items have no underlying issue
+these three actions can target. Real end-to-end verification of these
+three actions awaits a real issue (not a draft item) appearing on the
+board.
