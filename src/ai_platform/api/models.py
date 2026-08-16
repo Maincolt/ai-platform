@@ -25,6 +25,7 @@ class WorkflowSubmitRequest(BaseModel):
         "architecture.review",
         "data.analysis",
         "technical.review",
+        "security.review",
         "assignment.route",
     ]
     capability_version: Literal["1.0"]

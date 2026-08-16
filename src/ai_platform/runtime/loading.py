@@ -89,6 +89,7 @@ _SUPPORTED_CAPABILITY_NAMES = frozenset(
         "architecture.review",
         "data.analysis",
         "technical.review",
+        "security.review",
         "assignment.route",
     }
 )

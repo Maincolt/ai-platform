@@ -52,6 +52,8 @@ _TASK_COMMANDS_DATA_ANALYSIS = f"{_PREFIX}.task-commands.data-analysis.v1"
 _TASK_COMMANDS_DATA_ANALYSIS_DLQ = f"{_TASK_COMMANDS_DATA_ANALYSIS}.quarantine"
 _TASK_COMMANDS_TECHNICAL_REVIEW = f"{_PREFIX}.task-commands.technical-review.v1"
 _TASK_COMMANDS_TECHNICAL_REVIEW_DLQ = f"{_TASK_COMMANDS_TECHNICAL_REVIEW}.quarantine"
+_TASK_COMMANDS_SECURITY_REVIEW = f"{_PREFIX}.task-commands.security-review.v1"
+_TASK_COMMANDS_SECURITY_REVIEW_DLQ = f"{_TASK_COMMANDS_SECURITY_REVIEW}.quarantine"
 _TASK_COMMANDS_ASSIGNMENT_ROUTE = f"{_PREFIX}.task-commands.assignment-route.v1"
 _TASK_COMMANDS_ASSIGNMENT_ROUTE_DLQ = f"{_TASK_COMMANDS_ASSIGNMENT_ROUTE}.quarantine"
 _TASK_OUTCOMES = f"{_PREFIX}.task-outcomes.v1"
@@ -65,6 +67,7 @@ _UI_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-ui-review-agent-commands"
 _ARCHITECTURE_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-architecture-review-agent-commands"
 _DATA_ANALYSIS_AGENT_COMMAND_GROUP = "ai-platform-data-analysis-agent-commands"
 _TECHNICAL_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-technical-review-agent-commands"
+_SECURITY_REVIEW_AGENT_COMMAND_GROUP = "ai-platform-security-review-agent-commands"
 _ASSIGNMENT_ROUTE_AGENT_COMMAND_GROUP = "ai-platform-assignment-route-agent-commands"
 
 _PRODUCE_TIMEOUT_SECONDS = 10.0
@@ -255,6 +258,19 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     _WriteCase("technical-review-agent-consumer", _TASK_COMMANDS_DATA_ANALYSIS_DLQ, False),
     _WriteCase("technical-review-agent-consumer", _TASK_COMMANDS_TECHNICAL_REVIEW, False),
     _WriteCase("technical-review-agent-consumer", _TASK_OUTCOMES, False),
+    # security-review-agent-producer: same shape as agent-producer, only task-outcomes.
+    _WriteCase("security-review-agent-producer", _TASK_OUTCOMES, True),
+    _WriteCase("security-review-agent-producer", _TASK_COMMANDS_SECURITY_REVIEW, False),
+    _WriteCase("security-review-agent-producer", _TASK_COMMANDS_WORD_COUNT, False),
+    _WriteCase("security-review-agent-producer", _TASK_COMMANDS_SECURITY_REVIEW_DLQ, False),
+    # security-review-agent-consumer: allowed to write only its own
+    # commands quarantine topic -- never another capability's (ADR-0014
+    # Section 6's isolation guarantee, now proven for a ninth capability).
+    _WriteCase("security-review-agent-consumer", _TASK_COMMANDS_SECURITY_REVIEW_DLQ, True),
+    _WriteCase("security-review-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
+    _WriteCase("security-review-agent-consumer", _TASK_COMMANDS_TECHNICAL_REVIEW_DLQ, False),
+    _WriteCase("security-review-agent-consumer", _TASK_COMMANDS_SECURITY_REVIEW, False),
+    _WriteCase("security-review-agent-consumer", _TASK_OUTCOMES, False),
     # assignment-route-agent-producer: same shape as agent-producer, only task-outcomes.
     _WriteCase("assignment-route-agent-producer", _TASK_OUTCOMES, True),
     _WriteCase("assignment-route-agent-producer", _TASK_COMMANDS_ASSIGNMENT_ROUTE, False),
@@ -262,7 +278,7 @@ _WRITE_MATRIX: tuple[_WriteCase, ...] = (
     _WriteCase("assignment-route-agent-producer", _TASK_COMMANDS_ASSIGNMENT_ROUTE_DLQ, False),
     # assignment-route-agent-consumer: allowed to write only its own
     # commands quarantine topic -- never another capability's (ADR-0014
-    # Section 6's isolation guarantee, now proven for an eighth capability).
+    # Section 6's isolation guarantee, now proven for a tenth capability).
     _WriteCase("assignment-route-agent-consumer", _TASK_COMMANDS_ASSIGNMENT_ROUTE_DLQ, True),
     _WriteCase("assignment-route-agent-consumer", _TASK_COMMANDS_WORD_COUNT_DLQ, False),
     _WriteCase("assignment-route-agent-consumer", _TASK_COMMANDS_TECHNICAL_REVIEW_DLQ, False),
@@ -468,6 +484,63 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         _TECHNICAL_REVIEW_AGENT_COMMAND_GROUP,
         False,
     ),
+    # security-review-agent-consumer: allowed on its own capability's
+    # topic/group, denied on the other seven -- the isolation guarantee
+    # proven across all eight review/analysis capabilities now.
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_SECURITY_REVIEW,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        True,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_WORD_COUNT,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_SUMMARIZE,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_REVIEW,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_UI_REVIEW,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_ARCHITECTURE_REVIEW,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_DATA_ANALYSIS,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_COMMANDS_TECHNICAL_REVIEW,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-consumer",
+        _TASK_OUTCOMES,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
     # assignment-route-agent-consumer: allowed on its own capability's
     # topic/group, denied on the other seven -- the isolation guarantee
     # proven across all eight capabilities now.
@@ -549,6 +622,12 @@ _READ_MATRIX: tuple[_ReadCase, ...] = (
         "technical-review-agent-producer",
         _TASK_OUTCOMES,
         _TECHNICAL_REVIEW_AGENT_COMMAND_GROUP,
+        False,
+    ),
+    _ReadCase(
+        "security-review-agent-producer",
+        _TASK_OUTCOMES,
+        _SECURITY_REVIEW_AGENT_COMMAND_GROUP,
         False,
     ),
     _ReadCase(

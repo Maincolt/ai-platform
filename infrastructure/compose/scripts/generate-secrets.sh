@@ -50,6 +50,8 @@ write_if_absent "kafka_data_analysis_agent_producer_password.txt"
 write_if_absent "kafka_data_analysis_agent_consumer_password.txt"
 write_if_absent "kafka_technical_review_agent_producer_password.txt"
 write_if_absent "kafka_technical_review_agent_consumer_password.txt"
+write_if_absent "kafka_security_review_agent_producer_password.txt"
+write_if_absent "kafka_security_review_agent_consumer_password.txt"
 write_if_absent "kafka_assignment_route_agent_producer_password.txt"
 write_if_absent "kafka_assignment_route_agent_consumer_password.txt"
 

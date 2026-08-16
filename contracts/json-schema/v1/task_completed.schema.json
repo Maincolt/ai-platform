@@ -82,7 +82,7 @@
           "description": "Timestamp of the first accepted completion."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review", "assignment.route"]
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review", "security.review", "assignment.route"]
         },
         "capability_version": {
           "const": "1.0"
@@ -328,6 +328,39 @@
     },
     {
       "if": {
+        "properties": { "payload": { "properties": { "capability": { "const": "security.review" } } } }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "result": {
+                "additionalProperties": false,
+                "required": ["findings"],
+                "properties": {
+                  "findings": {
+                    "type": "array",
+                    "description": "Advisory only (ADR-0025 Decision 2): never applied automatically.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["location", "summary", "severity"],
+                      "properties": {
+                        "location": { "type": "string", "minLength": 1, "maxLength": 200 },
+                        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "severity": { "enum": ["low", "medium", "high"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
         "properties": { "payload": { "properties": { "capability": { "const": "assignment.route" } } } }
       },
       "then": {
@@ -354,7 +387,8 @@
                             "ui.review",
                             "architecture.review",
                             "data.analysis",
-                            "technical.review"
+                            "technical.review",
+                            "security.review"
                           ]
                         },
                         "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 }

@@ -56,6 +56,10 @@ from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
 )
+from ai_platform.agents.security_review_agent.agent import SecurityReviewAgent
+from ai_platform.agents.security_review_agent.capability import (
+    CAPABILITY_NAME as SECURITY_REVIEW_CAPABILITY_NAME,
+)
 from ai_platform.agents.summarize_agent.agent import SummarizeAgent
 from ai_platform.agents.summarize_agent.capability import (
     CAPABILITY_NAME as SUMMARIZE_CAPABILITY_NAME,
@@ -727,6 +731,16 @@ def _build_executor(
         )
     if capability_name == TECHNICAL_REVIEW_CAPABILITY_NAME:
         return TechnicalReviewAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
+    if capability_name == SECURITY_REVIEW_CAPABILITY_NAME:
+        return SecurityReviewAgent(
             environment=config.environment,
             agent_deployment_id=agent_id,
             agent_component=config.agent_component,

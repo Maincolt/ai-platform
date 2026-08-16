@@ -1,20 +1,18 @@
-"""The Assignment Route Agent execution lifecycle (ADR-0023, mirroring
+"""The Security Review Agent execution lifecycle (ADR-0025, mirroring
 `ai_platform.agents.technical_review_agent.agent`).
 
 Ordering, the durable pre-call claim, and the ADR-0016 unknown-outcome
 handling are identical to `TechnicalReviewAgent` -- see that module's
-docstring for the full rationale, which applies unchanged here. The
-difference is the result shape: instead of a findings list about the
-input itself, this Agent returns a *recommendation* list naming which of
-the team's other capabilities should look at the input
-(`{capability, rationale}` instead of `{component, summary, severity}`).
-This Agent never dispatches anything itself -- it has no access to the
-Orchestrator or Workflow API, only the AI Router, same as every other
-capability (ADR-0023 Decision 1/5). A successful provider call is not
-automatically a successful completion here either: the raw response text
-must still parse into a valid recommendation list (see
-`_parse_recommendations` below), same strict-parse discipline as every
-prior AI-backed capability.
+docstring for the full rationale, which applies unchanged here. The one
+difference: `security.review`'s findings use a free-text `location`
+locator instead of `technical.review`'s `component`, and the review
+prompt takes an adversarial security lens (injection, auth/authz gaps,
+secrets handling, insecure defaults, SSRF/path-traversal-shaped issues,
+unsafe deserialization) instead of a buildability lens. A successful
+provider call is not automatically a successful completion here either:
+the raw response text must still parse into a valid findings list (see
+`_parse_findings` below), same strict-parse discipline as every prior
+AI-backed capability.
 """
 
 import json
@@ -23,19 +21,19 @@ from datetime import datetime
 from enum import Enum
 from typing import cast
 
-from ai_platform.agents.assignment_route_agent.capability import (
+from ai_platform.agents.domain.outcomes import AgentCompletedReceipt, AgentEventOutboxRecord
+from ai_platform.agents.security_review_agent.capability import (
     CAPABILITY_NAME,
     CAPABILITY_VERSION,
 )
-from ai_platform.agents.assignment_route_agent.errors import (
+from ai_platform.agents.security_review_agent.errors import (
     CapabilityMismatchError,
     CommandIdentityConflictError,
     CommandIntegrityError,
     MissingOutcomeInvariantError,
     ProviderCallReconciliationPendingError,
 )
-from ai_platform.agents.assignment_route_agent.ids import IdentifierFactory
-from ai_platform.agents.domain.outcomes import AgentCompletedReceipt, AgentEventOutboxRecord
+from ai_platform.agents.security_review_agent.ids import IdentifierFactory
 from ai_platform.agents.test_agent.execution_context import ExecuteTaskContext
 from ai_platform.agents.test_agent.messages import (
     build_task_completed_payload,
@@ -59,27 +57,15 @@ from ai_platform.shared.messages import canonical_message_bytes
 from ai_platform.shared.outcomes import AgentOutcome
 
 _DEADLINE_FAILURE_CODE = "TASK_RESULT_DEADLINE_EXCEEDED"
-_MALFORMED_OUTPUT_FAILURE_CODE = "MALFORMED_ASSIGNMENT_ROUTE_OUTPUT"
-_MAX_RATIONALE_LENGTH = 2000
-_MAX_RECOMMENDATIONS = 6
-_REQUIRED_RECOMMENDATION_KEYS = frozenset({"capability", "rationale"})
-# The team `assignment.route` may route to: every real content-review
-# capability except itself and text.word-count (a trivial deterministic
-# capability, not a genuine assignment target -- ADR-0023 Decision 2).
-_ELIGIBLE_CAPABILITIES = frozenset(
-    {
-        "text.summarize",
-        "code.review",
-        "ui.review",
-        "architecture.review",
-        "data.analysis",
-        "technical.review",
-        "security.review",
-    }
-)
+_MALFORMED_OUTPUT_FAILURE_CODE = "MALFORMED_SECURITY_REVIEW_OUTPUT"
+_VALID_SEVERITIES = frozenset({"low", "medium", "high"})
+_MAX_FINDING_SUMMARY_LENGTH = 2000
+_MAX_FINDING_LOCATION_LENGTH = 200
+_MAX_FINDINGS = 100
+_REQUIRED_FINDING_KEYS = frozenset({"location", "summary", "severity"})
 
 
-class AssignmentRouteAgentDisposition(Enum):
+class SecurityReviewAgentDisposition(Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     DUPLICATE_RESOLVED = "DUPLICATE_RESOLVED"
@@ -87,8 +73,8 @@ class AssignmentRouteAgentDisposition(Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class AssignmentRouteAgentResult:
-    disposition: AssignmentRouteAgentDisposition
+class SecurityReviewAgentResult:
+    disposition: SecurityReviewAgentDisposition
     outcome: AgentOutcome
     """Always present: every code path either computes a fresh outcome or
     raises MissingOutcomeInvariantError rather than returning without one."""
@@ -115,40 +101,32 @@ def _strip_markdown_json_fence(text: str) -> str:
     return "\n".join(lines[1:-1]).strip()
 
 
-def _build_routing_prompt(assignment: str) -> str:
+def _build_review_prompt(content: str) -> str:
     return (
-        "You are a routing coordinator for a team of specialist review "
-        "capabilities. Read the following assignment description and "
-        "identify which of these capabilities should look at it. Only "
-        "include capabilities that are genuinely relevant -- usually one "
-        "to three, not all of them by default.\n\n"
-        "Available capabilities:\n"
-        '- "text.summarize": summarize long text/content.\n'
-        '- "code.review": review a diff/patch for code quality, bugs, '
-        "security issues.\n"
-        '- "ui.review": review a UI/UX/accessibility concern.\n'
-        '- "architecture.review": review a proposed architectural change, '
-        "design doc, or ADR draft.\n"
-        '- "data.analysis": review a dataset excerpt, metrics summary, or '
-        "usage/cost report.\n"
-        '- "technical.review": review a proposed data model/schema/API '
-        "contract/service-boundary design.\n"
-        '- "security.review": review a code diff, configuration file, or '
-        "infrastructure-as-code snippet for security concerns.\n\n"
-        "Respond with ONLY a JSON array (no prose, no markdown fences) of "
-        "recommendation objects. Each object must have exactly these "
-        'keys: "capability" (one of the exact capability names listed '
-        'above) and "rationale" (string, one sentence explaining why that '
-        "capability applies). Return an empty array [] only if truly none "
-        f"apply.\n\nAssignment:\n{assignment}"
+        "You are a meticulous, adversarial security reviewer. Review the "
+        "following code diff, configuration file, infrastructure-as-code "
+        "snippet, or design description and respond with ONLY a JSON "
+        "array (no prose, no markdown fences) of finding objects. Each "
+        'object must have exactly these keys: "location" (string, a '
+        'short label for where the concern is, e.g. "Dockerfile line '
+        '12", "POST /api/v1/workflows input validation", "hardcoded '
+        'credential in config.py"), "summary" (string, one sentence '
+        'describing the security concern), and "severity" (one of '
+        '"low", "medium", "high"). Focus specifically on security: '
+        "injection vulnerabilities (SQL, command, template), "
+        "authentication/authorization gaps, secrets or credential "
+        "handling, insecure defaults, SSRF or path-traversal-shaped "
+        "issues, and unsafe deserialization -- not general code quality "
+        "or style. Return an empty array [] if there are no findings."
+        f"\n\nContent:\n{content}"
     )
 
 
-def _parse_recommendations(output_text: str) -> list[dict[str, object]] | None:
-    """Parse and validate the provider's raw response into a recommendation list.
+def _parse_findings(output_text: str) -> list[dict[str, object]] | None:
+    """Parse and validate the provider's raw response into a findings list.
 
     Returns `None` on any shape/content mismatch -- the caller treats that
-    as a failed completion (`MALFORMED_ASSIGNMENT_ROUTE_OUTPUT`), never as
+    as a failed completion (`MALFORMED_SECURITY_REVIEW_OUTPUT`), never as
     a partial or best-effort result.
     """
     try:
@@ -158,40 +136,44 @@ def _parse_recommendations(output_text: str) -> list[dict[str, object]] | None:
     if not isinstance(parsed, list):
         return None
     candidates = cast(list[object], parsed)
-    if len(candidates) > _MAX_RECOMMENDATIONS:
+    if len(candidates) > _MAX_FINDINGS:
         return None
 
-    recommendations: list[dict[str, object]] = []
-    seen_capabilities: set[str] = set()
+    findings: list[dict[str, object]] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
             return None
         item = cast(dict[str, object], candidate)
-        if frozenset(item.keys()) != _REQUIRED_RECOMMENDATION_KEYS:
+        if frozenset(item.keys()) != _REQUIRED_FINDING_KEYS:
             return None
-        capability_value = item["capability"]
-        rationale_value = item["rationale"]
-        if capability_value not in _ELIGIBLE_CAPABILITIES:
-            return None
-        if capability_value in seen_capabilities:
-            return None
+        location_value = item["location"]
+        summary_value = item["summary"]
+        severity_value = item["severity"]
         if (
-            not isinstance(rationale_value, str)
-            or not rationale_value
-            or len(rationale_value) > _MAX_RATIONALE_LENGTH
+            not isinstance(location_value, str)
+            or not location_value
+            or len(location_value) > _MAX_FINDING_LOCATION_LENGTH
         ):
             return None
-        seen_capabilities.add(cast(str, capability_value))
-        recommendations.append(
+        if (
+            not isinstance(summary_value, str)
+            or not summary_value
+            or len(summary_value) > _MAX_FINDING_SUMMARY_LENGTH
+        ):
+            return None
+        if severity_value not in _VALID_SEVERITIES:
+            return None
+        findings.append(
             {
-                "capability": capability_value,
-                "rationale": rationale_value,
+                "location": location_value,
+                "summary": summary_value,
+                "severity": severity_value,
             }
         )
-    return recommendations
+    return findings
 
 
-class AssignmentRouteAgent:
+class SecurityReviewAgent:
     def __init__(
         self,
         *,
@@ -215,7 +197,7 @@ class AssignmentRouteAgent:
 
     async def handle(
         self, context: ExecuteTaskContext, *, now: datetime
-    ) -> AssignmentRouteAgentResult:
+    ) -> SecurityReviewAgentResult:
         if (
             context.capability_name != CAPABILITY_NAME
             or context.capability_version != CAPABILITY_VERSION
@@ -233,7 +215,7 @@ class AssignmentRouteAgent:
                 failure_code=_DEADLINE_FAILURE_CODE,
                 summary="Task result deadline elapsed before execution.",
             )
-            disposition = AssignmentRouteAgentDisposition.DEADLINE_EXPIRED_BEFORE_EXECUTION
+            disposition = SecurityReviewAgentDisposition.DEADLINE_EXPIRED_BEFORE_EXECUTION
             usage: ProviderCallUsageRecord | None = None
         else:
             claim = await self._outcome_transaction.claim_provider_call(
@@ -263,7 +245,7 @@ class AssignmentRouteAgent:
             else:
                 completion = await self._ai_router.complete(
                     AICompletionRequest(
-                        prompt=_build_routing_prompt(context.input_text),
+                        prompt=_build_review_prompt(context.input_text),
                         max_output_tokens=self._max_output_tokens,
                         idempotency_key=str(context.task_attempt_id),
                         deadline=context.task_result_deadline,
@@ -282,25 +264,24 @@ class AssignmentRouteAgent:
                     else None
                 )
                 if completion.output_text is not None:
-                    recommendations = _parse_recommendations(completion.output_text)
-                    if recommendations is not None:
+                    findings = _parse_findings(completion.output_text)
+                    if findings is not None:
                         outcome = AgentOutcome(
                             task_attempt_id=context.task_attempt_id,
                             completed_at=now,
-                            result_data={"assignments": recommendations},
+                            result_data={"findings": findings},
                         )
-                        disposition = AssignmentRouteAgentDisposition.COMPLETED
+                        disposition = SecurityReviewAgentDisposition.COMPLETED
                     else:
                         outcome = AgentOutcome(
                             task_attempt_id=context.task_attempt_id,
                             completed_at=now,
                             failure_code=_MALFORMED_OUTPUT_FAILURE_CODE,
                             summary=(
-                                "The AI Router's response did not parse into a valid "
-                                "recommendation list."
+                                "The AI Router's response did not parse into a valid findings list."
                             ),
                         )
-                        disposition = AssignmentRouteAgentDisposition.FAILED
+                        disposition = SecurityReviewAgentDisposition.FAILED
                 else:
                     assert completion.failure_code is not None
                     outcome = AgentOutcome(
@@ -309,7 +290,7 @@ class AssignmentRouteAgent:
                         failure_code=completion.failure_code.value,
                         summary="The AI Router returned a classified failure.",
                     )
-                    disposition = AssignmentRouteAgentDisposition.FAILED
+                    disposition = SecurityReviewAgentDisposition.FAILED
 
         completed_work = self._build_completed_work(context, outcome, now=now)
         committed = await self._outcome_transaction.commit_outcome(
@@ -330,7 +311,7 @@ class AssignmentRouteAgent:
         )
         if not committed.created:
             return self._resolve_duplicate(context, committed.completed_work)
-        return AssignmentRouteAgentResult(
+        return SecurityReviewAgentResult(
             disposition=disposition, outcome=committed.completed_work.outcome
         )
 
@@ -352,7 +333,7 @@ class AssignmentRouteAgent:
 
     def _resolve_duplicate(
         self, context: ExecuteTaskContext, completed_work: CompletedAgentWork
-    ) -> AssignmentRouteAgentResult:
+    ) -> SecurityReviewAgentResult:
         existing_receipt = completed_work.receipt
         if existing_receipt.command_message_id != context.command_message_id:
             raise CommandIdentityConflictError(
@@ -363,8 +344,8 @@ class AssignmentRouteAgent:
 
         if completed_work.outcome.task_attempt_id != context.task_attempt_id:
             raise MissingOutcomeInvariantError(context.task_attempt_id)
-        return AssignmentRouteAgentResult(
-            disposition=AssignmentRouteAgentDisposition.DUPLICATE_RESOLVED,
+        return SecurityReviewAgentResult(
+            disposition=SecurityReviewAgentDisposition.DUPLICATE_RESOLVED,
             outcome=completed_work.outcome,
         )
 
