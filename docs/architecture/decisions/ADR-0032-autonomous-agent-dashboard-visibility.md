@@ -150,3 +150,16 @@ never held one) for a feature not requested. The kill switch stays
 ## Implementation Status
 
 Accepted; implementation follows in the accepting PR.
+
+**Update (2026-08-16):** merged (PR #64) and deployed to the Mac Docker
+host (`platform`/`dashboard` rebuilt and recreated together, per the
+`network_mode: "service:platform"` rule). Live-verified via a Playwright
+screenshot: `GET /api/v1/agents` is unaffected (still "10 / 10 online"),
+and the new "Autonomous Agents" tab renders real data end to end —
+kill switch correctly reported disengaged, all three role cards showing
+real (zero) today-usage against the 10-action/100¢ caps, and the recent-
+actions table showing the real `scrum-master`/`set_status`/`PVTI_test`/
+`SUCCEEDED` audit row. `platform`'s new second Postgres pool (the
+`agent`-schema read) worked on the first real deployment — no
+configuration issue with the shared `dsn_agent` secret now mounted into
+a second process.
