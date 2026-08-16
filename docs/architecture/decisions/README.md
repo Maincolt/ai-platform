@@ -37,6 +37,7 @@ technical and structural choices.
 | [ADR-0028](ADR-0028-scrum-master-agent-phase-2.md) | `scrum-master-agent` — ADR-0026 Phase 2, Real Autonomous Board Write Access | Accepted |
 | [ADR-0029](ADR-0029-scrum-master-agent-action-set-expansion.md) | `scrum-master-agent` — Rounding Out the Action Set (close/relabel/reassign) | Accepted |
 | [ADR-0030](ADR-0030-product-owner-agent-phase-3.md) | `product-owner-agent` — ADR-0026 Phase 3 | Accepted |
+| [ADR-0031](ADR-0031-principal-developer-agent-phase-4.md) | `principal-developer-agent` — ADR-0026 Phase 4 | Accepted |
 
 ## Naming
 

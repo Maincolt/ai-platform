@@ -23,6 +23,7 @@ ai-platform = "ai_platform.runtime.platform_main:main"
 ai-platform-test-agent = "ai_platform.runtime.agent_main:main"
 ai-platform-scrum-master-agent = "ai_platform.runtime.scrum_master_main:main"
 ai-platform-product-owner-agent = "ai_platform.runtime.product_owner_main:main"
+ai-platform-principal-developer-agent = "ai_platform.runtime.principal_developer_main:main"
 
 [dependency-groups]
 dev = [

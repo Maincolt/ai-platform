@@ -484,6 +484,53 @@ class ProductOwnerRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PrincipalDeveloperRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
+    """ADR-0031: adds `principal-developer-agent`'s GitHub source-control
+    credential to the shared autonomous-role base -- unlike
+    `ScrumMasterRuntimeConfig`/`ProductOwnerRuntimeConfig`, this role
+    operates on a repository's pull requests directly, never the
+    Projects v2 board, so it needs a repo owner/name pair instead of a
+    project owner/number pair, and no project number at all."""
+
+    github_token: SecretFileReference | None
+    github_repo_owner: str | None
+    github_repo_name: str | None
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> PrincipalDeveloperRuntimeConfig:
+        values = os.environ if environment is None else environment
+        base = _autonomous_role_base(values)
+        return cls(
+            environment=base.environment,
+            database_dsn=base.database_dsn,
+            database_pool_min_size=base.database_pool_min_size,
+            database_pool_max_size=base.database_pool_max_size,
+            database_timeout_seconds=base.database_timeout_seconds,
+            agent_id=base.agent_id,
+            agent_component=base.agent_component,
+            readiness_host=base.readiness_host,
+            readiness_port=base.readiness_port,
+            readiness_credential=base.readiness_credential,
+            startup_timeout_seconds=base.startup_timeout_seconds,
+            shutdown_grace_seconds=base.shutdown_grace_seconds,
+            ai_router_anthropic_api_key=base.ai_router_anthropic_api_key,
+            ai_router_anthropic_model=base.ai_router_anthropic_model,
+            ai_router_openai_api_key=base.ai_router_openai_api_key,
+            ai_router_openai_model=base.ai_router_openai_model,
+            ai_router_max_output_tokens=base.ai_router_max_output_tokens,
+            ai_router_provider_timeout_seconds=base.ai_router_provider_timeout_seconds,
+            autonomous_poll_interval_seconds=base.autonomous_poll_interval_seconds,
+            autonomous_max_actions_per_day=base.autonomous_max_actions_per_day,
+            autonomous_max_spend_cents_per_day=base.autonomous_max_spend_cents_per_day,
+            github_token=_optional_secret(values, "AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE"),
+            github_repo_owner=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_REPO_OWNER"),
+            github_repo_name=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_REPO_NAME"),
+        )
+
+
 def _common(values: Mapping[str, str], *, prefix: str) -> CommonRuntimeConfig:
     environment = _required(values, "AI_PLATFORM_ENVIRONMENT")
     if environment != "development":
