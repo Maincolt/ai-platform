@@ -190,3 +190,16 @@ reasonable future enhancement, not a Phase 4 requirement.
 Accepted; implementation follows in the accepting PR. Per Decision 5,
 this role is deployed with a placeholder credential only — no real PAT,
 no real merge, until an explicit separate go-ahead.
+
+**Update (2026-08-16):** merged (PR #63) and deployed to the Mac Docker
+host with the obviously-fake placeholder credential Decision 5
+requires. The service reaches `ready: true` on its healthcheck; a live
+cycle correctly failed closed with a real GitHub `401 Bad credentials`
+on its pull-request fetch, exactly like `product-owner-agent`'s
+placeholder did — no merge, no request-changes, no AI Router call was
+even reached. This completes the build-and-deploy portion of all three
+phases (2, 3, 4) ADR-0026 originally staged; ADR-0026 Phase 5
+(deployment-capable autonomy) remains explicitly out of scope for a
+future ADR. This role's first real credential, and therefore its first
+real autonomous merge against this repository's actual `main` branch,
+still awaits an explicit, separate go-ahead from the repository owner.
