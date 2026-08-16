@@ -14,7 +14,7 @@ is recorded to the durable audit log before the cycle ends.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from ai_platform.agents.scrum_master_agent.errors import (
@@ -173,11 +173,14 @@ class ScrumMasterAgent:
         project_tracker: ProjectTrackerPort,
         ai_router: AIRouterPort,
         max_output_tokens: int,
+        provider_deadline_seconds: float,
         max_actions_per_day: int,
         max_spend_cents_per_day: int,
     ) -> None:
         if max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be positive")
+        if provider_deadline_seconds <= 0:
+            raise ValueError("provider_deadline_seconds must be positive")
         if max_actions_per_day <= 0:
             raise ValueError("max_actions_per_day must be positive")
         if max_spend_cents_per_day <= 0:
@@ -187,6 +190,7 @@ class ScrumMasterAgent:
         self._project_tracker = project_tracker
         self._ai_router = ai_router
         self._max_output_tokens = max_output_tokens
+        self._provider_deadline_seconds = provider_deadline_seconds
         self._max_actions_per_day = max_actions_per_day
         self._max_spend_cents_per_day = max_spend_cents_per_day
 
@@ -216,7 +220,7 @@ class ScrumMasterAgent:
                 prompt=_build_action_prompt(snapshot),
                 max_output_tokens=self._max_output_tokens,
                 idempotency_key=f"scrum-master-{now.isoformat()}",
-                deadline=now,
+                deadline=now + timedelta(seconds=self._provider_deadline_seconds),
                 classification=DataClassification.NO_SPECIAL_HANDLING,
             )
         )

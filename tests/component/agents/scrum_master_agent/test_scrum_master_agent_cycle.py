@@ -176,6 +176,7 @@ def _build_agent(
         project_tracker=tracker,
         ai_router=ai_router if ai_router is not None else _UnreachableAIRouter(),
         max_output_tokens=256,
+        provider_deadline_seconds=20.0,
         max_actions_per_day=max_actions_per_day,
         max_spend_cents_per_day=max_spend_cents_per_day,
     )

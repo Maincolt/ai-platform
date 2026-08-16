@@ -707,6 +707,9 @@ def build_scrum_master_process(
         project_tracker=tracker,
         ai_router=_build_ai_router(config),
         max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
         max_actions_per_day=config.autonomous_max_actions_per_day,
         max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
     )
@@ -981,6 +984,13 @@ def _require_ai_router_int(config: _AIRouterConfig, field_name: str) -> int:
     if value is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
     return cast(int, value)
+
+
+def _require_ai_router_float(config: _AIRouterConfig, field_name: str) -> float:
+    value = getattr(config, field_name)
+    if value is None:
+        raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
+    return cast(float, value)
 
 
 # ADR-0027 Decision 4: unlike ui.review's hardcoded review target, the
