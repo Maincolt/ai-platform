@@ -639,14 +639,16 @@ failure from a too-fast or too-slow crash window on a given run is a known,
 accepted flake in this suite, not a sign the environment is broken — rerun
 once if either test fails.
 
-## 11. Autonomous Agent Operations (ADR-0026/ADR-0028)
+## 11. Autonomous Agent Operations (ADR-0026/ADR-0028/ADR-0030)
 
-`scrum-master-agent` is the first Agent deployable that takes real,
-autonomous write actions with no per-action human approval — three
-independent, DB-backed safety mechanisms exist for operating it. All
-commands below run against `agent.autonomous_*` tables (migration 0009)
-via `docker exec` into the running `postgres` container, the same
-pattern Section 3/5 already use.
+`scrum-master-agent` was the first Agent deployable that takes real,
+autonomous write actions with no per-action human approval;
+`product-owner-agent` (ADR-0030) is the second, sharing the exact same
+`agent.autonomous_*` tables (migration 0009) via its own `role='product-owner'`
+rows — three independent, DB-backed safety mechanisms exist for operating
+either of them. All commands below run against those tables via
+`docker exec` into the running `postgres` container, the same pattern
+Section 3/5 already use.
 
 ### Checking whether the kill switch is engaged
 
@@ -657,8 +659,10 @@ docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
 
 ### Engaging the kill switch (halts all autonomous action-taking immediately)
 
-No redeploy needed — `scrum-master-agent`'s `PeriodicService` checks this
-at the start of every cycle, before any GitHub call:
+No redeploy needed — every autonomous role's `PeriodicService` checks
+this platform-wide flag at the start of every cycle, before any GitHub
+call. Engaging it halts `scrum-master-agent` **and** `product-owner-agent`
+together, not one at a time:
 
 ```bash
 docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
@@ -674,9 +678,12 @@ docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
   -c "SELECT role, day, actions_used, spend_cents_used FROM agent.autonomous_role_budget ORDER BY day DESC LIMIT 7;"
 ```
 
-`spend_cents_used` is an estimate from a hardcoded per-model rate table
-(`src/ai_platform/agents/scrum_master_agent/agent.py`), not exact
-provider billing (ADR-0028 Decision 2) — treat `actions_used` against
+Filter with `WHERE role = 'scrum-master'` or `WHERE role = 'product-owner'`
+to check one role in isolation — each role's daily cap is tracked and
+enforced independently, not shared. `spend_cents_used` is an estimate
+from a hardcoded per-model rate table
+(`src/ai_platform/agents/_autonomous_shared.py`), not exact provider
+billing (ADR-0028 Decision 2) — treat `actions_used` against
 `AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY` as the primary signal.
 
 ### Reading "what did it actually do" — the audit log
@@ -689,4 +696,5 @@ docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
 One row per attempted action, win or lose, append-only — this is the
 after-the-fact record ADR-0026 Decision 7 relies on since there is no
 per-action human checkpoint. `inputs` (jsonb) holds the full proposed
-action fields including the model's own stated `rationale`.
+action fields including the model's own stated `rationale`. Add
+`WHERE role = '...'` to see one role's actions only.

@@ -53,6 +53,8 @@ from ai_platform.agents.data_analysis_agent.agent import DataAnalysisAgent
 from ai_platform.agents.data_analysis_agent.capability import (
     CAPABILITY_NAME as DATA_ANALYSIS_CAPABILITY_NAME,
 )
+from ai_platform.agents.product_owner_agent.agent import ProductOwnerAgent
+from ai_platform.agents.product_owner_agent.tracker import GitHubProjectsBacklogClient
 from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
@@ -110,6 +112,7 @@ from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
     CommonRuntimeConfig,
     PlatformRuntimeConfig,
+    ProductOwnerRuntimeConfig,
     RuntimeConfigurationError,
     ScrumMasterRuntimeConfig,
     SecretFileReference,
@@ -758,6 +761,98 @@ def build_scrum_master_process(
     )
 
 
+def build_product_owner_process(
+    config: ProductOwnerRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `product-owner-agent` (ADR-0026 Phase 3, ADR-0030).
+
+    Mirrors `build_scrum_master_process` exactly: same zero-Kafka,
+    zero-Capability-Registry, `PeriodicService`-only shape. The two
+    processes are structurally identical (same board type, same kill-
+    switch/budget/audit-trail mechanisms) but never share code beyond
+    that shape -- separate domain package, separate credential, separate
+    role name -- matching this platform's existing convention of
+    parallel, self-contained Agent packages."""
+    if config.github_token is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
+    if config.github_project_owner is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_owner")
+    if config.github_project_number is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_number")
+
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    tracker = GitHubProjectsBacklogClient(
+        token=config.github_token.read(),
+        owner=config.github_project_owner,
+        project_number=config.github_project_number,
+    )
+    product_owner = ProductOwnerAgent(
+        agent_deployment_id=config.agent_id,
+        state=state,
+        backlog_tracker=tracker,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
+        max_actions_per_day=config.autonomous_max_actions_per_day,
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            product_owner.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
 def _build_executor(
     capability_name: str,
     *,
@@ -911,12 +1006,14 @@ _APPROVED_ANTHROPIC_MODELS = frozenset({"claude-haiku-4-5"})
 _APPROVED_OPENAI_MODELS = frozenset({"gpt-5-mini"})
 
 
-# Both `AgentRuntimeConfig` and `ScrumMasterRuntimeConfig` declare the
-# same six `ai_router_*` fields; this alias lets the AI Router builder
-# helpers below serve either without a shared base class -- ADR-0028's
-# `ScrumMasterRuntimeConfig` deliberately does not subclass
-# `CommonRuntimeConfig`/`AgentRuntimeConfig` (see its own docstring).
-_AIRouterConfig = AgentRuntimeConfig | ScrumMasterRuntimeConfig
+# `AgentRuntimeConfig` and every `_AutonomousRoleRuntimeConfigBase`
+# subclass (`ScrumMasterRuntimeConfig`, `ProductOwnerRuntimeConfig`, ...)
+# all declare the same six `ai_router_*` fields; this alias lets the AI
+# Router builder helpers below serve any of them without a shared base
+# class spanning `CommonRuntimeConfig` and the autonomous-role configs
+# (ADR-0028's `ScrumMasterRuntimeConfig` deliberately does not subclass
+# `CommonRuntimeConfig`/`AgentRuntimeConfig` -- see its own docstring).
+_AIRouterConfig = AgentRuntimeConfig | ScrumMasterRuntimeConfig | ProductOwnerRuntimeConfig
 
 
 def _build_ai_router(config: _AIRouterConfig) -> FallbackAIRouter:

@@ -295,12 +295,14 @@ class AgentRuntimeConfig(CommonRuntimeConfig):
 
 
 @dataclass(frozen=True, slots=True)
-class ScrumMasterRuntimeConfig:
-    """ADR-0028: deliberately not a `CommonRuntimeConfig` subclass -- this
-    process consumes no `ExecuteTask` commands and publishes no events,
-    so none of `CommonRuntimeConfig`'s Kafka/contract-schema fields
-    apply. A `PeriodicService`-driven process needs only a DB pool, the
-    AI Router, a GitHub credential, and its own cadence/budget knobs."""
+class _AutonomousRoleRuntimeConfigBase:
+    """Fields shared by every ADR-0026 autonomous-role runtime config
+    (`scrum-master`, `product-owner`, and eventually `principal-developer`).
+    Deliberately not a `CommonRuntimeConfig` subclass -- these are
+    `PeriodicService`-driven processes with no `ExecuteTask` consumption
+    and no published events, so none of `CommonRuntimeConfig`'s Kafka/
+    contract-schema fields apply. Each role's own config subclasses this
+    with only its role-specific credential fields (ADR-0030's Context)."""
 
     environment: str
     database_dsn: SecretFileReference
@@ -320,82 +322,164 @@ class ScrumMasterRuntimeConfig:
     ai_router_openai_model: str | None
     ai_router_max_output_tokens: int | None
     ai_router_provider_timeout_seconds: float | None
-    github_token: SecretFileReference | None
-    github_project_owner: str | None
-    github_project_number: int | None
     autonomous_poll_interval_seconds: float
     autonomous_max_actions_per_day: int
     autonomous_max_spend_cents_per_day: int
+
+
+def _autonomous_role_base(values: Mapping[str, str]) -> _AutonomousRoleRuntimeConfigBase:
+    env_name = _required(values, "AI_PLATFORM_ENVIRONMENT")
+    if env_name != "development":
+        raise RuntimeConfigurationError("SYNTHETIC_POLICY_REQUIRES_DEVELOPMENT")
+    pool_min_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE", 1, 32)
+    pool_max_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE", 1, 64)
+    if pool_min_size > pool_max_size:
+        raise RuntimeConfigurationError("DATABASE_POOL_MIN_EXCEEDS_MAX")
+    readiness_host = _required(values, "AI_PLATFORM_AGENT_READINESS_HOST")
+    if not (_is_loopback_literal(readiness_host) or readiness_host == "0.0.0.0"):
+        raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK_OR_ALL_INTERFACES")
+    return _AutonomousRoleRuntimeConfigBase(
+        environment=env_name,
+        database_dsn=SecretFileReference(
+            Path(_required(values, "AI_PLATFORM_AGENT_DATABASE_DSN_FILE"))
+        ),
+        database_pool_min_size=pool_min_size,
+        database_pool_max_size=pool_max_size,
+        database_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS", 0.1, 120.0
+        ),
+        agent_id=_required(values, "AI_PLATFORM_AGENT_ID"),
+        agent_component=_required(values, "AI_PLATFORM_AGENT_COMPONENT"),
+        readiness_host=readiness_host,
+        readiness_port=_bounded_int(values, "AI_PLATFORM_AGENT_READINESS_PORT", 1, 65_535),
+        readiness_credential=SecretFileReference(
+            Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
+        ),
+        startup_timeout_seconds=_bounded_float(
+            values, "AI_PLATFORM_STARTUP_TIMEOUT_SECONDS", 0.1, 300.0
+        ),
+        shutdown_grace_seconds=_bounded_float(
+            values, "AI_PLATFORM_SHUTDOWN_GRACE_SECONDS", 0.1, 300.0
+        ),
+        ai_router_anthropic_api_key=_optional_secret(
+            values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE"
+        ),
+        ai_router_anthropic_model=_optional_str(
+            values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL"
+        ),
+        ai_router_openai_api_key=_optional_secret(
+            values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE"
+        ),
+        ai_router_openai_model=_optional_str(values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL"),
+        ai_router_max_output_tokens=_optional_int(
+            values, "AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS", 1, 32_000
+        ),
+        ai_router_provider_timeout_seconds=_optional_float(
+            values, "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS", 0.1, 300.0
+        ),
+        autonomous_poll_interval_seconds=_bounded_float(
+            values, "AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS", 1.0, 86_400.0
+        ),
+        autonomous_max_actions_per_day=_bounded_int(
+            values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY", 1, 10_000
+        ),
+        autonomous_max_spend_cents_per_day=_bounded_int(
+            values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY", 1, 1_000_000
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ScrumMasterRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
+    """ADR-0028: adds `scrum-master-agent`'s GitHub Projects v2 tracker
+    credential to the shared autonomous-role base."""
+
+    github_token: SecretFileReference | None
+    github_project_owner: str | None
+    github_project_number: int | None
 
     @classmethod
     def from_environment(
         cls, environment: Mapping[str, str] | None = None
     ) -> ScrumMasterRuntimeConfig:
         values = os.environ if environment is None else environment
-        env_name = _required(values, "AI_PLATFORM_ENVIRONMENT")
-        if env_name != "development":
-            raise RuntimeConfigurationError("SYNTHETIC_POLICY_REQUIRES_DEVELOPMENT")
-        pool_min_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE", 1, 32)
-        pool_max_size = _bounded_int(values, "AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE", 1, 64)
-        if pool_min_size > pool_max_size:
-            raise RuntimeConfigurationError("DATABASE_POOL_MIN_EXCEEDS_MAX")
-        readiness_host = _required(values, "AI_PLATFORM_AGENT_READINESS_HOST")
-        if not (_is_loopback_literal(readiness_host) or readiness_host == "0.0.0.0"):
-            raise RuntimeConfigurationError("READINESS_HOST_MUST_BE_LOOPBACK_OR_ALL_INTERFACES")
+        base = _autonomous_role_base(values)
         return cls(
-            environment=env_name,
-            database_dsn=SecretFileReference(
-                Path(_required(values, "AI_PLATFORM_AGENT_DATABASE_DSN_FILE"))
-            ),
-            database_pool_min_size=pool_min_size,
-            database_pool_max_size=pool_max_size,
-            database_timeout_seconds=_bounded_float(
-                values, "AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS", 0.1, 120.0
-            ),
-            agent_id=_required(values, "AI_PLATFORM_AGENT_ID"),
-            agent_component=_required(values, "AI_PLATFORM_AGENT_COMPONENT"),
-            readiness_host=readiness_host,
-            readiness_port=_bounded_int(values, "AI_PLATFORM_AGENT_READINESS_PORT", 1, 65_535),
-            readiness_credential=SecretFileReference(
-                Path(_required(values, "AI_PLATFORM_READINESS_CREDENTIAL_FILE"))
-            ),
-            startup_timeout_seconds=_bounded_float(
-                values, "AI_PLATFORM_STARTUP_TIMEOUT_SECONDS", 0.1, 300.0
-            ),
-            shutdown_grace_seconds=_bounded_float(
-                values, "AI_PLATFORM_SHUTDOWN_GRACE_SECONDS", 0.1, 300.0
-            ),
-            ai_router_anthropic_api_key=_optional_secret(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE"
-            ),
-            ai_router_anthropic_model=_optional_str(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL"
-            ),
-            ai_router_openai_api_key=_optional_secret(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE"
-            ),
-            ai_router_openai_model=_optional_str(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL"
-            ),
-            ai_router_max_output_tokens=_optional_int(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS", 1, 32_000
-            ),
-            ai_router_provider_timeout_seconds=_optional_float(
-                values, "AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS", 0.1, 300.0
-            ),
+            environment=base.environment,
+            database_dsn=base.database_dsn,
+            database_pool_min_size=base.database_pool_min_size,
+            database_pool_max_size=base.database_pool_max_size,
+            database_timeout_seconds=base.database_timeout_seconds,
+            agent_id=base.agent_id,
+            agent_component=base.agent_component,
+            readiness_host=base.readiness_host,
+            readiness_port=base.readiness_port,
+            readiness_credential=base.readiness_credential,
+            startup_timeout_seconds=base.startup_timeout_seconds,
+            shutdown_grace_seconds=base.shutdown_grace_seconds,
+            ai_router_anthropic_api_key=base.ai_router_anthropic_api_key,
+            ai_router_anthropic_model=base.ai_router_anthropic_model,
+            ai_router_openai_api_key=base.ai_router_openai_api_key,
+            ai_router_openai_model=base.ai_router_openai_model,
+            ai_router_max_output_tokens=base.ai_router_max_output_tokens,
+            ai_router_provider_timeout_seconds=base.ai_router_provider_timeout_seconds,
+            autonomous_poll_interval_seconds=base.autonomous_poll_interval_seconds,
+            autonomous_max_actions_per_day=base.autonomous_max_actions_per_day,
+            autonomous_max_spend_cents_per_day=base.autonomous_max_spend_cents_per_day,
             github_token=_optional_secret(values, "AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE"),
             github_project_owner=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER"),
             github_project_number=_optional_int(
                 values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER", 1, 1_000_000
             ),
-            autonomous_poll_interval_seconds=_bounded_float(
-                values, "AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS", 1.0, 86_400.0
-            ),
-            autonomous_max_actions_per_day=_bounded_int(
-                values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY", 1, 10_000
-            ),
-            autonomous_max_spend_cents_per_day=_bounded_int(
-                values, "AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY", 1, 1_000_000
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProductOwnerRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
+    """ADR-0030: adds `product-owner-agent`'s GitHub Projects v2 backlog
+    credential to the shared autonomous-role base -- the same field
+    shape as `ScrumMasterRuntimeConfig`'s GitHub credential (both
+    operate on the same board type), read from `product-owner-agent`'s
+    own env vars/secret file so each role's container gets its own,
+    separately-scoped PAT (ADR-0028 Decision 4's per-role least
+    privilege, applied identically here)."""
+
+    github_token: SecretFileReference | None
+    github_project_owner: str | None
+    github_project_number: int | None
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> ProductOwnerRuntimeConfig:
+        values = os.environ if environment is None else environment
+        base = _autonomous_role_base(values)
+        return cls(
+            environment=base.environment,
+            database_dsn=base.database_dsn,
+            database_pool_min_size=base.database_pool_min_size,
+            database_pool_max_size=base.database_pool_max_size,
+            database_timeout_seconds=base.database_timeout_seconds,
+            agent_id=base.agent_id,
+            agent_component=base.agent_component,
+            readiness_host=base.readiness_host,
+            readiness_port=base.readiness_port,
+            readiness_credential=base.readiness_credential,
+            startup_timeout_seconds=base.startup_timeout_seconds,
+            shutdown_grace_seconds=base.shutdown_grace_seconds,
+            ai_router_anthropic_api_key=base.ai_router_anthropic_api_key,
+            ai_router_anthropic_model=base.ai_router_anthropic_model,
+            ai_router_openai_api_key=base.ai_router_openai_api_key,
+            ai_router_openai_model=base.ai_router_openai_model,
+            ai_router_max_output_tokens=base.ai_router_max_output_tokens,
+            ai_router_provider_timeout_seconds=base.ai_router_provider_timeout_seconds,
+            autonomous_poll_interval_seconds=base.autonomous_poll_interval_seconds,
+            autonomous_max_actions_per_day=base.autonomous_max_actions_per_day,
+            autonomous_max_spend_cents_per_day=base.autonomous_max_spend_cents_per_day,
+            github_token=_optional_secret(values, "AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE"),
+            github_project_owner=_optional_str(values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER"),
+            github_project_number=_optional_int(
+                values, "AI_PLATFORM_AGENT_GITHUB_PROJECT_NUMBER", 1, 1_000_000
             ),
         )
 
