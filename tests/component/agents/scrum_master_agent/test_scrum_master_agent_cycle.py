@@ -73,6 +73,9 @@ class FakeProjectTracker:
     set_status_calls: list[tuple[str, str]] = field(default_factory=list)
     add_comment_calls: list[tuple[str, str]] = field(default_factory=list)
     create_draft_item_calls: list[tuple[str, str]] = field(default_factory=list)
+    close_issue_calls: list[str] = field(default_factory=list)
+    relabel_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
+    reassign_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
     async def fetch(self) -> ProjectBoardSnapshot:
         self.fetch_calls += 1
@@ -95,6 +98,21 @@ class FakeProjectTracker:
         if "create_draft_item" in self.action_failures:
             raise self.action_failures["create_draft_item"]
         self.create_draft_item_calls.append((title, body))
+
+    async def close_issue(self, *, issue_url: str) -> None:
+        if "close_issue" in self.action_failures:
+            raise self.action_failures["close_issue"]
+        self.close_issue_calls.append(issue_url)
+
+    async def relabel(self, *, issue_url: str, labels: tuple[str, ...]) -> None:
+        if "relabel" in self.action_failures:
+            raise self.action_failures["relabel"]
+        self.relabel_calls.append((issue_url, labels))
+
+    async def reassign(self, *, issue_url: str, assignees: tuple[str, ...]) -> None:
+        if "reassign" in self.action_failures:
+            raise self.action_failures["reassign"]
+        self.reassign_calls.append((issue_url, assignees))
 
 
 @dataclass
@@ -298,11 +316,99 @@ def test_ai_router_classified_failure_dispatches_nothing() -> None:
     router = FakeAIRouter(
         result=AICompletionResult(failure_code=AICompletionFailureCode.ALL_PROVIDERS_EXHAUSTED)
     )
-    agent, state, _tracker = _build_agent(ai_router=router)
+    agent, _state, _tracker = _build_agent(ai_router=router)
 
     _run(agent.run_cycle())
 
-    assert state.recorded_actions == []
+
+def test_close_relabel_reassign_all_dispatch_and_record_success() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "close_issue",
+                "issue_url": "https://x/1",
+                "rationale": "Already fixed on main.",
+            },
+            {
+                "action": "relabel",
+                "issue_url": "https://x/1",
+                "labels": ["bug", "priority-1"],
+                "rationale": "Confirmed as a real bug.",
+            },
+            {
+                "action": "reassign",
+                "issue_url": "https://x/1",
+                "assignees": ["octocat"],
+                "rationale": "They own this area.",
+            },
+        ]
+    )
+    router = FakeAIRouter(
+        result=AICompletionResult(
+            output_text=raw,
+            usage=AICompletionUsage(
+                provider="anthropic",
+                model="claude-haiku-4-5",
+                input_tokens=500,
+                output_tokens=100,
+                latency_seconds=0.5,
+            ),
+        )
+    )
+    agent, state, tracker = _build_agent(ai_router=router)
+
+    _run(agent.run_cycle())
+
+    assert tracker.close_issue_calls == ["https://x/1"]
+    assert tracker.relabel_calls == [("https://x/1", ("bug", "priority-1"))]
+    assert tracker.reassign_calls == [("https://x/1", ("octocat",))]
+    assert len(state.recorded_actions) == 3
+    assert all(action.result_status == "SUCCEEDED" for action in state.recorded_actions)
+    assert [action.action_type for action in state.recorded_actions] == [
+        "close_issue",
+        "relabel",
+        "reassign",
+    ]
+
+
+def test_relabel_failure_does_not_block_the_next_actions_dispatch() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://x/1",
+                "labels": ["bug"],
+                "rationale": "x",
+            },
+            {
+                "action": "close_issue",
+                "issue_url": "https://x/1",
+                "rationale": "y",
+            },
+        ]
+    )
+    router = FakeAIRouter(
+        result=AICompletionResult(
+            output_text=raw,
+            usage=AICompletionUsage(
+                provider="anthropic",
+                model="claude-haiku-4-5",
+                input_tokens=500,
+                output_tokens=100,
+                latency_seconds=0.5,
+            ),
+        )
+    )
+    tracker = FakeProjectTracker(
+        snapshot=_SNAPSHOT,
+        action_failures={"relabel": TrackerActionFailedError("relabel", "boom")},
+    )
+    agent, state, tracker = _build_agent(ai_router=router, tracker=tracker)
+
+    _run(agent.run_cycle())
+
+    assert tracker.close_issue_calls == ["https://x/1"]
+    assert [action.result_status for action in state.recorded_actions] == ["FAILED", "SUCCEEDED"]
 
 
 def test_a_failed_action_is_recorded_as_failed_not_raised() -> None:

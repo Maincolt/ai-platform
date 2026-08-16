@@ -178,3 +178,141 @@ def test_too_many_proposed_actions_is_rejected() -> None:
         ]
     )
     assert _parse_proposed_actions(raw) is None
+
+
+def test_well_formed_close_issue_action_parses_correctly() -> None:
+    raw = _actions_json(
+        [
+            {
+                "action": "close_issue",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "rationale": "Already fixed on main.",
+            }
+        ]
+    )
+
+    parsed = _parse_proposed_actions(raw)
+
+    assert parsed is not None
+    assert parsed[0].action == "close_issue"
+    assert parsed[0].fields["issue_url"] == "https://github.com/octocat/repo/issues/1"
+
+
+def test_well_formed_relabel_action_parses_correctly() -> None:
+    raw = _actions_json(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": ["bug", "priority-1"],
+                "rationale": "Confirmed as a real bug.",
+            }
+        ]
+    )
+
+    parsed = _parse_proposed_actions(raw)
+
+    assert parsed == [
+        ProposedAction(
+            action="relabel",
+            fields={
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": ("bug", "priority-1"),
+            },
+            rationale="Confirmed as a real bug.",
+        )
+    ]
+
+
+def test_relabel_with_an_empty_label_list_is_accepted() -> None:
+    """An empty list is a valid full-replace payload -- it clears every
+    label, distinct from an omitted/malformed field."""
+    raw = _actions_json(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": [],
+                "rationale": "No longer applicable.",
+            }
+        ]
+    )
+
+    parsed = _parse_proposed_actions(raw)
+
+    assert parsed is not None
+    assert parsed[0].fields["labels"] == ()
+
+
+def test_well_formed_reassign_action_parses_correctly() -> None:
+    raw = _actions_json(
+        [
+            {
+                "action": "reassign",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "assignees": ["octocat"],
+                "rationale": "They own this area.",
+            }
+        ]
+    )
+
+    parsed = _parse_proposed_actions(raw)
+
+    assert parsed is not None
+    assert parsed[0].fields["assignees"] == ("octocat",)
+
+
+def test_relabel_with_a_non_list_labels_value_is_rejected() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": "bug",
+                "rationale": "x",
+            }
+        ]
+    )
+    assert _parse_proposed_actions(raw) is None
+
+
+def test_relabel_with_a_non_string_list_item_is_rejected() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": ["bug", 5],
+                "rationale": "x",
+            }
+        ]
+    )
+    assert _parse_proposed_actions(raw) is None
+
+
+def test_relabel_with_too_many_labels_is_rejected() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": [f"label-{i}" for i in range(11)],
+                "rationale": "x",
+            }
+        ]
+    )
+    assert _parse_proposed_actions(raw) is None
+
+
+def test_relabel_with_an_oversized_label_is_rejected() -> None:
+    raw = json.dumps(
+        [
+            {
+                "action": "relabel",
+                "issue_url": "https://github.com/octocat/repo/issues/1",
+                "labels": ["x" * 101],
+                "rationale": "x",
+            }
+        ]
+    )
+    assert _parse_proposed_actions(raw) is None
