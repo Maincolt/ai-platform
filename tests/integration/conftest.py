@@ -283,7 +283,7 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the twenty least-privilege application principals
+    """confluent_kafka client configs for the twenty-two least-privilege application principals
     provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four, the
     `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added in
     Sprint 9 for capability-scoped `text-summarize` routing, the
@@ -298,9 +298,11 @@ def kafka_principal_client_configs(
     `technical-review-agent-producer`/`technical-review-agent-consumer` pair ADR-0022 added
     for capability-scoped `technical-review` routing, the
     `assignment-route-agent-producer`/`assignment-route-agent-consumer` pair ADR-0023 added
-    for capability-scoped `assignment-route` routing, and the
+    for capability-scoped `assignment-route` routing, the
     `security-review-agent-producer`/`security-review-agent-consumer` pair ADR-0025 added
-    for capability-scoped `security-review` routing)."""
+    for capability-scoped `security-review` routing, and the
+    `scrum-status-agent-producer`/`scrum-status-agent-consumer` pair ADR-0027 added
+    for capability-scoped `scrum-status` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -363,6 +365,14 @@ def kafka_principal_client_configs(
         "security-review-agent-consumer": _kafka_principal_client_config(
             "security-review-agent-consumer",
             "kafka_security_review_agent_consumer_password.txt",
+        ),
+        "scrum-status-agent-producer": _kafka_principal_client_config(
+            "scrum-status-agent-producer",
+            "kafka_scrum_status_agent_producer_password.txt",
+        ),
+        "scrum-status-agent-consumer": _kafka_principal_client_config(
+            "scrum-status-agent-consumer",
+            "kafka_scrum_status_agent_consumer_password.txt",
         ),
         "assignment-route-agent-producer": _kafka_principal_client_config(
             "assignment-route-agent-producer",

@@ -84,10 +84,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 10000,
-          "description": "The input text/content submitted for the selected capability (plain text for text.word-count/text.summarize; a diff/patch for code.review; the hardcoded allowed review target URL for ui.review, ADR-0019 Decision 4; a proposed architectural change/design doc/ADR draft for architecture.review; a dataset excerpt/metrics summary/usage report for data.analysis; a proposed data model/schema/API contract/service-boundary design for technical.review; a code diff/configuration file/infrastructure-as-code snippet/design description to review for security concerns for security.review; a free-text assignment description to route to the right specialist capability for assignment.route)."
+          "description": "The input text/content submitted for the selected capability (plain text for text.word-count/text.summarize; a diff/patch for code.review; the hardcoded allowed review target URL for ui.review, ADR-0019 Decision 4; a proposed architectural change/design doc/ADR draft for architecture.review; a dataset excerpt/metrics summary/usage report for data.analysis; a proposed data model/schema/API contract/service-boundary design for technical.review; a code diff/configuration file/infrastructure-as-code snippet/design description to review for security concerns for security.review; a free-text focus/question about the live project board for scrum.status (e.g. 'what's blocking us'; submit a short placeholder such as 'status' for a general summary if there is no specific focus); a free-text assignment description to route to the right specialist capability for assignment.route)."
         },
         "capability": {
-          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review", "security.review", "assignment.route"],
+          "enum": ["text.word-count", "text.summarize", "code.review", "ui.review", "architecture.review", "data.analysis", "technical.review", "security.review", "scrum.status", "assignment.route"],
           "description": "ADR-0015: an explicit, reviewable list, not an open string -- an unrecognized capability value fails validation immediately."
         },
         "capability_version": {

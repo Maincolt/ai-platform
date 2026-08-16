@@ -90,6 +90,7 @@ _SUPPORTED_CAPABILITY_NAMES = frozenset(
         "data.analysis",
         "technical.review",
         "security.review",
+        "scrum.status",
         "assignment.route",
     }
 )

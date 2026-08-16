@@ -454,6 +454,72 @@ def test_security_review_result_does_not_accept_the_summarize_capabilitys_field(
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_scrum_status_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="scrum.status",
+        result={
+            "findings": [
+                {
+                    "location": "issue #42 (In Progress)",
+                    "summary": "Blocked on API review for 5 days.",
+                    "severity": "high",
+                },
+                {
+                    "location": "Sprint velocity",
+                    "summary": "3 of 8 planned items completed with 2 days left.",
+                    "severity": "medium",
+                },
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_scrum_status_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="scrum.status", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_scrum_status_finding_with_a_ui_review_area_key_is_rejected() -> None:
+    """`scrum.status`'s findings shape has no `area` concept -- it must
+    not accidentally validate against `ui.review`'s branch."""
+    message = _message(
+        capability="scrum.status",
+        result={"findings": [{"area": "header navigation", "summary": "x", "severity": "low"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_scrum_status_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="scrum.status",
+        result={"findings": [{"location": "issue #1", "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_scrum_status_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="scrum.status",
+        result={
+            "findings": [
+                {"location": "issue #1", "summary": "x", "severity": "low", "confidence": 0.9}
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_scrum_status_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(capability="scrum.status", result={"findings": [], "summary": "extra"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_assignment_route_result_validates_against_the_assignments_branch() -> None:
     message = _message(
         capability="assignment.route",

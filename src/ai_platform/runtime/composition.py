@@ -56,6 +56,11 @@ from ai_platform.agents.review_agent.agent import ReviewAgent
 from ai_platform.agents.review_agent.capability import (
     CAPABILITY_NAME as REVIEW_CAPABILITY_NAME,
 )
+from ai_platform.agents.scrum_status_agent.agent import ScrumStatusAgent
+from ai_platform.agents.scrum_status_agent.board import GitHubProjectsBoardReader
+from ai_platform.agents.scrum_status_agent.capability import (
+    CAPABILITY_NAME as SCRUM_STATUS_CAPABILITY_NAME,
+)
 from ai_platform.agents.security_review_agent.agent import SecurityReviewAgent
 from ai_platform.agents.security_review_agent.capability import (
     CAPABILITY_NAME as SECURITY_REVIEW_CAPABILITY_NAME,
@@ -749,6 +754,17 @@ def _build_executor(
             ai_router=_build_ai_router(config),
             max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
         )
+    if capability_name == SCRUM_STATUS_CAPABILITY_NAME:
+        return ScrumStatusAgent(
+            environment=config.environment,
+            agent_deployment_id=agent_id,
+            agent_component=config.agent_component,
+            outcome_transaction=outcome_transaction,
+            id_factory=Uuid7IdentifierFactory(),
+            ai_router=_build_ai_router(config),
+            project_board=_build_project_board_port(config),
+            max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        )
     if capability_name == ASSIGNMENT_ROUTE_CAPABILITY_NAME:
         return AssignmentRouteAgent(
             environment=config.environment,
@@ -863,6 +879,25 @@ def _require_ai_router_int(config: AgentRuntimeConfig, field_name: str) -> int:
     if value is None:
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{field_name}")
     return cast(int, value)
+
+
+# ADR-0027 Decision 4: unlike ui.review's hardcoded review target, the
+# GitHub Projects v2 board to fetch is ordinary, non-secret configuration
+# -- the fetch is always to https://api.github.com/graphql, scoped by
+# whichever read:project-only PAT is configured, so there is no
+# SSRF-shaped risk to close off by hardcoding a target in code.
+def _build_project_board_port(config: AgentRuntimeConfig) -> GitHubProjectsBoardReader:
+    if config.github_token is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
+    if config.github_project_owner is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_owner")
+    if config.github_project_number is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_project_number")
+    return GitHubProjectsBoardReader(
+        token=config.github_token.read(),
+        owner=config.github_project_owner,
+        project_number=config.github_project_number,
+    )
 
 
 def _security(
