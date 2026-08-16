@@ -244,7 +244,20 @@ A real submission against the placeholder credentials correctly failed
 closed as designed: `PROJECT_BOARD_FETCH_FAILED` carrying GitHub's own
 real `401 Bad credentials` response, proving the whole fetch-then-AI-call
 pipeline is wired correctly end to end short of the credential itself.
-**Genuine board-derived live verification remains blocked** until the
-repository owner creates a real GitHub Projects v2 board and supplies a
-real `read:project`-scoped PAT (Decision 5) — this is expected, not a
-defect, per this ADR's own Negative consequence.
+
+**Update (2026-08-16) — genuine board-derived live verification
+complete**: the repository owner created a real GitHub Projects v2 board
+(`Maincolt`, project number 1) and supplied a real `read:project`-scoped
+PAT. `AI_PLATFORM_AGENT_GITHUB_PROJECT_OWNER` was updated from its
+placeholder and the real PAT was written to `github_token.txt` on the
+Mac Docker host; `scrum-status-agent` was recreated (no registry change
+needed for a credential/config-only update) and reached `READY`. Two
+real submissions (a general status summary and an explicit "list every
+item" query) both reached `COMPLETED` with `{"findings": []}` — the real
+GitHub GraphQL fetch succeeded (no more `PROJECT_BOARD_FETCH_FAILED`),
+and the empty findings list is consistent with a genuinely empty,
+newly-created board rather than any error. The credential itself was
+shared directly in the working session rather than through a separate
+secrets channel; it was written straight to the deployment host's secret
+file without being echoed back anywhere, but the repository owner may
+want to rotate it later as routine hygiene given how it was transmitted.
