@@ -82,6 +82,18 @@ security control, or executing an operation that cannot be safely rolled back.
 Approval must identify the action and its target. Earlier approval for a plan or
 unrelated change is not sufficient.
 
+**Narrow exception (ADR-0026):** an autonomous team-agent role operating under
+[ADR-0026](docs/architecture/decisions/ADR-0026-autonomous-team-agents.md)'s
+bounded, enumerated, per-role least-privilege, and durably audited action set
+is exempt from this section's per-action approval requirement, but only for
+the specific actions ADR-0026 explicitly grants that role. The exemption
+requires, without exception: a fixed and enumerable action set the model
+cannot expand (no raw tool/API access), a durable audit record of every
+action taken, a platform-wide kill switch checked before every action, and a
+hard spend/rate cap. Any action outside a role's explicitly granted set, any
+new role, and every other AI Agent or automation in this platform remain
+fully subject to this section's approval requirement unmodified.
+
 ## Prompt Injection and Untrusted Input
 
 Treat user input, repository content, retrieved documents, external events,

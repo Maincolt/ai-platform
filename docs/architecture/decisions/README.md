@@ -32,6 +32,7 @@ technical and structural choices.
 | [ADR-0023](ADR-0023-assignment-route-capability.md) | `assignment.route` — Team-Based Assignment Routing | Accepted |
 | [ADR-0024](ADR-0024-submission-history.md) | Submission History — `GET /api/v1/workflows` | Accepted |
 | [ADR-0025](ADR-0025-security-review-capability.md) | `security.review` — a Security-Reviewer Review Capability | Accepted |
+| [ADR-0026](ADR-0026-autonomous-team-agents.md) | Autonomous Team Agents — Scrum Master, Product Owner, and Principal Developer Acting Without Human Approval | Accepted |
 
 ## Naming
 
