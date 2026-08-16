@@ -189,6 +189,32 @@ Registry binding) and live verification against the real Mac Docker host
 follow as a separate commit/PR, per this repository's established
 pattern.
 
+**Update (2026-08-16) — deployment wiring landed and live-verified**: PR
+#54 added the `security-review-agent` Compose service (shared
+`ai-platform:sprint6` image), its own Kafka producer/consumer
+principals/topic pair/ACLs (`security-review-agent-producer`/
+`-consumer`, `task-commands.security-review.v1` + quarantine companion),
+and a Capability Registry binding (revision `local-compose-10`); the new
+Kafka secrets were declared in the top-level `secrets:` stanza from the
+start, per the standing lesson from `architecture.review`'s deployment.
+`test_kafka_acl_matrix.py` gained matching isolation cases (162 cases
+total across all nine capabilities). Deployed to the Mac Docker host:
+image rebuilt, new SCRAM credentials seeded against the already-
+provisioned broker via `kafka-configs.sh --alter`, all eleven
+agent/platform/dashboard/test-agent services recreated for the
+registry-revision-bump gotcha. `GET /api/v1/agents` reported all nine
+capabilities `READY`/`fresh: true` on the first check, confirmed
+visually via a Playwright screenshot of the live dashboard showing
+"9 / 9 online" with `security.review` as its own card and zero frontend
+changes needed. A real submission (a deliberately vulnerable Python
+snippet with SQL injection via string concatenation, a hardcoded live
+API key, SQL injection via f-string interpolation, and a missing
+auth/authz check on a destructive endpoint) reached `COMPLETED` with
+four genuine, sharply specific findings from the real Anthropic
+provider — not a placeholder/fixture response. The full 162-case ACL
+matrix, including the new principals' isolation cases, passed live
+against the broker.
+
 ## Related Decisions
 
 - [ADR-0007: Agent Execution Model and Lifecycle](ADR-0007-agent-execution-model-and-lifecycle.md) — request/response shape this ADR applies
