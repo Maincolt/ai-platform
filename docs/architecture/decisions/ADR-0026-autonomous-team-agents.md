@@ -200,9 +200,10 @@ mechanism here. `SourceControlPort` deliberately excludes push/force-push
 to limit what a compromised merge action could do; `principal-developer-
 agent` can merge a bad PR but cannot rewrite history or push directly.
 
-No new data-classification concern beyond `SECURITY.md`'s existing AI Data
-Handling section: tracker/PR content is treated as the same class of
-input every prior capability's caller-supplied text already is.
+No new data-classification concern beyond `SECURITY.md`'s existing
+"External AI Providers" section: tracker/PR content is treated as the
+same class of input every prior capability's caller-supplied text
+already is.
 
 ## Alternatives Considered
 
