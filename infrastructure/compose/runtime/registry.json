@@ -1,5 +1,5 @@
 {
-  "revision": "local-compose-9",
+  "revision": "local-compose-10",
   "bindings": [
     {
       "capability_name": "text.word-count",
@@ -105,6 +105,21 @@
       "environment": "development",
       "enabled": true,
       "readiness_url": "http://technical-review-agent:8100/health/ready"
+    },
+    {
+      "capability_name": "security.review",
+      "capability_version": "1.0",
+      "command_contract_name": "ExecuteTask",
+      "command_contract_versions": ["1.0"],
+      "event_contract_names": ["TaskCompleted", "TaskFailed"],
+      "event_contract_versions": ["1.0", "1.0"],
+      "agent_id": "018f23a7-6b4d-7c91-8a2e-5ec0517924e5",
+      "implementation_identity": "local-compose-security-review-agent",
+      "implementation_version": "1.0",
+      "deployment_declaration_digest": "sha256:local-compose-security-review-declaration",
+      "environment": "development",
+      "enabled": true,
+      "readiness_url": "http://security-review-agent:8100/health/ready"
     },
     {
       "capability_name": "assignment.route",

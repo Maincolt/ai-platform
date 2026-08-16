@@ -3,7 +3,7 @@ turning the AI Router's raw text response into a structured, schema-valid
 recommendation list, or `None` (never a partial/best-effort result) on any
 shape mismatch. Recommendations differ from every findings-list
 capability's shape: keys are `capability`/`rationale` instead of a
-locator/summary/severity triple, `capability` must be one of the six
+locator/summary/severity triple, `capability` must be one of the seven
 eligible team capabilities, and duplicate capability entries are
 rejected (a recommendation list, not an evidence list, so naming the same
 capability twice is meaningless).
@@ -90,6 +90,15 @@ def test_recommendation_with_a_technical_review_component_key_is_rejected() -> N
     assert _parse_recommendations(raw) is None
 
 
+def test_recommendation_naming_security_review_is_accepted() -> None:
+    raw = json.dumps(
+        [{"capability": "security.review", "rationale": "Touches authentication handling."}]
+    )
+    assert _parse_recommendations(raw) == [
+        {"capability": "security.review", "rationale": "Touches authentication handling."}
+    ]
+
+
 def test_recommendation_naming_an_ineligible_capability_is_rejected() -> None:
     raw = json.dumps([{"capability": "text.word-count", "rationale": "x"}])
     assert _parse_recommendations(raw) is None
@@ -149,7 +158,10 @@ def test_too_many_recommendations_is_rejected() -> None:
     assert _parse_recommendations(raw) is None
 
 
-def test_all_six_eligible_capabilities_can_be_recommended_together() -> None:
+def test_six_distinct_eligible_capabilities_can_be_recommended_together() -> None:
+    """Six is the cap (`_MAX_RECOMMENDATIONS`) -- with `security.review`
+    added, seven capabilities are now eligible in total, so this
+    exercises six of the seven, not literally all of them."""
     raw = json.dumps(
         [
             {"capability": name, "rationale": "relevant"}

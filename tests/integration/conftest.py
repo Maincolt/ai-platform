@@ -283,7 +283,7 @@ def _kafka_principal_client_config(principal: str, password_secret_file: str) ->
 def kafka_principal_client_configs(
     external_services_status: ExternalServicesStatus,
 ) -> dict[str, dict[str, Any]]:
-    """confluent_kafka client configs for the eighteen least-privilege application principals
+    """confluent_kafka client configs for the twenty least-privilege application principals
     provisioned by `infrastructure/compose/scripts/init-kafka.sh` (the original four, the
     `summarize-agent-producer`/`summarize-agent-consumer` pair ADR-0014 Section 6 added in
     Sprint 9 for capability-scoped `text-summarize` routing, the
@@ -296,9 +296,11 @@ def kafka_principal_client_configs(
     `data-analysis-agent-producer`/`data-analysis-agent-consumer` pair ADR-0021 added for
     capability-scoped `data-analysis` routing, the
     `technical-review-agent-producer`/`technical-review-agent-consumer` pair ADR-0022 added
-    for capability-scoped `technical-review` routing, and the
+    for capability-scoped `technical-review` routing, the
     `assignment-route-agent-producer`/`assignment-route-agent-consumer` pair ADR-0023 added
-    for capability-scoped `assignment-route` routing)."""
+    for capability-scoped `assignment-route` routing, and the
+    `security-review-agent-producer`/`security-review-agent-consumer` pair ADR-0025 added
+    for capability-scoped `security-review` routing)."""
     return {
         "orchestrator-producer": _kafka_principal_client_config(
             "orchestrator-producer", "kafka_orchestrator_producer_password.txt"
@@ -353,6 +355,14 @@ def kafka_principal_client_configs(
         "technical-review-agent-consumer": _kafka_principal_client_config(
             "technical-review-agent-consumer",
             "kafka_technical_review_agent_consumer_password.txt",
+        ),
+        "security-review-agent-producer": _kafka_principal_client_config(
+            "security-review-agent-producer",
+            "kafka_security_review_agent_producer_password.txt",
+        ),
+        "security-review-agent-consumer": _kafka_principal_client_config(
+            "security-review-agent-consumer",
+            "kafka_security_review_agent_consumer_password.txt",
         ),
         "assignment-route-agent-producer": _kafka_principal_client_config(
             "assignment-route-agent-producer",

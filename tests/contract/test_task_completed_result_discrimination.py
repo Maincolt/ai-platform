@@ -388,6 +388,72 @@ def test_technical_review_result_does_not_accept_the_summarize_capabilitys_field
         _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_security_review_result_validates_against_the_findings_branch() -> None:
+    message = _message(
+        capability="security.review",
+        result={
+            "findings": [
+                {
+                    "location": "config.py line 18",
+                    "summary": "API key is hardcoded rather than read from a secret store.",
+                    "severity": "high",
+                },
+                {
+                    "location": "POST /api/v1/workflows input validation",
+                    "summary": "User-supplied text is concatenated directly into a SQL query.",
+                    "severity": "high",
+                },
+            ]
+        },
+    )
+    _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_security_review_capability_missing_findings_is_rejected() -> None:
+    message = _message(capability="security.review", result={"summary": "not a findings list"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_security_review_finding_with_a_technical_review_component_key_is_rejected() -> None:
+    """`security.review`'s findings shape has no `component` concept -- it
+    must not accidentally validate against `technical.review`'s branch."""
+    message = _message(
+        capability="security.review",
+        result={"findings": [{"component": "users table", "summary": "x", "severity": "low"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_security_review_finding_with_an_invalid_severity_is_rejected() -> None:
+    message = _message(
+        capability="security.review",
+        result={"findings": [{"location": "config.py", "summary": "x", "severity": "critical"}]},
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_security_review_finding_with_an_extra_field_is_rejected() -> None:
+    message = _message(
+        capability="security.review",
+        result={
+            "findings": [
+                {"location": "config.py", "summary": "x", "severity": "low", "confidence": 0.9}
+            ]
+        },
+    )
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_security_review_result_does_not_accept_the_summarize_capabilitys_field() -> None:
+    message = _message(capability="security.review", result={"findings": [], "summary": "extra"})
+    with pytest.raises(ValidationError):
+        _validator().validate(message)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_assignment_route_result_validates_against_the_assignments_branch() -> None:
     message = _message(
         capability="assignment.route",
@@ -400,6 +466,10 @@ def test_assignment_route_result_validates_against_the_assignments_branch() -> N
                 {
                     "capability": "technical.review",
                     "rationale": "Also includes a concrete schema change.",
+                },
+                {
+                    "capability": "security.review",
+                    "rationale": "Also touches authentication handling.",
                 },
             ]
         },
