@@ -639,18 +639,19 @@ failure from a too-fast or too-slow crash window on a given run is a known,
 accepted flake in this suite, not a sign the environment is broken — rerun
 once if either test fails.
 
-## 11. Autonomous Agent Operations (ADR-0026/ADR-0028/ADR-0030/ADR-0031/ADR-0032)
+## 11. Autonomous Agent Operations (ADR-0026/ADR-0028/ADR-0030/ADR-0031/ADR-0032/ADR-0033)
 
 `scrum-master-agent` was the first Agent deployable that takes real,
 autonomous write actions with no per-action human approval;
 `product-owner-agent` (ADR-0030) is the second; `principal-developer-agent`
-(ADR-0031, real PR merge rights) is the third and highest-blast-radius —
-all three share the exact same `agent.autonomous_*` tables (migration
-0009) via their own `role='scrum-master'`/`role='product-owner'`/
-`role='principal-developer'` rows, and the same three independent,
-DB-backed safety mechanisms. All commands below run against those tables
-via `docker exec` into the running `postgres` container, the same
-pattern Section 3/5 already use.
+(ADR-0031, real PR merge rights) is the third and highest-blast-radius;
+`frontend-specialist-agent`/`postgres-specialist-agent` (ADR-0033,
+review-only, no merge, path-filtered to their own domain) are the fourth
+and fifth. All five share the exact same `agent.autonomous_*` tables
+(migration 0009) via their own `role='...'` rows, and the same
+independent, DB-backed safety mechanisms. All commands below run against
+those tables via `docker exec` into the running `postgres` container,
+the same pattern Section 3/5 already use.
 
 **Most of this is now also visible in the dashboard's "Autonomous Agents"
 tab (ADR-0032)** — kill switch state, each role's today-budget usage, and
@@ -676,10 +677,12 @@ docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \
 
 No redeploy needed — every autonomous role's `PeriodicService` checks
 this platform-wide flag at the start of every cycle, before any GitHub
-call. Engaging it halts `scrum-master-agent`, `product-owner-agent`,
-**and** `principal-developer-agent` together, not one at a time — this
-is the fastest way to stop a real merge from happening if
-`principal-developer-agent` is ever running with a real credential:
+call. Engaging it halts all five roles (`scrum-master-agent`,
+`product-owner-agent`, `principal-developer-agent`,
+`frontend-specialist-agent`, `postgres-specialist-agent`) together, not
+one at a time — this is the fastest way to stop a real merge from
+happening if `principal-developer-agent` is ever running with a real
+credential:
 
 ```bash
 docker exec ai-platform-local-postgres-1 psql -U postgres -d ai_platform \

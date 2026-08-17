@@ -41,6 +41,7 @@ from ai_platform.adapters.persistence import (
     PsycopgTransportRejectionTransaction,
 )
 from ai_platform.adapters.persistence.outbox import OutboxRecoveryPolicy
+from ai_platform.agents._pull_request_review_shared import GitHubPullRequestReviewClient
 from ai_platform.agents.architecture_review_agent.agent import ArchitectureReviewAgent
 from ai_platform.agents.architecture_review_agent.capability import (
     CAPABILITY_NAME as ARCHITECTURE_REVIEW_CAPABILITY_NAME,
@@ -53,6 +54,7 @@ from ai_platform.agents.data_analysis_agent.agent import DataAnalysisAgent
 from ai_platform.agents.data_analysis_agent.capability import (
     CAPABILITY_NAME as DATA_ANALYSIS_CAPABILITY_NAME,
 )
+from ai_platform.agents.domain_review_agent.agent import DomainReviewAgent
 from ai_platform.agents.principal_developer_agent.agent import PrincipalDeveloperAgent
 from ai_platform.agents.principal_developer_agent.source_control import GitHubSourceControlClient
 from ai_platform.agents.product_owner_agent.agent import ProductOwnerAgent
@@ -113,7 +115,9 @@ from ai_platform.ports.persistence.transactions import (
 from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
     CommonRuntimeConfig,
+    FrontendSpecialistRuntimeConfig,
     PlatformRuntimeConfig,
+    PostgresSpecialistRuntimeConfig,
     PrincipalDeveloperRuntimeConfig,
     ProductOwnerRuntimeConfig,
     RuntimeConfigurationError,
@@ -967,6 +971,135 @@ def build_principal_developer_process(
     )
 
 
+def _build_domain_review_process(
+    config: FrontendSpecialistRuntimeConfig | PostgresSpecialistRuntimeConfig,
+    *,
+    role: str,
+    domain_label: str,
+    path_prefixes: tuple[str, ...],
+    server_factory: ServerFactory | None,
+) -> AgentProcess:
+    """Shared by `build_frontend_specialist_process`/
+    `build_postgres_specialist_process` (ADR-0033) -- the two roles are
+    structurally identical, differing only in the three parameters this
+    function takes beyond `config`. Same zero-Kafka, zero-Capability-
+    Registry, `PeriodicService`-only shape every prior role's build
+    function already has."""
+    if config.github_token is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
+    if config.github_repo_owner is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_repo_owner")
+    if config.github_repo_name is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_repo_name")
+
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    pull_request_review = GitHubPullRequestReviewClient(
+        token=config.github_token.read(),
+        owner=config.github_repo_owner,
+        repo=config.github_repo_name,
+    )
+    domain_review = DomainReviewAgent(
+        role=role,
+        domain_label=domain_label,
+        path_prefixes=path_prefixes,
+        agent_deployment_id=config.agent_id,
+        state=state,
+        pull_request_review=pull_request_review,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
+        max_actions_per_day=config.autonomous_max_actions_per_day,
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            domain_review.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
+def build_frontend_specialist_process(
+    config: FrontendSpecialistRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `frontend-specialist-agent` (ADR-0026, ADR-0033)."""
+    return _build_domain_review_process(
+        config,
+        role="frontend-specialist",
+        domain_label="Vue.js frontend",
+        path_prefixes=("frontend/",),
+        server_factory=server_factory,
+    )
+
+
+def build_postgres_specialist_process(
+    config: PostgresSpecialistRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `postgres-specialist-agent` (ADR-0026, ADR-0033)."""
+    return _build_domain_review_process(
+        config,
+        role="postgres-specialist",
+        domain_label="Postgres schema and persistence layer",
+        path_prefixes=(
+            "infrastructure/migrations/",
+            "src/ai_platform/adapters/persistence/",
+            "src/ai_platform/ports/persistence/",
+        ),
+        server_factory=server_factory,
+    )
+
+
 def _build_executor(
     capability_name: str,
     *,
@@ -1132,6 +1265,8 @@ _AIRouterConfig = (
     | ScrumMasterRuntimeConfig
     | ProductOwnerRuntimeConfig
     | PrincipalDeveloperRuntimeConfig
+    | FrontendSpecialistRuntimeConfig
+    | PostgresSpecialistRuntimeConfig
 )
 
 

@@ -39,6 +39,7 @@ technical and structural choices.
 | [ADR-0030](ADR-0030-product-owner-agent-phase-3.md) | `product-owner-agent` — ADR-0026 Phase 3 | Accepted |
 | [ADR-0031](ADR-0031-principal-developer-agent-phase-4.md) | `principal-developer-agent` — ADR-0026 Phase 4 | Accepted |
 | [ADR-0032](ADR-0032-autonomous-agent-dashboard-visibility.md) | Autonomous Agent Status — Dashboard Visibility | Accepted |
+| [ADR-0033](ADR-0033-frontend-and-postgres-specialist-agents.md) | `frontend-specialist-agent` and `postgres-specialist-agent` — Extending ADR-0026's Autonomous Roles | Accepted |
 
 ## Naming
 

@@ -94,6 +94,16 @@ hard spend/rate cap. Any action outside a role's explicitly granted set, any
 new role, and every other AI Agent or automation in this platform remain
 fully subject to this section's approval requirement unmodified.
 
+**Narrow exception (ADR-0033):** the same exemption, under the same
+conditions without exception, additionally covers the two autonomous roles
+[ADR-0033](docs/architecture/decisions/ADR-0033-frontend-and-postgres-specialist-agents.md)
+defines (`frontend-specialist-agent`, `postgres-specialist-agent`), only for
+the one action ADR-0033 grants them (`request_changes` on pull requests
+touching their own domain's file paths — never a merge or any write action).
+Any action outside that grant, any further new role, and every other AI
+Agent or automation in this platform remain fully subject to this section's
+approval requirement unmodified.
+
 ## Prompt Injection and Untrusted Input
 
 Treat user input, repository content, retrieved documents, external events,
