@@ -17,11 +17,36 @@ const MAX_ACTIONS_PER_DAY = 10;
 const MAX_SPEND_CENTS_PER_DAY = 100;
 
 const KNOWN_ROLES = [
-  { key: "scrum-master", label: "Scrum Master" },
-  { key: "product-owner", label: "Product Owner" },
-  { key: "principal-developer", label: "Principal Developer" },
-  { key: "frontend-specialist", label: "Frontend Specialist" },
-  { key: "postgres-specialist", label: "Postgres Specialist" },
+  {
+    key: "scrum-master",
+    label: "Scrum Master",
+    description:
+      "Manages the sprint board: moves cards, comments, closes/relabels/reassigns issues, creates draft items.",
+  },
+  {
+    key: "product-owner",
+    label: "Product Owner",
+    description:
+      "Manages the backlog: creates/edits/closes tickets, archives drafts, reprioritizes, adjusts sprint scope.",
+  },
+  {
+    key: "principal-developer",
+    label: "Principal Developer",
+    description:
+      "Reviews and merges pull requests once required checks pass -- the only role with merge rights.",
+  },
+  {
+    key: "frontend-specialist",
+    label: "Frontend Specialist",
+    description:
+      "Reviews pull requests touching frontend/ (Vue.js). Review-only -- structurally unable to merge.",
+  },
+  {
+    key: "postgres-specialist",
+    label: "Postgres Specialist",
+    description:
+      "Reviews pull requests touching migrations and the persistence layer. Review-only -- structurally unable to merge.",
+  },
 ];
 
 const status = ref(null);
@@ -111,6 +136,7 @@ onUnmounted(() => {
       <div class="role-grid">
         <el-card v-for="role in roleCards" :key="role.key" class="role-card">
           <h3>{{ role.label }}</h3>
+          <p class="role-description">{{ role.description }}</p>
           <div class="progress-row">
             <span class="progress-label">
               Actions today: {{ role.actionsUsed }} / {{ MAX_ACTIONS_PER_DAY }}
@@ -172,8 +198,14 @@ onUnmounted(() => {
 }
 
 .role-card h3 {
-  margin: 0 0 1rem;
+  margin: 0 0 0.5rem;
   font-size: 1rem;
+}
+
+.role-description {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--el-text-color-secondary);
 }
 
 .progress-row {

@@ -16,7 +16,28 @@ const STATUS_LABELS = {
   DRAINING: "Draining",
 };
 
+// One line per capability explaining what it actually does -- the
+// capability name alone (e.g. "technical.review") doesn't say much on
+// its own. Static/hand-maintained: add an entry here whenever a new
+// capability is registered.
+const CAPABILITY_DESCRIPTIONS = {
+  "text.summarize": "Summarizes free-text input into a concise digest.",
+  "code.review": "Reviews source code diffs for bugs, style, and correctness issues.",
+  "ui.review": "Captures a live page with Playwright and reviews it for UI/accessibility issues.",
+  "architecture.review": "Reviews architectural or system-design proposals for soundness.",
+  "data.analysis": "Analyzes a dataset for trends, correlations, and anomalies.",
+  "technical.review": "Reviews technical/API/schema design proposals for issues.",
+  "assignment.route": "Routes a free-text assignment to the capability(ies) best suited to review it.",
+  "security.review": "Reviews code for security vulnerabilities (injection, auth gaps, secrets, etc.).",
+  "scrum.status": "Fetches the live GitHub Projects v2 board and reports its status.",
+  "text.word-count": "Counts words in the input text (the platform's built-in test capability).",
+};
+
 const statusLabel = computed(() => STATUS_LABELS[props.agent.status] ?? props.agent.status);
+
+const capabilityDescription = computed(
+  () => CAPABILITY_DESCRIPTIONS[props.agent.capability] ?? null,
+);
 
 const statusTagType = computed(() => {
   if (props.agent.status === "READY" && props.agent.fresh) return "success";
@@ -49,6 +70,8 @@ const shortAgentId = computed(() => {
       <h2 class="capability">{{ agent.capability }}</h2>
       <el-tag :type="statusTagType" round>{{ statusLabel }}</el-tag>
     </div>
+
+    <p v-if="capabilityDescription" class="description">{{ capabilityDescription }}</p>
 
     <el-tag v-if="isBusy" type="primary" size="small" class="busy-tag">{{ busyLabel }}</el-tag>
 
@@ -90,6 +113,12 @@ const shortAgentId = computed(() => {
   font-size: 1.05rem;
   margin: 0;
   word-break: break-word;
+}
+
+.description {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--el-text-color-secondary);
 }
 
 .busy-tag {
