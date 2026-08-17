@@ -192,3 +192,14 @@ Accepted; implementation follows in the accepting PR. Both roles deploy
 with placeholder credentials only — real PATs are a separate, later
 step the repository owner supplies explicitly, same as every prior
 role.
+
+**Update (2026-08-17):** merged (PR #65) and deployed to the Mac Docker
+host with obviously-fake placeholder credentials. Both services reach
+`ready: true`; a live cycle on each correctly failed closed with a real
+GitHub `401 Bad credentials` on the pull-request fetch — no AI Router
+call was reached, no action was possible. Confirmed visually via a
+Playwright screenshot: the dashboard's "Autonomous Agents" tab now
+shows all five roles (`AutonomousAgentsPanel.vue`'s `KNOWN_ROLES`
+extended), Frontend Specialist and Postgres Specialist both at zero
+usage today. Real PATs for both roles still await the repository
+owner's explicit supply.
