@@ -1159,6 +1159,101 @@ services:
       - ai_router_openai_api_key
       - github_token_principal_developer
 
+  # ADR-0026/ADR-0033: frontend-specialist-agent -- review-only (no
+  # merge, no write path of any kind: PullRequestReviewPort has no merge
+  # method at all), scoped to pull requests touching frontend/. Same
+  # zero-Kafka, zero-Capability-Registry, PeriodicService-only shape as
+  # every other autonomous role. PLACEHOLDER PAT ONLY -- same posture as
+  # every role's first deployment; a real PAT is a separate later step.
+  frontend-specialist-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-frontend-specialist-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750004"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-frontend-specialist-agent
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0033 Decision 4: a separate, frontend-specialist-only PAT
+      # (repo scope) -- never any other role's. PLACEHOLDER.
+      AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token_frontend_specialist
+      AI_PLATFORM_AGENT_GITHUB_REPO_OWNER: "Maincolt"
+      AI_PLATFORM_AGENT_GITHUB_REPO_NAME: "ai-platform"
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+      - github_token_frontend_specialist
+
+  # ADR-0026/ADR-0033: postgres-specialist-agent -- same shape as
+  # frontend-specialist-agent, scoped instead to pull requests touching
+  # infrastructure/migrations/, src/ai_platform/adapters/persistence/,
+  # or src/ai_platform/ports/persistence/. Review-only, no merge.
+  # PLACEHOLDER PAT ONLY.
+  postgres-specialist-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-postgres-specialist-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750005"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-postgres-specialist-agent
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0033 Decision 4: a separate, postgres-specialist-only PAT
+      # (repo scope) -- never any other role's. PLACEHOLDER.
+      AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token_postgres_specialist
+      AI_PLATFORM_AGENT_GITHUB_REPO_OWNER: "Maincolt"
+      AI_PLATFORM_AGENT_GITHUB_REPO_NAME: "ai-platform"
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+      - github_token_postgres_specialist
+
   # ADR-0023: assignment.route, the platform's eighth capability. Built
   # from the shared ai-platform:sprint6 image, same as technical-review-agent.
   assignment-route-agent:
@@ -1330,6 +1425,14 @@ secrets:
   # credential did.
   github_token_principal_developer:
     file: ./secrets/github_token_principal_developer.txt
+  # ADR-0033 Decision 3: a separate, frontend-specialist-only PAT (repo
+  # scope). Placeholder until the repository owner supplies a real one.
+  github_token_frontend_specialist:
+    file: ./secrets/github_token_frontend_specialist.txt
+  # ADR-0033 Decision 3: a separate, postgres-specialist-only PAT (repo
+  # scope). Placeholder until the repository owner supplies a real one.
+  github_token_postgres_specialist:
+    file: ./secrets/github_token_postgres_specialist.txt
 
 volumes:
   postgres-data:
