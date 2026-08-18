@@ -203,3 +203,19 @@ phases (2, 3, 4) ADR-0026 originally staged; ADR-0026 Phase 5
 future ADR. This role's first real credential, and therefore its first
 real autonomous merge against this repository's actual `main` branch,
 still awaits an explicit, separate go-ahead from the repository owner.
+
+**Update (2026-08-18):** the repository owner gave that explicit
+go-ahead and supplied a real, `repo`-scoped PAT. Before redeploying,
+confirmed via `gh pr list` that no pull request was currently open
+against this repository — the first real cycle would have nothing to
+act on regardless. Redeployed with the real credential: a live cycle
+showed a genuine `200 OK` pull-request fetch and a genuine Anthropic
+completion, and (confirmed via `agent.autonomous_actions`) recorded no
+action, matching the empty-PR-list expectation. This role's `run_cycle`
+does not skip the AI Router call on an empty PR list the way
+`frontend-specialist-agent`/`postgres-specialist-agent` do (ADR-0033's
+domain-filter early-exit is specific to those two) — the model was
+asked and correctly proposed nothing. `principal-developer-agent` is
+now live with real merge capability; its first real merge, if any,
+awaits an actual open, `mergeable_state == "clean"` pull request to
+appear.
