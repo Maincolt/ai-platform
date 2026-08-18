@@ -9,10 +9,10 @@ const REFRESH_INTERVAL_MS = 15000;
 
 // The currently-deployed daily caps (infrastructure/compose/docker-compose.yml's
 // AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY/_SPEND_CENTS_PER_DAY,
-// identical for all five roles -- ADR-0030/ADR-0031/ADR-0033's explicit
-// choice to reuse ADR-0028's proven defaults). A dashboard display
-// convenience, not an enforcement mechanism -- keep in sync by hand if
-// the deployed caps ever change.
+// identical for all six roles -- ADR-0030/ADR-0031/ADR-0033/ADR-0034's
+// explicit choice to reuse ADR-0028's proven defaults). A dashboard
+// display convenience, not an enforcement mechanism -- keep in sync by
+// hand if the deployed caps ever change.
 const MAX_ACTIONS_PER_DAY = 10;
 const MAX_SPEND_CENTS_PER_DAY = 100;
 
@@ -46,6 +46,12 @@ const KNOWN_ROLES = [
     label: "Postgres Specialist",
     description:
       "Reviews pull requests touching migrations and the persistence layer. Review-only -- structurally unable to merge.",
+  },
+  {
+    key: "backend-specialist",
+    label: "Backend Specialist",
+    description:
+      "Reviews pull requests touching the Python backend (src/ai_platform/). Review-only -- structurally unable to merge.",
   },
 ];
 
@@ -98,7 +104,7 @@ onUnmounted(() => {
 <template>
   <div class="autonomous-panel">
     <p class="intro">
-      Status for the ADR-0026 autonomous roles (ADR-0028/ADR-0030/ADR-0031/ADR-0033) -- each wakes up
+      Status for the ADR-0026 autonomous roles (ADR-0028/ADR-0030/ADR-0031/ADR-0033/ADR-0034) -- each wakes up
       hourly and takes real write actions with no per-action human approval, bounded by a
       platform-wide kill switch, a daily action/spend cap per role, and a durable audit trail.
       These roles hold no Capability Registry binding, so they never appear in the Agents tab.
