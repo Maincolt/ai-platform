@@ -106,3 +106,14 @@ benefit.
 Accepted; implementation follows in the accepting PR. Deploys with a
 placeholder credential only — a real PAT is a separate, later step the
 repository owner supplies explicitly, same as every prior role.
+
+**Update (2026-08-18):** merged (PR #66). The repository owner supplied
+a real, `repo`-scoped PAT before first deployment, so this role skipped
+the placeholder-then-real two-step every prior role followed — deployed
+directly with the real credential. A live cycle showed a genuine
+`200 OK` pull-request fetch against `Maincolt/ai-platform`, correctly
+reporting no open pull requests touch `src/ai_platform/` right now. The
+service reaches `ready: true`. Confirmed visually via a Playwright
+screenshot: the dashboard's "Autonomous Agents" tab now shows all six
+roles, Backend Specialist included, all at zero usage today.
+`backend-specialist-agent` is now live with real review capability.
