@@ -203,3 +203,13 @@ shows all five roles (`AutonomousAgentsPanel.vue`'s `KNOWN_ROLES`
 extended), Frontend Specialist and Postgres Specialist both at zero
 usage today. Real PATs for both roles still await the repository
 owner's explicit supply.
+
+**Update (2026-08-18):** the repository owner supplied real,
+`repo`-scoped PATs for both roles. Redeployed with them: a live cycle
+on each showed a genuine `200 OK` pull-request fetch against
+`Maincolt/ai-platform`, correctly reporting no open pull requests touch
+either domain (nothing open to review at the time). Both roles are now
+live and correctly idle, the same "live and correctly idle" state
+`scrum-master-agent` was in before its first test card existed — their
+first real `request_changes` action awaits an open PR that actually
+touches `frontend/` or the migrations/persistence paths.
