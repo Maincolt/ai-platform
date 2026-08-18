@@ -114,6 +114,7 @@ from ai_platform.ports.persistence.transactions import (
 )
 from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
+    BackendSpecialistRuntimeConfig,
     CommonRuntimeConfig,
     FrontendSpecialistRuntimeConfig,
     PlatformRuntimeConfig,
@@ -972,7 +973,9 @@ def build_principal_developer_process(
 
 
 def _build_domain_review_process(
-    config: FrontendSpecialistRuntimeConfig | PostgresSpecialistRuntimeConfig,
+    config: FrontendSpecialistRuntimeConfig
+    | PostgresSpecialistRuntimeConfig
+    | BackendSpecialistRuntimeConfig,
     *,
     role: str,
     domain_label: str,
@@ -980,11 +983,12 @@ def _build_domain_review_process(
     server_factory: ServerFactory | None,
 ) -> AgentProcess:
     """Shared by `build_frontend_specialist_process`/
-    `build_postgres_specialist_process` (ADR-0033) -- the two roles are
-    structurally identical, differing only in the three parameters this
-    function takes beyond `config`. Same zero-Kafka, zero-Capability-
-    Registry, `PeriodicService`-only shape every prior role's build
-    function already has."""
+    `build_postgres_specialist_process`/`build_backend_specialist_process`
+    (ADR-0033, ADR-0034) -- all three roles are structurally identical,
+    differing only in the three parameters this function takes beyond
+    `config`. Same zero-Kafka, zero-Capability-Registry,
+    `PeriodicService`-only shape every prior role's build function
+    already has."""
     if config.github_token is None:
         raise RuntimeConfigurationError("MISSING_CONFIGURATION:github_token")
     if config.github_repo_owner is None:
@@ -1096,6 +1100,26 @@ def build_postgres_specialist_process(
             "src/ai_platform/adapters/persistence/",
             "src/ai_platform/ports/persistence/",
         ),
+        server_factory=server_factory,
+    )
+
+
+def build_backend_specialist_process(
+    config: BackendSpecialistRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `backend-specialist-agent` (ADR-0026, ADR-0034).
+
+    Deliberately overlaps `postgres-specialist-agent`'s domain (ADR-0034
+    Decision 1) -- the path-prefix filter has no exclusion mechanism,
+    and two independent review comments on the same persistence-touching
+    PR is accepted as layered review depth, not treated as a bug."""
+    return _build_domain_review_process(
+        config,
+        role="backend-specialist",
+        domain_label="Python backend service and API layer",
+        path_prefixes=("src/ai_platform/",),
         server_factory=server_factory,
     )
 
@@ -1267,6 +1291,7 @@ _AIRouterConfig = (
     | PrincipalDeveloperRuntimeConfig
     | FrontendSpecialistRuntimeConfig
     | PostgresSpecialistRuntimeConfig
+    | BackendSpecialistRuntimeConfig
 )
 
 

@@ -416,3 +416,47 @@ def test_postgres_specialist_domain_filter_matches_its_own_paths() -> None:
     prompt = router.calls[0].prompt
     assert "Add a migration" in prompt
     assert "Add a Vue component" not in prompt
+
+
+def test_backend_specialist_domain_filter_deliberately_overlaps_postgres() -> None:
+    """ADR-0034 Decision 1: backend-specialist's single broad prefix
+    covers non-persistence backend files *and* the same
+    persistence-touching PRs postgres-specialist already reviews --
+    intentional overlap, not a bug -- while still excluding frontend."""
+    api_pull_request = PullRequestSnapshot(
+        number=4, title="Add a new endpoint", changed_file_paths=("src/ai_platform/api/app.py",)
+    )
+    postgres_pull_request = PullRequestSnapshot(
+        number=3,
+        title="Add a migration",
+        changed_file_paths=("src/ai_platform/adapters/persistence/autonomous.py",),
+    )
+    router = FakeAIRouter(
+        result=AICompletionResult(
+            output_text="[]",
+            usage=AICompletionUsage(
+                provider="anthropic",
+                model="m",
+                input_tokens=1,
+                output_tokens=1,
+                latency_seconds=0.1,
+            ),
+        )
+    )
+    pull_request_review = FakePullRequestReview(
+        pull_requests=(_FRONTEND_PULL_REQUEST, api_pull_request, postgres_pull_request)
+    )
+    agent, _state, pull_request_review = _build_agent(
+        role="backend-specialist",
+        path_prefixes=("src/ai_platform/",),
+        ai_router=router,
+        pull_request_review=pull_request_review,
+    )
+
+    _run(agent.run_cycle())
+
+    assert len(router.calls) == 1
+    prompt = router.calls[0].prompt
+    assert "Add a new endpoint" in prompt
+    assert "Add a migration" in prompt
+    assert "Add a Vue component" not in prompt

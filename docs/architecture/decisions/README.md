@@ -40,6 +40,7 @@ technical and structural choices.
 | [ADR-0031](ADR-0031-principal-developer-agent-phase-4.md) | `principal-developer-agent` — ADR-0026 Phase 4 | Accepted |
 | [ADR-0032](ADR-0032-autonomous-agent-dashboard-visibility.md) | Autonomous Agent Status — Dashboard Visibility | Accepted |
 | [ADR-0033](ADR-0033-frontend-and-postgres-specialist-agents.md) | `frontend-specialist-agent` and `postgres-specialist-agent` — Extending ADR-0026's Autonomous Roles | Accepted |
+| [ADR-0034](ADR-0034-backend-specialist-agent.md) | `backend-specialist-agent` — A Third Domain Review Role | Accepted |
 
 ## Naming
 

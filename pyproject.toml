@@ -26,6 +26,7 @@ ai-platform-product-owner-agent = "ai_platform.runtime.product_owner_main:main"
 ai-platform-principal-developer-agent = "ai_platform.runtime.principal_developer_main:main"
 ai-platform-frontend-specialist-agent = "ai_platform.runtime.frontend_specialist_main:main"
 ai-platform-postgres-specialist-agent = "ai_platform.runtime.postgres_specialist_main:main"
+ai-platform-backend-specialist-agent = "ai_platform.runtime.backend_specialist_main:main"
 
 [dependency-groups]
 dev = [

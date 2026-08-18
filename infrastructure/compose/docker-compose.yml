@@ -1254,6 +1254,53 @@ services:
       - ai_router_openai_api_key
       - github_token_postgres_specialist
 
+  # ADR-0026/ADR-0034: backend-specialist-agent -- same shape as
+  # frontend-specialist-agent/postgres-specialist-agent, scoped to pull
+  # requests touching src/ai_platform/ (deliberately overlapping
+  # postgres-specialist-agent's persistence paths -- ADR-0034 Decision
+  # 1). Review-only, no merge. PLACEHOLDER PAT ONLY.
+  backend-specialist-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-backend-specialist-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750006"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-backend-specialist-agent
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0034 Decision 2: a separate, backend-specialist-only PAT
+      # (repo scope) -- never any other role's. PLACEHOLDER.
+      AI_PLATFORM_AGENT_GITHUB_TOKEN_FILE: /run/secrets/github_token_backend_specialist
+      AI_PLATFORM_AGENT_GITHUB_REPO_OWNER: "Maincolt"
+      AI_PLATFORM_AGENT_GITHUB_REPO_NAME: "ai-platform"
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+      - github_token_backend_specialist
+
   # ADR-0023: assignment.route, the platform's eighth capability. Built
   # from the shared ai-platform:sprint6 image, same as technical-review-agent.
   assignment-route-agent:
@@ -1433,6 +1480,10 @@ secrets:
   # scope). Placeholder until the repository owner supplies a real one.
   github_token_postgres_specialist:
     file: ./secrets/github_token_postgres_specialist.txt
+  # ADR-0034 Decision 2: a separate, backend-specialist-only PAT (repo
+  # scope). Placeholder until the repository owner supplies a real one.
+  github_token_backend_specialist:
+    file: ./secrets/github_token_backend_specialist.txt
 
 volumes:
   postgres-data:
