@@ -32,9 +32,13 @@ boilerplate between the two.
 
 ### 1. Data source: Frankfurter's public `/latest` endpoint, no credential
 
-`https://api.frankfurter.app/latest` — free, unauthenticated, ECB
-reference exchange rates, updated daily on ECB business days. Same
-"no credential of any kind" posture as `crypto-market-agent`'s CoinGecko
+`https://api.frankfurter.dev/v1/latest` — free, unauthenticated, ECB
+reference exchange rates, updated daily on ECB business days. (This
+ADR's original URL, `api.frankfurter.app/latest`, now permanently
+redirects here — `301` to the `frankfurter.dev` host, found during live
+deployment against the Mac Docker host; the client calls the canonical
+URL directly rather than relying on redirect-following.) Same "no
+credential of any kind" posture as `crypto-market-agent`'s Binance
 source (Decision 1 there): a public GET request, no PAT, no key file,
 nothing to place under least privilege because nothing exists to leak.
 
