@@ -180,6 +180,13 @@ class CryptoMarketAgent:
             logger.warning("crypto-market-agent: findings response did not parse")
             return
 
+        watchlist_symbols = {price.symbol for price in snapshot.prices}
+        if any(finding["symbol"] not in watchlist_symbols for finding in findings):
+            logger.warning(
+                "crypto-market-agent: findings referenced a symbol outside the fetched watchlist"
+            )
+            return
+
         for finding in findings:
             await self._state.record_action(
                 agent_deployment_id=self._agent_deployment_id,

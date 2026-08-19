@@ -68,8 +68,12 @@ class BinanceMarketClient:
     async def fetch(self) -> MarketSnapshot:
         # Binance's multi-symbol form takes a JSON-array-encoded query
         # parameter (documented shape: symbols=["BTCUSDT","ETHUSDT"]) --
-        # httpx percent-encodes the raw string value for us.
-        params = {"symbols": json.dumps(list(self._symbols))}
+        # httpx percent-encodes the raw string value for us. Compact
+        # separators (no space after the comma), matching this
+        # codebase's existing precedent for a JSON string embedded
+        # elsewhere (shared/logging), since the space is untested and
+        # not confirmed accepted by Binance's parser.
+        params = {"symbols": json.dumps(list(self._symbols), separators=(",", ":"))}
         try:
             if self._client is not None:
                 response = await self._client.get(

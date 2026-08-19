@@ -96,8 +96,9 @@ class AutonomousRoleBudgetModel(BaseModel):
 
 
 class AutonomousActionModel(BaseModel):
-    """One audit-log entry (ADR-0032). Deliberately excludes `inputs`/
-    `result_detail` -- see `AutonomousActionRecord`'s own docstring."""
+    """One audit-log entry (ADR-0032). Deliberately excludes `inputs` --
+    see `AutonomousActionRecord`'s own docstring. `result_detail` is
+    included, already bounded/truncated for display by the adapter."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -106,6 +107,7 @@ class AutonomousActionModel(BaseModel):
     action_type: str
     target: str
     result_status: Literal["SUCCEEDED", "FAILED"]
+    result_detail: str
 
 
 class AutonomousStatusResponse(BaseModel):

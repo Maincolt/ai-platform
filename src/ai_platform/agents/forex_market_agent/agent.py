@@ -175,6 +175,15 @@ class ForexMarketAgent:
             logger.warning("forex-market-agent: findings response did not parse")
             return
 
+        watchlist_pairs = {
+            f"{snapshot.base_currency}/{rate.currency}" for rate in snapshot.rates
+        }
+        if any(finding["pair"] not in watchlist_pairs for finding in findings):
+            logger.warning(
+                "forex-market-agent: findings referenced a pair outside the fetched watchlist"
+            )
+            return
+
         for finding in findings:
             await self._state.record_action(
                 agent_deployment_id=self._agent_deployment_id,

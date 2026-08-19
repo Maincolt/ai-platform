@@ -101,7 +101,11 @@ def test_role_budgets_are_reported() -> None:
     ]
 
 
-def test_recent_actions_are_reported_without_inputs_or_result_detail() -> None:
+def test_recent_actions_are_reported_with_result_detail_but_without_inputs() -> None:
+    """`result_detail` is surfaced (ADR-0035/ADR-0036 -- the market-
+    observer roles' whole purpose is to display it); `inputs` stays
+    excluded (ADR-0032 Security -- see `AutonomousActionRecord`'s
+    docstring)."""
     base_state = build_app_state()
     fake = _FakeAutonomousState(
         recent_actions=(
@@ -111,6 +115,7 @@ def test_recent_actions_are_reported_without_inputs_or_result_detail() -> None:
                 action_type="set_status",
                 target="PVTI_1",
                 result_status="SUCCEEDED",
+                result_detail="ok",
             ),
         )
     )
@@ -126,7 +131,7 @@ def test_recent_actions_are_reported_without_inputs_or_result_detail() -> None:
             "action_type": "set_status",
             "target": "PVTI_1",
             "result_status": "SUCCEEDED",
+            "result_detail": "ok",
         }
     ]
     assert "inputs" not in actions[0]
-    assert "result_detail" not in actions[0]

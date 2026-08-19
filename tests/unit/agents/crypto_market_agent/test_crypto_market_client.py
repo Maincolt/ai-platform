@@ -112,3 +112,21 @@ def test_request_targets_binance_24h_ticker_with_watchlist_symbols() -> None:
     assert request.url.host == "api.binance.com"
     assert request.url.path == "/api/v3/ticker/24hr"
     assert request.url.params["symbols"] == '["BTCUSDT"]'
+
+
+def test_multi_symbol_request_has_no_spaces_in_the_json_array_param() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {"symbol": "BTCUSDT", "lastPrice": "1.0"},
+                {"symbol": "ETHUSDT", "lastPrice": "2.0"},
+            ],
+        )
+
+    _run(_client(handler, symbols=("BTCUSDT", "ETHUSDT")).fetch())
+
+    assert captured[0].url.params["symbols"] == '["BTCUSDT","ETHUSDT"]'

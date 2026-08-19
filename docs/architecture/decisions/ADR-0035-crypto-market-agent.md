@@ -186,6 +186,25 @@ strain, and a purpose-built name would be the only benefit.
 
 ## Implementation Status
 
+A pre-merge review (PR #67) found three real gaps, all fixed before
+merge: (1) `agent.autonomous_actions.result_detail` was written but
+never surfaced anywhere the dashboard could show it, contradicting this
+ADR's own Decision 6 claim — `AutonomousActionRecord`/the `GET
+/api/v1/autonomous-agents` response/the dashboard table now include a
+truncated `result_detail` column (previously excluded platform-wide per
+ADR-0032 Security; now included since these two roles' entire purpose
+is to surface it, and it renders as plain, escaped text); (2)
+`_parse_findings` validated a finding's `symbol` shape but never
+checked it against the symbols actually present in the fetched
+snapshot, so a hallucinated or injected off-watchlist symbol could be
+recorded as a real observation — `run_cycle` now rejects the whole
+batch if any finding references a symbol outside the fetched watchlist,
+matching this codebase's existing "reject the whole batch on any
+mismatch" discipline; (3) the Binance multi-symbol query parameter used
+`json.dumps`'s default separators (a space after each comma), untested
+for the multi-symbol case — now uses compact separators, with a new
+multi-symbol test.
+
 Accepted and implemented: `src/ai_platform/agents/crypto_market_agent/`
 (`client.py`'s `BinanceMarketClient`, `agent.py`'s `CryptoMarketAgent`
 and strict findings parser), `CryptoMarketRuntimeConfig`

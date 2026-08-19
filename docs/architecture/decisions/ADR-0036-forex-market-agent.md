@@ -139,6 +139,12 @@ rate movement is later judged necessary.
 
 ## Implementation Status
 
+The same pre-merge review that covered ADR-0035 (PR #67) applies here
+too: `result_detail` dashboard visibility (shared fix, `AutonomousActionRecord`/
+API/dashboard table) and the same off-watchlist-`pair` rejection added
+to `run_cycle`, independently implemented per Decision 3 (no shared
+helper with `crypto_market_agent`'s equivalent check).
+
 Accepted and implemented: `src/ai_platform/agents/forex_market_agent/`
 (`client.py`'s `FrankfurterExchangeRateClient`, `agent.py`'s
 `ForexMarketAgent` and its own independent findings parser),
