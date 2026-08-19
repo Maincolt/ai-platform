@@ -679,6 +679,95 @@ class BackendSpecialistRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CryptoMarketRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
+    """ADR-0035: adds `crypto-market-agent`'s configured watchlist to the
+    shared autonomous-role base. Unlike every prior autonomous role's
+    config class, there is no credential field at all -- Binance's
+    public 24h-ticker endpoint needs none (ADR-0035 Decision 1, revised
+    to Binance from the ADR's original CoinGecko choice)."""
+
+    crypto_watchlist: tuple[str, ...]
+    """Binance trading-pair symbols, e.g. ("BTCUSDT", "ETHUSDT")."""
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> CryptoMarketRuntimeConfig:
+        values = os.environ if environment is None else environment
+        base = _autonomous_role_base(values)
+        return cls(
+            environment=base.environment,
+            database_dsn=base.database_dsn,
+            database_pool_min_size=base.database_pool_min_size,
+            database_pool_max_size=base.database_pool_max_size,
+            database_timeout_seconds=base.database_timeout_seconds,
+            agent_id=base.agent_id,
+            agent_component=base.agent_component,
+            readiness_host=base.readiness_host,
+            readiness_port=base.readiness_port,
+            readiness_credential=base.readiness_credential,
+            startup_timeout_seconds=base.startup_timeout_seconds,
+            shutdown_grace_seconds=base.shutdown_grace_seconds,
+            ai_router_anthropic_api_key=base.ai_router_anthropic_api_key,
+            ai_router_anthropic_model=base.ai_router_anthropic_model,
+            ai_router_openai_api_key=base.ai_router_openai_api_key,
+            ai_router_openai_model=base.ai_router_openai_model,
+            ai_router_max_output_tokens=base.ai_router_max_output_tokens,
+            ai_router_provider_timeout_seconds=base.ai_router_provider_timeout_seconds,
+            autonomous_poll_interval_seconds=base.autonomous_poll_interval_seconds,
+            autonomous_max_actions_per_day=base.autonomous_max_actions_per_day,
+            autonomous_max_spend_cents_per_day=base.autonomous_max_spend_cents_per_day,
+            crypto_watchlist=_required_string_list(values, "AI_PLATFORM_AGENT_CRYPTO_WATCHLIST"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForexMarketRuntimeConfig(_AutonomousRoleRuntimeConfigBase):
+    """ADR-0036: adds `forex-market-agent`'s configured base currency and
+    watchlist to the shared autonomous-role base. Like
+    `CryptoMarketRuntimeConfig`, no credential field -- Frankfurter's
+    public rates endpoint needs none (ADR-0036 Decision 1). Deliberately
+    a fully independent config class from `CryptoMarketRuntimeConfig`
+    (ADR-0036 Decision 3), even though the shape looks similar."""
+
+    forex_base_currency: str | None
+    forex_watchlist: tuple[str, ...]
+    """Target currency codes against `forex_base_currency`, e.g. ("USD", "GBP", "JPY")."""
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str] | None = None
+    ) -> ForexMarketRuntimeConfig:
+        values = os.environ if environment is None else environment
+        base = _autonomous_role_base(values)
+        return cls(
+            environment=base.environment,
+            database_dsn=base.database_dsn,
+            database_pool_min_size=base.database_pool_min_size,
+            database_pool_max_size=base.database_pool_max_size,
+            database_timeout_seconds=base.database_timeout_seconds,
+            agent_id=base.agent_id,
+            agent_component=base.agent_component,
+            readiness_host=base.readiness_host,
+            readiness_port=base.readiness_port,
+            readiness_credential=base.readiness_credential,
+            startup_timeout_seconds=base.startup_timeout_seconds,
+            shutdown_grace_seconds=base.shutdown_grace_seconds,
+            ai_router_anthropic_api_key=base.ai_router_anthropic_api_key,
+            ai_router_anthropic_model=base.ai_router_anthropic_model,
+            ai_router_openai_api_key=base.ai_router_openai_api_key,
+            ai_router_openai_model=base.ai_router_openai_model,
+            ai_router_max_output_tokens=base.ai_router_max_output_tokens,
+            ai_router_provider_timeout_seconds=base.ai_router_provider_timeout_seconds,
+            autonomous_poll_interval_seconds=base.autonomous_poll_interval_seconds,
+            autonomous_max_actions_per_day=base.autonomous_max_actions_per_day,
+            autonomous_max_spend_cents_per_day=base.autonomous_max_spend_cents_per_day,
+            forex_base_currency=_optional_str(values, "AI_PLATFORM_AGENT_FOREX_BASE_CURRENCY"),
+            forex_watchlist=_required_string_list(values, "AI_PLATFORM_AGENT_FOREX_WATCHLIST"),
+        )
+
+
 def _common(values: Mapping[str, str], *, prefix: str) -> CommonRuntimeConfig:
     environment = _required(values, "AI_PLATFORM_ENVIRONMENT")
     if environment != "development":
@@ -751,6 +840,17 @@ def _required(values: Mapping[str, str], name: str) -> str:
     if value is None or not value.strip():
         raise RuntimeConfigurationError(f"MISSING_CONFIGURATION:{name}")
     return value.strip()
+
+
+def _required_string_list(values: Mapping[str, str], name: str) -> tuple[str, ...]:
+    """A comma-separated list of non-empty tokens, e.g. a market
+    watchlist (ADR-0035/ADR-0036) -- config-driven, not hardcoded,
+    matching `scrum.status`'s config-driven-fetch-target precedent."""
+    raw = _required(values, name)
+    items = tuple(token.strip() for token in raw.split(",") if token.strip())
+    if not items:
+        raise RuntimeConfigurationError(f"EMPTY_CONFIGURATION:{name}")
+    return items
 
 
 def _bounded_int(values: Mapping[str, str], name: str, minimum: int, maximum: int) -> int:

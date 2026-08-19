@@ -53,6 +53,18 @@ const KNOWN_ROLES = [
     description:
       "Reviews pull requests touching the Python backend (src/ai_platform/). Review-only -- structurally unable to merge.",
   },
+  {
+    key: "crypto-market",
+    label: "Crypto Market",
+    description:
+      "Watches a cryptocurrency watchlist and records advisory findings. Read-only -- no external write action of any kind.",
+  },
+  {
+    key: "forex-market",
+    label: "Forex Market",
+    description:
+      "Watches a foreign-exchange watchlist and records advisory findings. Read-only -- no external write action of any kind.",
+  },
 ];
 
 const status = ref(null);
