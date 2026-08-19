@@ -50,11 +50,15 @@ from ai_platform.agents.assignment_route_agent.agent import AssignmentRouteAgent
 from ai_platform.agents.assignment_route_agent.capability import (
     CAPABILITY_NAME as ASSIGNMENT_ROUTE_CAPABILITY_NAME,
 )
+from ai_platform.agents.crypto_market_agent.agent import CryptoMarketAgent
+from ai_platform.agents.crypto_market_agent.client import BinanceMarketClient
 from ai_platform.agents.data_analysis_agent.agent import DataAnalysisAgent
 from ai_platform.agents.data_analysis_agent.capability import (
     CAPABILITY_NAME as DATA_ANALYSIS_CAPABILITY_NAME,
 )
 from ai_platform.agents.domain_review_agent.agent import DomainReviewAgent
+from ai_platform.agents.forex_market_agent.agent import ForexMarketAgent
+from ai_platform.agents.forex_market_agent.client import FrankfurterExchangeRateClient
 from ai_platform.agents.principal_developer_agent.agent import PrincipalDeveloperAgent
 from ai_platform.agents.principal_developer_agent.source_control import GitHubSourceControlClient
 from ai_platform.agents.product_owner_agent.agent import ProductOwnerAgent
@@ -116,6 +120,8 @@ from ai_platform.runtime.configuration import (
     AgentRuntimeConfig,
     BackendSpecialistRuntimeConfig,
     CommonRuntimeConfig,
+    CryptoMarketRuntimeConfig,
+    ForexMarketRuntimeConfig,
     FrontendSpecialistRuntimeConfig,
     PlatformRuntimeConfig,
     PostgresSpecialistRuntimeConfig,
@@ -1124,6 +1130,171 @@ def build_backend_specialist_process(
     )
 
 
+def build_crypto_market_process(
+    config: CryptoMarketRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `crypto-market-agent` (ADR-0035).
+
+    Same zero-Kafka, zero-Capability-Registry, `PeriodicService`-only
+    shape as `build_scrum_master_process`, but with no credential to
+    validate at all -- Binance's public 24h-ticker endpoint needs none
+    (ADR-0035 Decision 1, revised to Binance from the ADR's original
+    CoinGecko choice). Unlike every prior autonomous role, this process
+    never dispatches an external write action; its only side effect is a
+    local `agent.autonomous_actions` row per cycle."""
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    market_data = BinanceMarketClient(symbols=config.crypto_watchlist)
+    crypto_market = CryptoMarketAgent(
+        agent_deployment_id=config.agent_id,
+        state=state,
+        market_data=market_data,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            crypto_market.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
+def build_forex_market_process(
+    config: ForexMarketRuntimeConfig,
+    *,
+    server_factory: ServerFactory | None = None,
+) -> AgentProcess:
+    """Build `forex-market-agent` (ADR-0036).
+
+    Mirrors `build_crypto_market_process`'s shape (zero-Kafka, zero-
+    Capability-Registry, `PeriodicService`-only, no credential) but is a
+    fully independent composition function, per ADR-0036 Decision 3 --
+    no shared helper between the two market-observer builders beyond
+    what every autonomous role already shares (`_build_ai_router`,
+    `PsycopgAutonomousStatePort`, `PeriodicService`)."""
+    if config.forex_base_currency is None:
+        raise RuntimeConfigurationError("MISSING_CONFIGURATION:forex_base_currency")
+
+    pool = AsyncPsycopgPool(
+        config.database_dsn.read(),
+        component_schema="agent",
+        expected_schema_version=_EXPECTED_SCHEMA_VERSION["agent"],
+        min_size=config.database_pool_min_size,
+        max_size=config.database_pool_max_size,
+        timeout_seconds=config.database_timeout_seconds,
+    )
+    state = PsycopgAutonomousStatePort(pool)
+    exchange_rates = FrankfurterExchangeRateClient(
+        base_currency=config.forex_base_currency,
+        target_currencies=config.forex_watchlist,
+    )
+    forex_market = ForexMarketAgent(
+        agent_deployment_id=config.agent_id,
+        state=state,
+        exchange_rates=exchange_rates,
+        ai_router=_build_ai_router(config),
+        max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
+        provider_deadline_seconds=_require_ai_router_float(
+            config, "ai_router_provider_timeout_seconds"
+        ),
+        max_spend_cents_per_day=config.autonomous_max_spend_cents_per_day,
+    )
+
+    readiness_state = AgentReadinessState(
+        AgentReadinessSnapshot(
+            environment=config.environment,
+            agent_id=AgentId(config.agent_id),
+            declaration_revision="n/a",
+            declaration_digest="n/a",
+            capabilities=(),
+            accepted_command_contracts=(),
+            produced_event_contracts=(),
+            ready=False,
+            draining=False,
+        )
+    )
+    readiness_app = create_agent_readiness_app(
+        state=readiness_state,
+        readiness_credential=config.readiness_credential.read(),
+    )
+    services: list[ManagedService] = [
+        PeriodicService(
+            forex_market.run_cycle,
+            interval_seconds=config.autonomous_poll_interval_seconds,
+        ),
+    ]
+    actual_server_factory = server_factory or _server_service
+    services.append(
+        actual_server_factory(readiness_app, config.readiness_host, config.readiness_port)
+    )
+
+    lifecycle = ProcessLifecycle(
+        resources=(pool,),
+        services=services,
+        startup_timeout_seconds=config.startup_timeout_seconds,
+        shutdown_timeout_seconds=config.shutdown_grace_seconds,
+        on_started=lambda: readiness_state.set_ready(True),
+        on_stopping=readiness_state.start_draining,
+        on_service_failure=lambda: readiness_state.set_ready(False),
+    )
+    return AgentProcess(
+        readiness_app=readiness_app,
+        readiness_state=readiness_state,
+        lifecycle=lifecycle,
+    )
+
+
 def _build_executor(
     capability_name: str,
     *,
@@ -1292,6 +1463,8 @@ _AIRouterConfig = (
     | FrontendSpecialistRuntimeConfig
     | PostgresSpecialistRuntimeConfig
     | BackendSpecialistRuntimeConfig
+    | CryptoMarketRuntimeConfig
+    | ForexMarketRuntimeConfig
 )
 
 

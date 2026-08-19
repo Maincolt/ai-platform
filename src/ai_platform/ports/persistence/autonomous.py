@@ -44,9 +44,15 @@ class RoleBudgetRecord:
 class AutonomousActionRecord:
     """One audit-log row, for a caller listing recent actions across
     every role (ADR-0032) rather than dispatching one. Deliberately
-    excludes `inputs`/`result_detail` -- both can carry arbitrary text
-    sourced from untrusted fetched content (ADR-0032 Security), and this
-    record is meant for display, not full audit reconstruction (use
+    excludes `inputs` -- it can carry arbitrary text sourced from
+    untrusted fetched content (ADR-0032 Security) beyond what a single
+    display field should hold. `result_detail` is included, bounded/
+    truncated by the adapter (ADR-0035/ADR-0036): the market-observer
+    roles' whole purpose is to surface this text (their finding
+    summary), and it renders as plain, escaped text, not raw HTML, so
+    the display-only risk is the same as any other AI-generated finding
+    already shown elsewhere on this dashboard. This record is still
+    meant for display, not full audit reconstruction (use
     `agent.autonomous_actions` directly via `psql` for that)."""
 
     occurred_at: datetime
@@ -54,6 +60,7 @@ class AutonomousActionRecord:
     action_type: str
     target: str
     result_status: str
+    result_detail: str
 
 
 class AutonomousStatePort(Protocol):

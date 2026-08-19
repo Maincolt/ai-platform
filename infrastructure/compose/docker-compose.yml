@@ -1301,6 +1301,98 @@ services:
       - ai_router_openai_api_key
       - github_token_backend_specialist
 
+  # ADR-0035: crypto-market-agent -- a read-only, action-free autonomous
+  # role (PeriodicService, zero Kafka, no Capability Registry binding,
+  # same shape as scrum-master-agent/the specialist reviewers). No
+  # credential at all: Binance's public 24h-ticker endpoint needs none
+  # (revised to Binance from the ADR's original CoinGecko choice). Its
+  # only side effect is a local agent.autonomous_actions row per cycle
+  # -- it never calls out to anything beyond Binance and this platform's
+  # own database.
+  crypto-market-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-crypto-market-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750007"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-crypto-market-agent
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0035 Decision 2: config-driven watchlist, not hardcoded.
+      # Binance trading-pair symbols (revised from CoinGecko coin ids).
+      AI_PLATFORM_AGENT_CRYPTO_WATCHLIST: "BTCUSDT,ETHUSDT,SOLUSDT"
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+
+  # ADR-0036: forex-market-agent -- a second, independent market-observer
+  # role (same PeriodicService/zero-Kafka/no-Registry-binding/no-
+  # credential shape as crypto-market-agent, deliberately built with no
+  # shared code between the two per ADR-0036 Decision 3). Watches a
+  # configured currency-pair watchlist via Frankfurter's free ECB
+  # reference-rate API.
+  forex-market-agent:
+    image: ai-platform:sprint6
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["ai-platform-forex-market-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AI_PLATFORM_ENVIRONMENT: development
+      AI_PLATFORM_AGENT_DATABASE_POOL_MIN_SIZE: "1"
+      AI_PLATFORM_AGENT_DATABASE_POOL_MAX_SIZE: "3"
+      AI_PLATFORM_AGENT_DATABASE_DSN_FILE: /run/secrets/dsn_agent
+      AI_PLATFORM_AGENT_DATABASE_TIMEOUT_SECONDS: "5"
+      AI_PLATFORM_AGENT_ID: "018f23a7-6b4d-7c91-8a2e-5c40a5750008"
+      AI_PLATFORM_AGENT_COMPONENT: local-compose-forex-market-agent
+      AI_PLATFORM_AGENT_READINESS_HOST: 0.0.0.0
+      AI_PLATFORM_AGENT_READINESS_PORT: "8100"
+      AI_PLATFORM_READINESS_CREDENTIAL_FILE: /run/secrets/readiness_credential
+      AI_PLATFORM_STARTUP_TIMEOUT_SECONDS: "30"
+      AI_PLATFORM_SHUTDOWN_GRACE_SECONDS: "10"
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_API_KEY_FILE: /run/secrets/ai_router_anthropic_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_ANTHROPIC_MODEL: claude-haiku-4-5
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_API_KEY_FILE: /run/secrets/ai_router_openai_api_key
+      AI_PLATFORM_AGENT_AI_ROUTER_OPENAI_MODEL: gpt-5-mini
+      AI_PLATFORM_AGENT_AI_ROUTER_MAX_OUTPUT_TOKENS: "512"
+      AI_PLATFORM_AGENT_AI_ROUTER_PROVIDER_TIMEOUT_SECONDS: "20"
+      # ADR-0036 Decision 2: config-driven base currency and watchlist.
+      AI_PLATFORM_AGENT_FOREX_BASE_CURRENCY: "EUR"
+      AI_PLATFORM_AGENT_FOREX_WATCHLIST: "USD,GBP,JPY"
+      AI_PLATFORM_AGENT_AUTONOMOUS_POLL_INTERVAL_SECONDS: "3600"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_ACTIONS_PER_DAY: "10"
+      AI_PLATFORM_AGENT_AUTONOMOUS_MAX_SPEND_CENTS_PER_DAY: "100"
+    secrets:
+      - dsn_agent
+      - readiness_credential
+      - ai_router_anthropic_api_key
+      - ai_router_openai_api_key
+
   # ADR-0023: assignment.route, the platform's eighth capability. Built
   # from the shared ai-platform:sprint6 image, same as technical-review-agent.
   assignment-route-agent:

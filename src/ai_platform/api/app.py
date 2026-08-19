@@ -443,6 +443,7 @@ async def autonomous_agents_status(
                     action_type=record.action_type,
                     target=record.target,
                     result_status=cast("Literal['SUCCEEDED', 'FAILED']", record.result_status),
+                    result_detail=record.result_detail,
                 )
                 for record in recent_actions
             ],

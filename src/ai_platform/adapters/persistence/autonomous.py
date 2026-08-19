@@ -131,19 +131,20 @@ class PsycopgAutonomousStatePort:
         async with self._pool.connection() as connection:
             rows = await (
                 await connection.execute(
-                    "SELECT occurred_at, role, action_type, target, result_status "
+                    "SELECT occurred_at, role, action_type, target, result_status, result_detail "
                     "FROM agent.autonomous_actions ORDER BY occurred_at DESC, id DESC LIMIT %s",
                     (limit,),
                 )
             ).fetchall()
         records: list[AutonomousActionRecord] = []
-        for occurred_at, role, action_type, target, result_status in rows:
+        for occurred_at, role, action_type, target, result_status, result_detail in rows:
             if (
                 not isinstance(occurred_at, datetime)
                 or not isinstance(role, str)
                 or not isinstance(action_type, str)
                 or not isinstance(target, str)
                 or not isinstance(result_status, str)
+                or not isinstance(result_detail, str)
             ):
                 raise PermanentPersistenceError("Stored autonomous action record is invalid.")
             records.append(
@@ -153,6 +154,20 @@ class PsycopgAutonomousStatePort:
                     action_type=action_type,
                     target=target,
                     result_status=result_status,
+                    result_detail=_truncate_for_display(result_detail),
                 )
             )
         return tuple(records)
+
+
+_MAX_DISPLAYED_RESULT_DETAIL_LENGTH = 300
+
+
+def _truncate_for_display(value: str) -> str:
+    """Bound at the adapter boundary (ADR-0032's own "display, not full
+    reconstruction" framing) -- callers past this point may render the
+    value directly, so the truncation must happen before it leaves the
+    adapter, not be left to each caller to remember."""
+    if len(value) <= _MAX_DISPLAYED_RESULT_DETAIL_LENGTH:
+        return value
+    return value[: _MAX_DISPLAYED_RESULT_DETAIL_LENGTH - 1] + "…"

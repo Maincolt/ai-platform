@@ -53,6 +53,18 @@ const KNOWN_ROLES = [
     description:
       "Reviews pull requests touching the Python backend (src/ai_platform/). Review-only -- structurally unable to merge.",
   },
+  {
+    key: "crypto-market",
+    label: "Crypto Market",
+    description:
+      "Watches a cryptocurrency watchlist and records advisory findings. Read-only -- no external write action of any kind.",
+  },
+  {
+    key: "forex-market",
+    label: "Forex Market",
+    description:
+      "Watches a foreign-exchange watchlist and records advisory findings. Read-only -- no external write action of any kind.",
+  },
 ];
 
 const status = ref(null);
@@ -168,7 +180,7 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column prop="role" label="Role" width="160" />
         <el-table-column prop="action_type" label="Action" width="160" />
-        <el-table-column prop="target" label="Target" />
+        <el-table-column prop="target" label="Target" width="140" />
         <el-table-column label="Result" width="120">
           <template #default="{ row }">
             <el-tag :type="row.result_status === 'SUCCEEDED' ? 'success' : 'danger'">
@@ -176,6 +188,13 @@ onUnmounted(() => {
             </el-tag>
           </template>
         </el-table-column>
+        <!-- The market-observer roles' whole purpose is to surface this
+             text (their AI-generated finding summary) -- other roles'
+             detail is usually just "ok" or a short error string. Plain
+             text, Vue-escaped, same display-only posture as any other
+             AI-generated finding already shown elsewhere on this
+             dashboard (ADR-0035/ADR-0036). -->
+        <el-table-column prop="result_detail" label="Detail" show-overflow-tooltip />
       </el-table>
     </template>
   </div>
