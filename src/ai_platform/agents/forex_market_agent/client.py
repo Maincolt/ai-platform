@@ -19,7 +19,12 @@ import httpx
 
 from ai_platform.agents.forex_market_agent.errors import ExchangeRateFetchFailedError
 
-_FRANKFURTER_LATEST_URL = "https://api.frankfurter.app/latest"
+_FRANKFURTER_LATEST_URL = "https://api.frankfurter.dev/v1/latest"
+"""`api.frankfurter.app` (this ADR's original choice) now permanently
+redirects here (`301` to `api.frankfurter.dev/v1/latest`, confirmed live
+against the Mac Docker deployment) -- calling the canonical host/path
+directly avoids an extra redirect hop rather than relying on the HTTP
+client to follow it."""
 _DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 _MAX_CURRENCY_CODE_LENGTH = 10
 

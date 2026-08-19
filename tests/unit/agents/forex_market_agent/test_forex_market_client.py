@@ -101,8 +101,8 @@ def test_request_targets_frankfurter_latest_with_watchlist_params() -> None:
 
     assert len(captured) == 1
     request = captured[0]
-    assert request.url.host == "api.frankfurter.app"
-    assert request.url.path == "/latest"
+    assert request.url.host == "api.frankfurter.dev"
+    assert request.url.path == "/v1/latest"
     query = request.url.params
     assert query["from"] == "EUR"
     assert query["to"] == "USD"
