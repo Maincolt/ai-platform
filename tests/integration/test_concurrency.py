@@ -68,7 +68,7 @@ _CAPABILITY_VERSION = "1.0"
 # Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
 # (see tests/integration/conftest.py's copy of this same constant/comment).
 _EXPECTED_ORCHESTRATOR_SCHEMA_VERSION = 4
-_EXPECTED_AGENT_SCHEMA_VERSION = 5
+_EXPECTED_AGENT_SCHEMA_VERSION = 6
 
 
 def _new_id() -> str:

@@ -1,4 +1,4 @@
-"""The Crypto Market Agent's cycle logic (ADR-0035).
+"""The Crypto Market Agent's cycle logic (ADR-0035, ADR-0038).
 
 Like `scrum_master_agent`, `run_cycle()` is the operation a
 `PeriodicService` invokes on a fixed interval, not a reaction to one
@@ -6,10 +6,12 @@ Like `scrum_master_agent`, `run_cycle()` is the operation a
 propose-then-dispatch step: this role never acts on anything external.
 Each cycle: check the kill switch, check today's spend, fetch the
 watchlist, make one AI Router call producing findings, strictly parse/
-validate them, then record each finding as one
-`agent.autonomous_actions` row (`action_type="record_finding"`) --
-that write is the cycle's only side effect, always local, never a call
-back out to any external system.
+validate them, then record every fetched price (ADR-0038, structured
+history for `coinbase-trader-agent`/`fxcm-trader-agent` to read later)
+and each finding as one `agent.autonomous_actions` row
+(`action_type="record_finding"`) plus one `agent.market_findings` row
+-- those writes are the cycle's only side effect, always local, never a
+call back out to any external system.
 """
 
 import json
@@ -18,10 +20,15 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from ai_platform.agents._autonomous_shared import estimate_spend_cents, strip_markdown_json_fence
-from ai_platform.agents.crypto_market_agent.client import MarketDataPort, MarketSnapshot
+from ai_platform.agents.crypto_market_agent.client import (
+    MarketDataPort,
+    MarketSnapshot,
+    SymbolPrice,
+)
 from ai_platform.agents.crypto_market_agent.errors import MarketDataFetchFailedError
 from ai_platform.ports.ai_router import AICompletionRequest, AIRouterPort, DataClassification
 from ai_platform.ports.persistence.autonomous import AutonomousStatePort
+from ai_platform.ports.persistence.market_history import MarketHistoryPort
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +122,7 @@ class CryptoMarketAgent:
         *,
         agent_deployment_id: str,
         state: AutonomousStatePort,
+        market_history: MarketHistoryPort,
         market_data: MarketDataPort,
         ai_router: AIRouterPort,
         max_output_tokens: int,
@@ -129,6 +137,7 @@ class CryptoMarketAgent:
             raise ValueError("max_spend_cents_per_day must be positive")
         self._agent_deployment_id = agent_deployment_id
         self._state = state
+        self._market_history = market_history
         self._market_data = market_data
         self._ai_router = ai_router
         self._max_output_tokens = max_output_tokens
@@ -154,6 +163,9 @@ class CryptoMarketAgent:
         except MarketDataFetchFailedError as error:
             logger.warning("crypto-market-agent: price fetch failed: %s", error.reason)
             return
+
+        for price in snapshot.prices:
+            await self._record_price_observation_best_effort(price=price, now=now)
 
         completion = await self._ai_router.complete(
             AICompletionRequest(
@@ -197,4 +209,47 @@ class CryptoMarketAgent:
                 result_status="SUCCEEDED",
                 result_detail=finding["summary"],
                 occurred_at=now,
+            )
+            await self._record_finding_history_best_effort(finding=finding, now=now)
+
+    async def _record_price_observation_best_effort(
+        self, *, price: SymbolPrice, now: datetime
+    ) -> None:
+        # ADR-0038: purely additive/non-critical relative to
+        # `agent.autonomous_actions` -- unlike that call, a transient
+        # failure here must never propagate and kill `PeriodicService`'s
+        # loop (it has no retry of its own, so an uncaught exception
+        # here would silently end every future cycle, including the
+        # audit-critical `record_action` path).
+        try:
+            await self._market_history.record_price_observation(
+                role=_ROLE,
+                symbol=price.symbol,
+                price=price.price_usd,
+                change_24h_percent=price.change_24h_percent,
+                observed_at=now,
+            )
+        except Exception:  # noqa: BLE001 - deliberately broad, see comment above
+            logger.warning(
+                "crypto-market-agent: failed to record price observation for %s",
+                price.symbol,
+                exc_info=True,
+            )
+
+    async def _record_finding_history_best_effort(
+        self, *, finding: dict[str, str], now: datetime
+    ) -> None:
+        try:
+            await self._market_history.record_finding(
+                role=_ROLE,
+                symbol=finding["symbol"],
+                summary=finding["summary"],
+                severity=finding["severity"],
+                observed_at=now,
+            )
+        except Exception:  # noqa: BLE001 - deliberately broad, see comment above
+            logger.warning(
+                "crypto-market-agent: failed to record finding history for %s",
+                finding["symbol"],
+                exc_info=True,
             )

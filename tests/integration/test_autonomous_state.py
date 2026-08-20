@@ -18,7 +18,7 @@ pytestmark = pytest.mark.external_service
 
 # Must track `ai_platform.runtime.composition._EXPECTED_SCHEMA_VERSION`
 # (see tests/integration/conftest.py's copy of this same constant/comment).
-_EXPECTED_AGENT_SCHEMA_VERSION = 5
+_EXPECTED_AGENT_SCHEMA_VERSION = 6
 
 
 async def _open_agent_pool(dsn: str) -> AsyncPsycopgPool:
