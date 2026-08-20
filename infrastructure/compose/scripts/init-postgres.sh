@@ -154,5 +154,7 @@ apply_migration orchestrator 4 /sql/migrations/0008_orchestrator_submission_hist
     "orchestrator migration 0008"
 apply_migration agent 5 /sql/migrations/0009_agent_autonomous_actions.sql \
     "agent migration 0009"
+apply_migration agent 6 /sql/migrations/0010_agent_market_history.sql \
+    "agent migration 0010"
 
 echo "PostgreSQL bootstrap complete."
