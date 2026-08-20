@@ -1,10 +1,11 @@
-"""The Forex Market Agent's cycle logic (ADR-0036).
+"""The Forex Market Agent's cycle logic (ADR-0036, ADR-0038).
 
 Same broad shape as `crypto_market_agent.agent` (`PeriodicService`-driven,
 fetch, one AI Router call, record findings, no dispatch step, no
 external write action of any kind) but a fully independent
 implementation, per ADR-0036 Decision 3 -- no shared base class or
-module between the two roles.
+module between the two roles. ADR-0038's structured price/finding
+history is written independently here too, same reasoning.
 
 ECB reference rates (Frankfurter's data source) update once per
 business day, not continuously (ADR-0036 Decision 1): the prompt is
@@ -22,6 +23,7 @@ from ai_platform.agents.forex_market_agent.client import ExchangeRatePort, Excha
 from ai_platform.agents.forex_market_agent.errors import ExchangeRateFetchFailedError
 from ai_platform.ports.ai_router import AICompletionRequest, AIRouterPort, DataClassification
 from ai_platform.ports.persistence.autonomous import AutonomousStatePort
+from ai_platform.ports.persistence.market_history import MarketHistoryPort
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,7 @@ class ForexMarketAgent:
         *,
         agent_deployment_id: str,
         state: AutonomousStatePort,
+        market_history: MarketHistoryPort,
         exchange_rates: ExchangeRatePort,
         ai_router: AIRouterPort,
         max_output_tokens: int,
@@ -124,6 +127,7 @@ class ForexMarketAgent:
             raise ValueError("max_spend_cents_per_day must be positive")
         self._agent_deployment_id = agent_deployment_id
         self._state = state
+        self._market_history = market_history
         self._exchange_rates = exchange_rates
         self._ai_router = ai_router
         self._max_output_tokens = max_output_tokens
@@ -149,6 +153,11 @@ class ForexMarketAgent:
         except ExchangeRateFetchFailedError as error:
             logger.warning("forex-market-agent: exchange-rate fetch failed: %s", error.reason)
             return
+
+        for rate in snapshot.rates:
+            await self._record_price_observation_best_effort(
+                pair=f"{snapshot.base_currency}/{rate.currency}", rate=rate.rate, now=now
+            )
 
         completion = await self._ai_router.complete(
             AICompletionRequest(
@@ -194,4 +203,47 @@ class ForexMarketAgent:
                 result_status="SUCCEEDED",
                 result_detail=finding["summary"],
                 occurred_at=now,
+            )
+            await self._record_finding_history_best_effort(finding=finding, now=now)
+
+    async def _record_price_observation_best_effort(
+        self, *, pair: str, rate: float, now: datetime
+    ) -> None:
+        # ADR-0038: purely additive/non-critical relative to
+        # `agent.autonomous_actions` -- unlike that call, a transient
+        # failure here must never propagate and kill `PeriodicService`'s
+        # loop (it has no retry of its own, so an uncaught exception
+        # here would silently end every future cycle, including the
+        # audit-critical `record_action` path).
+        try:
+            await self._market_history.record_price_observation(
+                role=_ROLE,
+                symbol=pair,
+                price=rate,
+                change_24h_percent=None,
+                observed_at=now,
+            )
+        except Exception:  # noqa: BLE001 - deliberately broad, see comment above
+            logger.warning(
+                "forex-market-agent: failed to record price observation for %s",
+                pair,
+                exc_info=True,
+            )
+
+    async def _record_finding_history_best_effort(
+        self, *, finding: dict[str, str], now: datetime
+    ) -> None:
+        try:
+            await self._market_history.record_finding(
+                role=_ROLE,
+                symbol=finding["pair"],
+                summary=finding["summary"],
+                severity=finding["severity"],
+                observed_at=now,
+            )
+        except Exception:  # noqa: BLE001 - deliberately broad, see comment above
+            logger.warning(
+                "forex-market-agent: failed to record finding history for %s",
+                finding["pair"],
+                exc_info=True,
             )

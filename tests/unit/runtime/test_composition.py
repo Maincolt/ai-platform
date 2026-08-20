@@ -299,7 +299,7 @@ def test_pool_uses_agent_schema_and_expected_version(tmp_path: Path) -> None:
     config = PlatformRuntimeConfig.from_environment(_platform_env(tmp_path))
     pool = _pool(config, component_schema="agent")
     assert pool.component_schema == "agent"
-    assert pool.expected_schema_version == 5
+    assert pool.expected_schema_version == 6
 
 
 # --- executor selection (fail-closed) ---------------------------------------

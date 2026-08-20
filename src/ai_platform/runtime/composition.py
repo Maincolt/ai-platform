@@ -36,6 +36,7 @@ from ai_platform.adapters.persistence import (
     AsyncPsycopgPool,
     PsycopgAgentPersistence,
     PsycopgAutonomousStatePort,
+    PsycopgMarketHistoryPort,
     PsycopgOrchestratorPersistence,
     PsycopgOutboxTransaction,
     PsycopgTransportRejectionTransaction,
@@ -1153,10 +1154,12 @@ def build_crypto_market_process(
         timeout_seconds=config.database_timeout_seconds,
     )
     state = PsycopgAutonomousStatePort(pool)
+    market_history = PsycopgMarketHistoryPort(pool)
     market_data = BinanceMarketClient(symbols=config.crypto_watchlist)
     crypto_market = CryptoMarketAgent(
         agent_deployment_id=config.agent_id,
         state=state,
+        market_history=market_history,
         market_data=market_data,
         ai_router=_build_ai_router(config),
         max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
@@ -1235,6 +1238,7 @@ def build_forex_market_process(
         timeout_seconds=config.database_timeout_seconds,
     )
     state = PsycopgAutonomousStatePort(pool)
+    market_history = PsycopgMarketHistoryPort(pool)
     exchange_rates = FrankfurterExchangeRateClient(
         base_currency=config.forex_base_currency,
         target_currencies=config.forex_watchlist,
@@ -1242,6 +1246,7 @@ def build_forex_market_process(
     forex_market = ForexMarketAgent(
         agent_deployment_id=config.agent_id,
         state=state,
+        market_history=market_history,
         exchange_rates=exchange_rates,
         ai_router=_build_ai_router(config),
         max_output_tokens=_require_ai_router_int(config, "ai_router_max_output_tokens"),
@@ -1598,7 +1603,7 @@ _EXPECTED_SCHEMA_VERSION: dict[str, int] = {
     # each component so a stale database is rejected at startup rather than
     # silently misread.
     "orchestrator": 4,
-    "agent": 5,
+    "agent": 6,
 }
 
 
