@@ -71,8 +71,11 @@ incapability" pattern every prior role already established:
 method at all, so even a misconfigured key with that permission still
 has no *code path* here that could use it. Starts as an
 obviously-fake placeholder at deployment time, same placeholder-then-
-real path every prior role's credential has followed — see Decision 6
-for why this role adds an extra gate beyond that pattern.
+real path every prior role's credential has followed, now with a
+**third stage before real money**: placeholder → sandbox (Decision 7)
+→ real, no-withdrawal key — see Decision 6 for the additional
+role-specific gate on top of that progression, and Decision 7 for the
+sandbox stage itself.
 
 ### 2. Action set: one verb, `place_market_order`, bounded by three independent caps
 
@@ -182,12 +185,62 @@ first real write action merely *awaited* an explicit go-ahead as a
 documented caveat (ADR-0028's Implementation Status); this role makes
 that gate a structural, code-enforced default rather than a promise.
 
+### 7. A mandatory sandbox stage before any real-money credential is ever installed
+
+**Added after initial drafting**, per the repository owner's explicit
+instruction: this role must run against Coinbase's real Advanced Trade
+**sandbox** (`api-sandbox.coinbase.com`, no authentication required,
+genuinely no real funds involved) before a real, funded Coinbase
+account is ever connected. Confirmed via research (not assumed):
+Coinbase's sandbox is real but limited — it only covers
+Accounts/Orders endpoints, and its responses are **static/pre-defined**,
+not a dynamic market simulation. This means the sandbox stage validates
+that this role's Coinbase integration is *wired correctly*
+(authentication shape, request/response parsing, order-placement call
+succeeds and is handled) — it does **not** validate realistic trading
+behavior (no real price movement, no real fill dynamics to react to).
+That distinction is not a limitation of this role's design; it is a
+real, documented limitation of what Coinbase's sandbox itself offers,
+and this ADR states it explicitly rather than implying the sandbox
+stage substitutes for real-market validation it structurally cannot
+provide.
+
+Two required stages before this role ever places a real order, both
+gated (not just documented as caveats, per Decision 6's structural
+gate applying to *both* stages, not only the final one):
+
+1. **Sandbox stage**: `CoinbaseTradingPort` configured against
+   `api-sandbox.coinbase.com`, no real credential at all (the sandbox
+   needs none). `agent.autonomous_trading_enabled` for this role must
+   still be explicitly flipped to `TRUE` before even sandbox orders are
+   placed — proving the full cycle (fetch history → AI proposal →
+   validation → dispatch → audit) runs correctly end to end with zero
+   financial exposure of any kind.
+2. **Real stage**: only after the sandbox stage has run successfully
+   for a repository-owner-determined period, the sandbox configuration
+   is replaced with a real, no-withdrawal-scoped API key
+   (Decision 1) **and** `agent.autonomous_trading_enabled` is reset to
+   `FALSE` and must be explicitly re-enabled — switching to a real
+   credential does not inherit an already-`TRUE` gate from the sandbox
+   stage; the two stages are gated independently, so the repository
+   owner's decision to trust the sandbox run is never silently
+   interpreted as consent for real money.
+
 ## Security
 
 This is a materially different risk class from every prior role, and
 this ADR treats it as such rather than reusing ADR-0026's risk analysis
 by reference:
 
+- **The sandbox stage (Decision 7) bounds integration risk, not
+  strategy risk.** Because Coinbase's sandbox returns static/
+  pre-defined responses, a clean sandbox run proves this role's code
+  is wired correctly — it cannot prove the AI's trading judgment is
+  sound against real market conditions, since the sandbox never
+  presents any. The first real trade is still the first real test of
+  the actual decision-making, not just the plumbing; Decision 7's
+  independent re-gating exists precisely because a successful sandbox
+  run is not evidence that real trading will go well.
 - **Real, irreversible financial loss is the direct consequence of a
   successful prompt injection here** — not "an unwanted comment" or "a
   wrong status change," a filled order at real money. The per-trade
@@ -309,3 +362,8 @@ implemented in the same pass they were drafted). `SECURITY.md` also
 needs a new carve-out paragraph naming this ADR and role explicitly,
 per the same "any new role... remain[s] fully subject to this section's
 approval requirement" text every prior role ADR has re-amended.
+
+Even once accepted and implemented, no real Coinbase credential is
+supplied until Decision 7's sandbox stage has run to the repository
+owner's satisfaction — implementation, acceptance, sandbox deployment,
+and real-money deployment are four separate gates, not one.

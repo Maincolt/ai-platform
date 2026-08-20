@@ -64,8 +64,9 @@ withdrawal-permission boundary as ADR-0037 Decision 1: FXCM account
 transfers/withdrawals must never be enabled on this key (a requirement
 on how the repository owner scopes it), and `FxcmTradingPort` has no
 withdrawal/transfer method in code regardless. Starts as an
-obviously-fake placeholder at deployment time; see Decision 6 for the
-additional gate beyond that.
+obviously-fake placeholder at deployment time, then a **demo account**
+(Decision 7) before any real, funded FXCM account is ever connected —
+see Decision 6 for the additional gate beyond that progression.
 
 ### 2. Action set: one verb, `place_market_order`, bounded by three independent caps
 
@@ -128,6 +129,43 @@ BOOLEAN NOT NULL DEFAULT FALSE`) — independent of
 `role='coinbase-trader'`'s row, so enabling one trading role never
 implicitly enables the other. No new migration beyond ADR-0037's own
 (the table is role-keyed, not role-specific).
+
+### 7. A mandatory demo-account stage before any real-money credential is ever installed
+
+**Added after initial drafting**, same repository-owner instruction as
+ADR-0037 Decision 7. Confirmed via research: FXCM demo accounts get
+**full REST API access by default — the same API surface as a live
+account**, with real-time simulated order execution against real
+market prices and fake funds. This is materially higher-fidelity than
+Coinbase's sandbox (ADR-0037 Decision 7, static/pre-defined responses,
+Accounts/Orders only): a clean FXCM demo run validates not just that
+`FxcmTradingPort` is wired correctly, but that this role's actual
+proposals fill at realistic prices against real market conditions —
+closer to genuine strategy validation, though still without real
+capital at risk.
+
+Same two-stage, independently-gated structure as ADR-0037 Decision 7:
+
+1. **Demo stage**: `FxcmTradingPort` configured against a real FXCM
+   demo account (a free account created at FXCM, not a Coinbase-style
+   authless sandbox — this does require its own credential, just a
+   demo one, obtained the same way a live account's token would be).
+   `agent.autonomous_trading_enabled` (`role='fxcm-trader'`) must be
+   explicitly `TRUE` before even demo orders are placed.
+2. **Real stage**: only after the demo stage has run to the repository
+   owner's satisfaction, the demo credential is replaced with a real,
+   no-withdrawal-scoped FXCM account/key, and
+   `agent.autonomous_trading_enabled` is reset to `FALSE` and must be
+   explicitly re-enabled — the demo stage's gate never carries forward
+   as implicit consent for real money.
+
+Because FXCM's demo fidelity is genuinely higher than Coinbase's
+sandbox, a successful demo run here is somewhat stronger evidence of
+sound trading judgment than ADR-0037's sandbox stage can offer for
+`coinbase-trader-agent` — still not a guarantee real market
+conditions (real liquidity, real slippage, real news-driven volatility)
+will behave identically, which is why Decision 6's independent gate
+still applies to the real stage regardless.
 
 ## Security
 
@@ -209,3 +247,7 @@ acceptance, including resolving the leverage question in Security,
 before any implementation begins. `SECURITY.md` needs its own new
 carve-out paragraph naming this ADR and role explicitly, independent of
 whatever paragraph ADR-0037 eventually adds.
+
+Same four-gate progression as ADR-0037: implementation, acceptance,
+demo-account deployment, and real-money deployment are separate,
+independently-confirmed steps (Decision 7).
